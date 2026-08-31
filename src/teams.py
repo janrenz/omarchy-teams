@@ -16,6 +16,7 @@ own, and only the person who owns the tenant can make one. See README.md.
 """
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -376,6 +377,70 @@ def cmd_login_poll(args):
 # --------------------------------------------------------------------------
 
 
+# Teams writes an emoji as a tag carrying the real character in its alt:
+#   <emoji id="smile" alt="\U0001F642" title="Grinsen"></emoji>
+# so the character is already there to be used - no id-to-emoji table to keep,
+# and no guessing at ids this tenant's client happens to send.
+EMOJI_TAG = re.compile(r'<\s*emoji\b[^>]*?\balt="([^"]*)"[^>]*?>', re.I)
+EMOJI_CLOSE = re.compile(r'<\s*/\s*emoji\s*>', re.I)
+
+IMG_TAG = re.compile(r'<\s*img\b([^>]*)>', re.I)
+CSS_WIDTH = re.compile(r'width\s*:\s*([0-9.]+)\s*px', re.I)
+CSS_HEIGHT = re.compile(r'height\s*:\s*([0-9.]+)\s*px', re.I)
+
+# Inline images live behind the Graph API and need the bearer token to read.
+# That token must never be sent anywhere else, and the URL being fetched comes
+# out of a message somebody else wrote - so the host is checked rather than
+# trusted. A crafted <img src="https://evil/"> would otherwise hand the
+# attacker a token with read access to this mailbox.
+GRAPH_HOST = "graph.microsoft.com"
+IMAGE_CAP = 12 * 1024 * 1024
+IMAGE_CACHE = os.path.join(
+    os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+    "omarchy", "teams", "images",
+)
+IMAGE_TYPES = {
+    "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+    "image/gif": ".gif", "image/webp": ".webp", "image/bmp": ".bmp",
+}
+
+
+def attr(attrs, name):
+    found = re.search(r'\b%s\s*=\s*"([^"]*)"' % name, attrs, re.I)
+    return found.group(1) if found else ""
+
+
+def message_images(html):
+    """Inline images in a message body, as {url, alt, width, height}.
+
+    Only Graph-hosted ones. Anything else in an <img> is either a tracking
+    pixel or something this plugin has no business fetching.
+    """
+    images = []
+    for match in IMG_TAG.finditer(str(html or "")):
+        attrs = match.group(1)
+        src = attr(attrs, "src")
+        if not src.lower().startswith("https://" + GRAPH_HOST + "/"):
+            continue
+        style = attr(attrs, "style")
+        width = attr(attrs, "width") or (CSS_WIDTH.search(style).group(1) if CSS_WIDTH.search(style) else "")
+        height = attr(attrs, "height") or (CSS_HEIGHT.search(style).group(1) if CSS_HEIGHT.search(style) else "")
+
+        def number(value):
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return 0
+
+        images.append({
+            "url": src,
+            "alt": attr(attrs, "alt") or attr(attrs, "aria-label"),
+            "width": number(width),
+            "height": number(height),
+        })
+    return images
+
+
 def plain_text(html):
     """A chat message as one line of text.
 
@@ -384,6 +449,8 @@ def plain_text(html):
     alt text or nothing, and what is left is what was said.
     """
     text = str(html or "")
+    text = EMOJI_TAG.sub(lambda m: m.group(1), text)
+    text = EMOJI_CLOSE.sub("", text)
     text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", "", text, flags=re.I | re.S)
     text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.I)
     text = re.sub(r"<\s*/\s*(p|div|li)\s*>", "\n", text, flags=re.I)
@@ -428,6 +495,7 @@ def message_row(message):
         "when": message.get("createdDateTime", ""),
         "text": plain_text(body.get("content")),
         "edited": bool(message.get("lastEditedDateTime")),
+        "images": message_images(body.get("content")),
         # A system message ("X added Y to the chat") has no sender and reads
         # oddly in a list of things people said.
         "system": message.get("messageType", "message") != "message",
@@ -605,6 +673,67 @@ def cmd_messages(args):
     out({"ok": True, "messages": rows})
 
 
+def fetch_bytes(url, token, limit=IMAGE_CAP):
+    """Binary content from Graph, with the token attached only for Graph.
+
+    The URL comes out of a message somebody else wrote, so the host is
+    verified rather than trusted: sending an Authorization header to an
+    attacker-chosen origin would hand them a token that can read this account.
+    """
+    parsed = urllib.parse.urlsplit(url)
+    if parsed.scheme != "https" or parsed.hostname != GRAPH_HOST:
+        raise AccountError("bad_image_host",
+                           "Refusing to fetch an image from %s" % (parsed.hostname or "nowhere"))
+
+    request = urllib.request.Request(url, headers={
+        "User-Agent": USER_AGENT,
+        "Authorization": "Bearer " + token,
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            body = response.read(limit + 1)
+            if len(body) > limit:
+                raise AccountError("image_too_large", "That image is larger than this plugin will read")
+            return body, response.headers.get("Content-Type", "").split(";")[0].strip().lower()
+    except urllib.error.HTTPError as error:
+        raise AccountError("image_failed", "Could not read that image (HTTP %d)" % error.code)
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        raise AccountError("image_failed", "Could not read that image: %s" % error)
+
+
+def cmd_image(args):
+    """Download one inline image and report where it landed.
+
+    Cached by the URL's digest, because the window asks for the same picture
+    every time a conversation is reopened and these run to several megabytes.
+    """
+    digest = hashlib.sha256(args.url.encode("utf-8")).hexdigest()[:32]
+    os.makedirs(IMAGE_CACHE, exist_ok=True)
+    for extension in set(IMAGE_TYPES.values()) | {".bin"}:
+        cached = os.path.join(IMAGE_CACHE, digest + extension)
+        if os.path.exists(cached) and os.path.getsize(cached) > 0:
+            out({"ok": True, "path": cached, "cached": True})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    try:
+        token, account = access_token(args.account, account)
+        body, content_type = fetch_bytes(args.url, token)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    if not content_type.startswith("image/"):
+        fail("not_an_image", "That link is %s, not an image" % (content_type or "of unknown type"))
+
+    path = os.path.join(IMAGE_CACHE, digest + IMAGE_TYPES.get(content_type, ".bin"))
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as handle:
+        handle.write(body)
+    os.replace(tmp, path)
+    out({"ok": True, "path": path, "cached": False, "bytes": len(body), "contentType": content_type})
+
+
 def cmd_send(args):
     text = str(args.text or "").strip()
     if not text:
@@ -756,6 +885,10 @@ def main():
     channels.add_argument("--team", required=True, help="team id from a fetch")
     channels.add_argument("--demo", action="store_true")
     channels.set_defaults(func=cmd_channels)
+
+    image = with_account("image", "download one inline image, and say where it is")
+    image.add_argument("--url", required=True, help="a graph.microsoft.com hostedContents URL from a message")
+    image.set_defaults(func=cmd_image)
 
     send = with_account("send", "post a message to a chat or channel")
     send.add_argument("--chat", default="")

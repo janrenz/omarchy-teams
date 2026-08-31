@@ -105,6 +105,21 @@ Item {
     requestClose()
   }
 
+  // Only where there is something to type into. Focusing a composer that is
+  // not on screen would take the keys away from the conversation list and give
+  // them to nothing.
+  function focusComposer() {
+    if (!service.reading) return
+    composer.forceActiveFocus()
+  }
+
+  // Back to the conversation list, with the draft left exactly as it is. The
+  // key catcher is stood down while the composer has focus - it claims bare
+  // letters - so this is the only way back to the keyboard without the mouse.
+  function leaveComposer() {
+    keyCatcher.forceActiveFocus()
+  }
+
   FloatingWindow {
     id: window
     title: service.openConversation
@@ -132,10 +147,16 @@ Item {
         blocked: composer.activeFocus || codeField.activeFocus
         onMoveRequested: function(dx, dy) {
           if (dy !== 0) conversations.moveCursor(dy)
-          else if (dx > 0) composer.forceActiveFocus()
+          else if (dx > 0) root.focusComposer()
         }
         onActivateRequested: conversations.activateCursor()
         onCloseRequested: root.dismiss()
+        // Tab is how most people expect to reach the box they type in; l and
+        // the right arrow already do it, but only for those who knew.
+        onTabRequested: root.focusComposer()
+        onTextKey: function(text) {
+          if (text === "r") service.reloadConversation()
+        }
 
         Column {
           anchors.fill: parent
@@ -457,9 +478,43 @@ Item {
                           - (service.messagesError !== "" ? Style.space(20) : 0)
                   clip: true
 
+                  // The newest message is at the bottom, so that is where a
+                  // conversation should open and where it should be again
+                  // after you send something - not scrolled back to whatever
+                  // was said first.
+                  //
+                  // Following rather than scrolling once: the rows arrive
+                  // before they have been laid out, so a single jump lands
+                  // short of the end by however much the transcript is still
+                  // about to grow. This keeps up until it settles, and lets go
+                  // the moment the reader scrolls back for themselves.
+                  property bool followNewest: true
+
+                  function toNewest() {
+                    var flick = transcript.contentItem
+                    if (!flick) return
+                    flick.contentY = Math.max(0, flick.contentHeight - flick.height)
+                  }
+
+                  Connections {
+                    target: service
+                    function onMessagesChanged() {
+                      transcript.followNewest = true
+                      Qt.callLater(transcript.toNewest)
+                    }
+                  }
+
+                  Connections {
+                    target: transcript.contentItem
+                    // Dragged or flicked by hand, as opposed to moved by the
+                    // line above.
+                    function onMovementStarted() { transcript.followNewest = false }
+                  }
+
                   Column {
                     width: transcript.width
                     spacing: Style.spacing.lg
+                    onHeightChanged: if (transcript.followNewest) transcript.toNewest()
 
                     Repeater {
                       model: Model.groupMessages(service.messages, service.view.userId)
@@ -488,17 +543,40 @@ Item {
                           // Selectable: the whole point of a transcript is
                           // that you can take a line out of it. A plain Text
                           // item cannot be selected at all.
-                          delegate: SelectableText {
+                          delegate: Column {
                             required property var modelData
                             width: parent ? parent.width : 0
-                            text: String(modelData.text || "")
-                            // Rendered as text, always. A Teams message is
-                            // HTML written by whoever sent it, and rich text
-                            // fetches what it is told to fetch.
-                            textFormat: TextEdit.PlainText
-                            color: Color.foreground
-                            font.family: Style.font.family
-                            font.pixelSize: Style.font.bodySmall
+                            spacing: Style.spacing.xs
+
+                            SelectableText {
+                              width: parent.width
+                              visible: text !== ""
+                              text: String(modelData.text || "")
+                              // Rendered as text, always. A Teams message is
+                              // HTML written by whoever sent it, and rich text
+                              // fetches what it is told to fetch. The emoji
+                              // survive because teams.py turns each <emoji>
+                              // tag into the character its alt already holds.
+                              textFormat: TextEdit.PlainText
+                              color: Color.foreground
+                              font.family: Style.font.family
+                              font.pixelSize: Style.font.bodySmall
+                            }
+
+                            Repeater {
+                              model: modelData.images || []
+
+                              delegate: MessageImage {
+                                required property var modelData
+                                url: String(modelData.url || "")
+                                alt: String(modelData.alt || "")
+                                intrinsicWidth: Number(modelData.width || 0)
+                                intrinsicHeight: Number(modelData.height || 0)
+                                account: service.alias
+                                pluginDir: root.pluginDir
+                                maxWidth: Math.min(Style.space(320), columns.readerWidth - Style.spacing.xxl)
+                              }
+                            }
                           }
                         }
                       }
@@ -525,7 +603,7 @@ Item {
 
                     TextArea {
                       id: composer
-                      placeholderText: "Message — Ctrl+Enter to send"
+                      placeholderText: "Message — Shift+Enter to send"
                       wrapMode: TextArea.Wrap
                       color: Color.foreground
                       placeholderTextColor: Qt.darker(Color.foreground, 1.5)
@@ -534,14 +612,25 @@ Item {
                       background: null
                       text: service.draft
                       onTextChanged: if (text !== service.draft) service.draft = text
-                      // Enter is a newline; Ctrl+Enter sends. A chat box that
-                      // sends on Enter posts half-written thoughts.
+                      // Enter is a newline; Shift+Enter sends, and Ctrl+Enter
+                      // still does too for anyone with it in their fingers. A
+                      // chat box that sends on Enter alone posts half-written
+                      // thoughts.
+                      //
+                      // Escape and Tab hand the keyboard back to the
+                      // conversation list, since the key catcher cannot hear
+                      // anything while this has focus.
                       Keys.onPressed: function(event) {
-                        if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                            && (event.modifiers & Qt.ControlModifier)) {
-                          service.send()
+                        if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backtab
+                            || event.key === Qt.Key_Tab) {
+                          root.leaveComposer()
                           event.accepted = true
+                          return
                         }
+                        if (event.key !== Qt.Key_Return && event.key !== Qt.Key_Enter) return
+                        if (!(event.modifiers & (Qt.ShiftModifier | Qt.ControlModifier))) return
+                        service.send()
+                        event.accepted = true
                       }
                     }
                   }

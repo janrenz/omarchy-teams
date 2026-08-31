@@ -194,7 +194,8 @@ function groupMessages(messages, meId) {
     var mine = String(message.fromId || "") === String(meId || "") && String(meId || "") !== ""
     var last = groups.length > 0 ? groups[groups.length - 1] : null
     if (last && !message.system && !last.system && String(last.fromId) === String(message.fromId || "")) {
-      last.lines.push({ id: message.id, text: message.text, when: message.when, edited: message.edited === true })
+      last.lines.push({ id: message.id, text: message.text, when: message.when,
+                        edited: message.edited === true, images: message.images || [] })
       last.when = message.when
       continue
     }
@@ -205,7 +206,8 @@ function groupMessages(messages, meId) {
       mine: mine,
       system: message.system === true,
       when: message.when,
-      lines: [{ id: message.id, text: message.text, when: message.when, edited: message.edited === true }]
+      lines: [{ id: message.id, text: message.text, when: message.when,
+                edited: message.edited === true, images: message.images || [] }]
     })
   }
   return groups

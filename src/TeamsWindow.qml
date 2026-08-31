@@ -132,8 +132,18 @@ Item {
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // The conversation list, over the transcript, for when the window is too
+  // narrow to show both at once.
+  property bool listDrawerOpen: false
+
+  function toggleListDrawer() {
+    listDrawerOpen = !listDrawerOpen
+    if (listDrawerOpen) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
   function dismiss() {
     if (composingNew) { closeNewChat(); return }
+    if (listDrawerOpen) { listDrawerOpen = false; return }
     if (viewerPath !== "") { closeViewer(); return }
     if (service.reading) { service.closeConversation(); return }
     requestClose()
@@ -221,7 +231,7 @@ Item {
         // While a field has focus these belong to the text in it.
         if (composer.activeFocus || codeField.activeFocus) return
         if (root.viewerPath !== "" || root.composingNew) return
-        var view = root.scrollTarget()
+        var view = root.listDrawerOpen ? drawerScroll : root.scrollTarget()
         if (!view) return
         var page = Math.max(Style.space(80), view.height * 0.9)
         var half = page / 2
@@ -238,6 +248,78 @@ Item {
         else if (control && event.key === Qt.Key_B) root.scrollBy(view, -page)
         else return
         event.accepted = true
+      }
+
+      // The conversation list as a layer over the transcript.
+      //
+      // Qt's own answer to this is Controls' Drawer, and it is the right shape
+      // - edge-anchored, modal, dismissed by the scrim. It does not work here:
+      // inside a Quickshell FloatingWindow it reports visible with position
+      // stuck at 0, so it never actually slides in. The shell's own components
+      // reach for Popup rather than Drawer for the same reason, and the panels
+      // hand-roll their overlays. This follows the panels.
+      Item {
+        id: listDrawer
+        anchors.fill: parent
+        visible: drawerSlide.x > -drawerPanel.width
+        z: 80
+
+        // Dimmed, not blacked out: the conversation underneath is the thing
+        // being navigated away from, and it should still be legible.
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.6)
+          opacity: root.listDrawerOpen ? 1 : 0
+          Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
+
+          MouseArea {
+            anchors.fill: parent
+            enabled: root.listDrawerOpen
+            // Clicking away is how every drawer closes.
+            onClicked: root.listDrawerOpen = false
+          }
+        }
+
+        Item {
+          id: drawerSlide
+          width: drawerPanel.width
+          height: parent.height
+          x: root.listDrawerOpen ? 0 : -drawerPanel.width
+          Behavior on x { NumberAnimation { duration: 180; easing.type: Easing.OutCubic } }
+
+          Rectangle {
+            id: drawerPanel
+            width: Math.min(Style.space(320), listDrawer.width * 0.85)
+            height: parent.height
+            color: Color.background
+            border.width: Style.space(1)
+            border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.15)
+
+            // Swallows clicks so the list does not dismiss itself.
+            MouseArea { anchors.fill: parent }
+
+            ScrollView {
+              id: drawerScroll
+              anchors.fill: parent
+              anchors.margins: Style.spacing.md
+              clip: true
+
+              ConversationList {
+                width: drawerPanel.width - Style.spacing.md * 2
+                rows: service.conversations
+                selectedKey: service.openConversation ? String(service.openConversation.key) : ""
+                fg: Color.foreground
+                accent: Color.accent
+                fontFamily: Style.font.family
+                onPicked: function(row) {
+                  if (row.kind === "team") { service.toggleTeam(row.id); return }
+                  service.openChat(row)
+                  root.listDrawerOpen = false
+                }
+              }
+            }
+          }
+        }
       }
 
       // Starting a chat: type a name, pick a person.
@@ -482,6 +564,10 @@ Item {
         onMoveRequested: function(dx, dy) {
           if (dy !== 0) conversations.moveCursor(dy)
           else if (dx > 0) root.focusComposer()
+          // Left is "back towards the list". Where the list is not on screen,
+          // that means bringing it out rather than doing nothing.
+          else if (dx < 0 && !columns.roomForBoth && service.reading)
+            root.listDrawerOpen = true
         }
         onActivateRequested: conversations.activateCursor()
         onCloseRequested: root.dismiss()
@@ -556,6 +642,20 @@ Item {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.spacing.sm
+
+              // Only when the list has nowhere else to be: wide enough and it
+              // is already on screen, and a button that shows what is already
+              // shown is a button that teaches people to ignore buttons.
+              Button {
+                visible: service.signedIn && !columns.roomForBoth && service.reading
+                text: "\uF035C"
+                tooltipText: "Conversations"
+                bordered: true
+                foreground: Color.foreground
+                fontFamily: Style.font.family
+                fontSize: Style.font.icon
+                onClicked: root.toggleListDrawer()
+              }
 
               Button {
                 visible: service.signedIn && service.canStartChat
@@ -776,8 +876,11 @@ Item {
                 accent: Color.accent
                 fontFamily: Style.font.family
                 onPicked: function(row) {
-                  if (row.kind === "team") service.toggleTeam(row.id)
-                  else service.openChat(row)
+                  if (row.kind === "team") { service.toggleTeam(row.id); return }
+                  service.openChat(row)
+                  // Picking from the drawer is the end of what the drawer is
+                  // for; leaving it up would cover the thing just opened.
+                  root.listDrawerOpen = false
                 }
               }
             }

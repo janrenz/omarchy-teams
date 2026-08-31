@@ -291,6 +291,7 @@ Item {
 
               ConversationList {
                 width: drawerPanel.width - Style.spacing.md * 2
+                density: service.densityScale
                 rows: service.conversations
                 selectedKey: service.openConversation ? String(service.openConversation.key) : ""
                 fg: Color.foreground
@@ -499,8 +500,8 @@ Item {
 
         Column {
           anchors.fill: parent
-          anchors.margins: Style.spacing.panelPadding
-          spacing: Style.spacing.panelGap
+          anchors.margins: service.pad(Style.spacing.panelPadding)
+          spacing: service.pad(Style.spacing.panelGap)
 
           // ---------------- header ----------------
           Item {
@@ -742,7 +743,7 @@ Item {
             id: columns
             width: parent.width
             height: parent.height - y
-            spacing: Style.spacing.xxl
+            spacing: service.pad(Style.spacing.xxl)
             // Drawn during the first fetch too, so the placeholder rows below
             // stand where the real ones will be. Before this the window was
             // simply blank for the length of the fetch, which read as broken.
@@ -785,6 +786,7 @@ Item {
 
               ConversationList {
                 id: conversations
+                density: service.densityScale
                 onCursorMoved: function(itemY, itemHeight) {
                   root.ensureVisible(sidebarScroll, itemY, itemHeight)
                 }
@@ -832,7 +834,7 @@ Item {
 
               Column {
                 anchors.fill: parent
-                spacing: Style.spacing.md
+                spacing: service.pad(Style.spacing.md)
                 visible: service.reading
 
                 Text {
@@ -896,7 +898,7 @@ Item {
 
                   Column {
                     width: transcript.width
-                    spacing: Style.spacing.lg
+                    spacing: service.pad(Style.spacing.lg)
                     onHeightChanged: if (transcript.followNewest) transcript.toNewest()
 
                     Repeater {
@@ -929,7 +931,7 @@ Item {
                           delegate: Column {
                             required property var modelData
                             width: parent ? parent.width : 0
-                            spacing: Style.spacing.xs
+                            spacing: service.pad(Style.spacing.xs)
 
                             SelectableText {
                               width: parent.width

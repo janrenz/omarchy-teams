@@ -26,6 +26,15 @@ Item {
   readonly property int chatCount: intSetting("chats", 25, 1, 40)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 120, 30, 3600)
 
+  // How much room to give things. A multiplier over the theme's spacing rather
+  // than pixel values of our own, so it still follows the font size.
+  readonly property string density: String(setting("density", "cosy"))
+  readonly property real densityScale: Model.densityScale(density)
+  // Rounded here so every caller gets the same integer, rather than each one
+  // rounding a slightly different product and the columns ending up a pixel
+  // out from each other.
+  function pad(px) { return Math.max(1, Math.round(px * densityScale)) }
+
   // Configured enough to try. The client id is not optional the way the mail
   // plugin's is: an app registration declares which permissions it may ask
   // for, so there is no shared registration that could stand in for one set up

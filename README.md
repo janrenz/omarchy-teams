@@ -54,6 +54,7 @@ What the tenant actually granted is recorded from the token response rather than
 | `authority` | `common` | `common`, `organizations`, or your tenant id. |
 | `channels` | `true` | Whether to ask for team and channel access at sign-in. |
 | `chats` | `25` | How many chats to list (1–40). |
+| `density` | `cosy` | How much room the window gives things: `compact`, `cosy`, `roomy`, `spacious`. A multiplier over the theme's own spacing, so it follows your font size rather than fighting it. |
 | `refreshIntervalSec` | `120` | How often to poll (30–3600). |
 | `icon` / `label` | `󰊻` | Bar glyph, or text instead of it. |
 | `tintOnUnread` | `true` | Highlight the bar icon while a chat is unread. |
@@ -69,6 +70,8 @@ What the tenant actually granted is recorded from the token response rather than
 
 ```
 dev/link.sh          # stage the QML where Quickshell can import qs.Commons
+python3 dev/test-teams.py                           # the helper: parsing, permission, hosts
+node dev/test-model.js                              # the shaping the window binds to
 python3 src/teams.py fetch --account work --demo    # synthetic data, no sign-in
 ```
 

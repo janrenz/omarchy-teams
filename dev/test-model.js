@@ -17,7 +17,8 @@ const source = fs
 const Model = new Function(
   source +
     "; return { accountView, conversationRows, selectableRows, groupMessages, whenLabel, " +
-    "subtitleFor, oneLine, plainText, parseJson, linkify, hasLink, escapeHtml }"
+    "subtitleFor, oneLine, plainText, parseJson, linkify, hasLink, escapeHtml, " +
+    "densityScale, densityNames }"
 )()
 
 let passed = 0
@@ -330,6 +331,35 @@ test("hasLink is false for ordinary words, so plain lines stay plain", () => {
   eq(Model.hasLink("one https://x.y here"), true)
   // The regex is global; asking twice must give the same answer.
   eq(Model.hasLink("one https://x.y here"), true)
+})
+
+// ------------------------------------------------------------------ density
+
+test("each named spacing is a distinct multiplier, in order", () => {
+  const scales = Model.densityNames().map(Model.densityScale)
+  for (let i = 1; i < scales.length; i++)
+    ok(scales[i] > scales[i - 1], "spacing should grow: " + JSON.stringify(scales))
+})
+
+test("cosy is the theme's own spacing, untouched", () => {
+  eq(Model.densityScale("cosy"), 1.0)
+})
+
+test("an unknown or missing name falls back to cosy rather than to nothing", () => {
+  // A bad value in shell.json must not collapse every gap to zero.
+  for (const bad of ["", null, undefined, "enormous", 7])
+    eq(Model.densityScale(bad), 1.0, JSON.stringify(bad) + " should fall back")
+})
+
+test("the name is not case sensitive", () => {
+  eq(Model.densityScale("ROOMY"), Model.densityScale("roomy"))
+})
+
+test("every name the settings form offers actually maps", () => {
+  // The manifest lists these; a name in the form with no scale behind it
+  // would silently do nothing.
+  for (const name of Model.densityNames())
+    ok(Model.densityScale(name) > 0, name + " should have a scale")
 })
 
 // ---------------------------------------------------------------------------

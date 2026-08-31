@@ -16,13 +16,17 @@ Column {
   property color accent: Color.accent
   property string fontFamily: Style.font.family
   property int cursorIndex: -1
+  // How generously to space the rows. 1.0 is the theme's own spacing.
+  property real density: 1.0
+
+  function pad(px) { return Math.max(1, Math.round(px * density)) }
 
   signal picked(var row)
   // Where the cursored row sits, so the pane holding this list can keep it on
   // screen. The list cannot scroll itself: it does not know it is in one.
   signal cursorMoved(real itemY, real itemHeight)
 
-  spacing: Style.spacing.xxs
+  spacing: pad(Style.spacing.xxs)
 
   readonly property var selectable: Model.selectableRows(rows)
 
@@ -57,7 +61,7 @@ Column {
       onCursoredChanged: if (cursored) root.cursorMoved(y, height)
 
       width: parent ? parent.width : 0
-      implicitHeight: body.implicitHeight + Style.spacing.sm * 2
+      implicitHeight: body.implicitHeight + root.pad(Style.spacing.sm) * 2
       radius: Style.space(5)
       color: {
         if (inert) return "transparent"
@@ -115,7 +119,7 @@ Column {
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: Style.spacing.md + Style.space(10)
+        anchors.leftMargin: root.pad(Style.spacing.md) + Style.space(10)
                             + Style.space(12) * line.modelData.depth
         anchors.rightMargin: Style.spacing.md
         spacing: Style.spacing.xxs

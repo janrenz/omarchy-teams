@@ -33,7 +33,8 @@
       "chats": 25,
       "channels": true,
       "refreshIntervalSec": 120,
-      "tintOnUnread": true
+      "tintOnUnread": true,
+      "density": "cosy"
     },
     "schema": [
       {
@@ -69,6 +70,19 @@
         "max": 40,
         "step": 1,
         "defaultValue": 25
+      },
+      {
+        "key": "density",
+        "type": "string",
+        "label": "Spacing",
+        "description": "How much room the window gives things. Scales the theme's own spacing, so it follows your font size rather than fighting it.",
+        "defaultValue": "cosy",
+        "options": [
+          "compact",
+          "cosy",
+          "roomy",
+          "spacious"
+        ]
       },
       {
         "key": "refreshIntervalSec",

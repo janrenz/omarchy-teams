@@ -28,6 +28,23 @@ function plainText(value) {
   return String(value === undefined || value === null ? "" : value).replace(/</g, "")
 }
 
+// How much room the window gives things.
+//
+// One multiplier over the shell's own spacing tokens rather than a set of
+// hand-picked pixel values: the theme already decides what "a gap" is, and
+// this says how generous to be with it. Sizes still scale with the font that
+// way, which hand-picked numbers would stop doing.
+var DENSITY = { compact: 0.7, cosy: 1.0, roomy: 1.4, spacious: 1.8 }
+
+function densityScale(name) {
+  var found = DENSITY[String(name || "").toLowerCase()]
+  return typeof found === "number" ? found : DENSITY.cosy
+}
+
+function densityNames() {
+  return ["compact", "cosy", "roomy", "spacious"]
+}
+
 // A message as markup with its links clickable.
 //
 // The text is escaped FIRST and links added afterwards, never the other way

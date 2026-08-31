@@ -28,15 +28,23 @@ Row {
       color: root.color
       anchors.verticalCenter: parent.verticalCenter
 
-      // Each dot lags the one before it by a third of the cycle, which is what
-      // reads as travel rather than as three things blinking together.
+      // Each dot lags the one before it, which is what reads as travel rather
+      // than as three things blinking together.
+      //
+      // The cycle is four steps long, not three: lead, up, down, trail. With
+      // three the last dot's trailing pause came out negative - Qt refuses a
+      // duration below zero and the animation never ran right. Lead and trail
+      // are complements, so every dot's loop is the same length and they stay
+      // in step for as long as the spinner is up.
+      readonly property int step: Math.max(1, Math.round(root.period / 4))
+
       SequentialAnimation on opacity {
         running: root.visible
         loops: Animation.Infinite
-        PauseAnimation { duration: index * Math.round(root.period / 3) }
-        NumberAnimation { to: 1.0; duration: Math.round(root.period / 3); easing.type: Easing.OutQuad }
-        NumberAnimation { to: 0.25; duration: Math.round(root.period / 3); easing.type: Easing.InQuad }
-        PauseAnimation { duration: root.period - 2 * Math.round(root.period / 3) - index * Math.round(root.period / 3) }
+        PauseAnimation { duration: index * step }
+        NumberAnimation { to: 1.0; duration: step; easing.type: Easing.OutQuad }
+        NumberAnimation { to: 0.25; duration: step; easing.type: Easing.InQuad }
+        PauseAnimation { duration: (2 - index) * step }
       }
     }
   }

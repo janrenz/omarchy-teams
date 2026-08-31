@@ -100,23 +100,6 @@ Item {
   property string pane: "list"
   readonly property bool typing: service.reading
 
-  // A picture being looked at full size, over everything else.
-  property string viewerPath: ""
-
-  function viewImage(path) {
-    if (String(path || "") === "") return
-    viewerPath = String(path)
-    Qt.callLater(function() { viewerKeys.forceActiveFocus() })
-  }
-
-  function closeViewer() {
-    viewerPath = ""
-    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
-  }
-
-  // Escape unwinds one layer at a time, innermost first: the picture, then the
-  // conversation, then the window. Anything else and Escape from a photograph
-  // would shut the whole window.
   property bool composingNew: false
 
   function openNewChat() {
@@ -141,10 +124,12 @@ Item {
     if (listDrawerOpen) Qt.callLater(function() { keyCatcher.forceActiveFocus() })
   }
 
+  // Escape unwinds one layer at a time, innermost first. A picture is not in
+  // this list: it opens in its own window, so closing that closes the picture
+  // and leaves Teams alone.
   function dismiss() {
     if (composingNew) { closeNewChat(); return }
     if (listDrawerOpen) { listDrawerOpen = false; return }
-    if (viewerPath !== "") { closeViewer(); return }
     if (service.reading) { service.closeConversation(); return }
     requestClose()
   }
@@ -230,7 +215,7 @@ Item {
       Keys.onPressed: function(event) {
         // While a field has focus these belong to the text in it.
         if (composer.activeFocus || codeField.activeFocus) return
-        if (root.viewerPath !== "" || root.composingNew) return
+        if (root.composingNew) return
         var view = root.listDrawerOpen ? drawerScroll : root.scrollTarget()
         if (!view) return
         var page = Math.max(Style.space(80), view.height * 0.9)
@@ -335,13 +320,20 @@ Item {
 
           MouseArea { anchors.fill: parent; onClicked: root.closeNewChat() }
 
-          Column {
+          // A backing item rather than a bare Column: it swallows the clicks
+          // that would otherwise reach the scrim and dismiss the card, and a
+          // MouseArea cannot be anchored inside a Column without breaking it.
+          Item {
             anchors.centerIn: parent
-            width: Math.min(Style.space(420), parent.width - Style.spacing.huge * 2)
-            spacing: Style.spacing.md
+            width: card.width
+            height: card.height
 
-            // Swallows clicks so picking inside the card does not dismiss it.
-            MouseArea { anchors.fill: parent; z: -1 }
+            MouseArea { anchors.fill: parent }
+
+          Column {
+            id: card
+            width: Math.min(Style.space(420), newChat.width - Style.spacing.huge * 2)
+            spacing: Style.spacing.md
 
             Text {
               width: parent.width
@@ -477,79 +469,6 @@ Item {
               font.pixelSize: Style.font.caption
             }
           }
-        }
-      }
-
-      // Over everything, and only when there is something to show. Its own key
-      // handling, because the panel catcher below is covered while this is up.
-      Item {
-        id: viewer
-        anchors.fill: parent
-        visible: root.viewerPath !== ""
-        z: 100
-
-        FocusScope {
-          id: viewerKeys
-          anchors.fill: parent
-          focus: viewer.visible
-
-          Keys.onPressed: function(event) {
-            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
-              root.closeViewer()
-              event.accepted = true
-            } else if (event.key === Qt.Key_O) {
-              // Still one keystroke away from a real image viewer, for
-              // zooming, rotating, or saving it somewhere.
-              Quickshell.execDetached(["xdg-open", root.viewerPath])
-              event.accepted = true
-            }
-          }
-
-          Rectangle {
-            anchors.fill: parent
-            // Not fully opaque: it should read as the picture being held up in
-            // front of the conversation, not as a different screen.
-            color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.94)
-
-            MouseArea {
-              anchors.fill: parent
-              // Clicking the surround closes, the way every picture viewer
-              // does. Clicking the picture itself does not.
-              onClicked: root.closeViewer()
-            }
-
-            Image {
-              id: fullPicture
-              anchors.centerIn: parent
-              source: root.viewerPath !== "" ? "file://" + root.viewerPath : ""
-              fillMode: Image.PreserveAspectFit
-              asynchronous: true
-              width: Math.min(implicitWidth, parent.width - Style.spacing.huge * 2)
-              height: Math.min(implicitHeight, parent.height - Style.spacing.huge * 4)
-              // Decoded to the size it is drawn at; these are camera photos and
-              // the full thing is tens of megapixels.
-              sourceSize.width: Math.round(parent.width)
-
-              MouseArea { anchors.fill: parent }
-            }
-
-            Spinner {
-              anchors.centerIn: parent
-              visible: fullPicture.status === Image.Loading
-              color: Color.accent
-              dotSize: Style.space(5)
-            }
-
-            Text {
-              anchors.horizontalCenter: parent.horizontalCenter
-              anchors.bottom: parent.bottom
-              anchors.bottomMargin: Style.spacing.xxl
-              text: "Esc to close · O to open in an image viewer"
-              textFormat: Text.PlainText
-              color: Qt.darker(Color.foreground, 1.5)
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
           }
         }
       }
@@ -1050,7 +969,6 @@ Item {
                                 account: service.alias
                                 pluginDir: root.pluginDir
                                 maxWidth: Math.min(Style.space(320), columns.readerWidth - Style.spacing.xxl)
-                                onViewRequested: function(path) { root.viewImage(path) }
                               }
                             }
                           }

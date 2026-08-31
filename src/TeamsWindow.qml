@@ -568,12 +568,14 @@ Item {
               // shown is a button that teaches people to ignore buttons.
               Button {
                 visible: service.signedIn && !columns.roomForBoth && service.reading
-                text: "\uF035C"
-                tooltipText: "Conversations"
+                text: "Conversations"
                 bordered: true
                 foreground: Color.foreground
                 fontFamily: Style.font.family
-                fontSize: Style.font.icon
+                // The same size as its neighbours. A glyph at icon size made
+                // this button taller than the two beside it, which is what a
+                // row of buttons must never be.
+                fontSize: Style.font.caption
                 onClicked: root.toggleListDrawer()
               }
 

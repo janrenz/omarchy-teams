@@ -464,38 +464,57 @@ def chat_rows(token, me_id, top):
 
 
 def team_rows(token):
-    """Joined teams and their channels, flattened for a sidebar."""
-    # No $top: /me/joinedTeams rejects it outright ("Query option 'Top' is not
-    # allowed"), and so do the channel collections. Both are small enough to
-    # take whole and cap here instead.
+    """The teams this user has joined. Names only.
+
+    Not their channels. Channels are one request per team, this account is in
+    28 of them, and a sidebar that lists every channel of every team is two
+    hundred rows nobody scrolls. They are fetched when a team is opened - see
+    cmd_channels - which makes the first paint one request instead of 29.
+    """
     status, payload = graph_get(token, "/me/joinedTeams")
     if status != 200:
         return [], graph_error(payload, "Could not read your teams")
 
-    teams = []
-    for team in payload.get("value", [])[:TEAM_CAP]:
-        team_id = team.get("id", "")
-        channel_status, channel_payload = graph_get(
-            token, "/teams/%s/channels" % urllib.parse.quote(team_id, safe=""))
-        channels = []
-        if channel_status == 200:
-            for channel in channel_payload.get("value", [])[:CHANNEL_CAP]:
-                channels.append({
-                    "id": channel.get("id", ""),
-                    "teamId": team_id,
-                    "name": channel.get("displayName", ""),
-                    "description": (channel.get("description") or "").strip(),
-                })
-        channels.sort(key=lambda row: row["name"].lower())
-        teams.append({
-            "id": team_id,
-            "name": team.get("displayName", ""),
-            "channels": channels,
-            # One unreadable team is not worth failing the sidebar over.
-            "problem": "" if channel_status == 200 else graph_error(channel_payload, "Could not read its channels"),
-        })
+    teams = [{
+        "id": team.get("id", ""),
+        "name": team.get("displayName", ""),
+        "description": (team.get("description") or "").strip(),
+    } for team in payload.get("value", [])[:TEAM_CAP]]
     teams.sort(key=lambda row: row["name"].lower())
     return teams, ""
+
+
+def cmd_channels(args):
+    """One team's channels, fetched when somebody opens that team."""
+    if args.demo:
+        out({"ok": True, "teamId": args.team, "channels": [
+            {"id": "demo-ch-0", "teamId": args.team, "name": "General", "description": ""},
+            {"id": "demo-ch-1", "teamId": args.team, "name": "Releases", "description": ""},
+        ]})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    status, payload = graph_get(
+        token, "/teams/%s/channels" % urllib.parse.quote(args.team, safe=""))
+    if status == 403:
+        fail("permission_required", graph_error(payload, "This sign-in may not read that team"))
+    if status != 200:
+        fail("channels_failed", graph_error(payload, "Could not read this team's channels"))
+
+    channels = [{
+        "id": channel.get("id", ""),
+        "teamId": args.team,
+        "name": channel.get("displayName", ""),
+        "description": (channel.get("description") or "").strip(),
+    } for channel in payload.get("value", [])[:CHANNEL_CAP]]
+    channels.sort(key=lambda row: row["name"].lower())
+    out({"ok": True, "teamId": args.team, "channels": channels})
 
 
 def fetch_account(alias, args):
@@ -523,15 +542,11 @@ def fetch_account(alias, args):
     if chat_error:
         result["warnings"].append({"scope": "chats", "message": chat_error})
 
-    if has_channels(account) and getattr(args, "channels", True):
+    if has_channels(account) and getattr(args, "teams", True):
         teams, team_error = team_rows(token)
         result["teams"] = teams
         if team_error:
             result["warnings"].append({"scope": "teams", "message": team_error})
-        for team in teams:
-            if team["problem"]:
-                result["warnings"].append(
-                    {"scope": "teams", "message": "%s: %s" % (team["name"], team["problem"])})
 
     return result
 
@@ -677,15 +692,8 @@ def demo_account(alias):
             "when": now.isoformat().replace("+00:00", "Z"),
             "unread": unread,
         })
-    teams = [{
-        "id": "demo-team-0",
-        "name": "Engineering",
-        "problem": "",
-        "channels": [
-            {"id": "demo-ch-0", "teamId": "demo-team-0", "name": "General", "description": ""},
-            {"id": "demo-ch-1", "teamId": "demo-team-0", "name": "Releases", "description": ""},
-        ],
-    }]
+    teams = [{"id": "demo-team-0", "name": "Engineering", "description": ""},
+             {"id": "demo-team-1", "name": "Platform", "description": ""}]
     return {
         "ok": True, "alias": alias, "username": "%s@example.com" % alias,
         "displayName": alias.capitalize(), "userId": "demo-me", "channels": True,
@@ -729,9 +737,10 @@ def main():
     fetch = sub.add_parser("fetch", help="chats, and teams when allowed")
     fetch.add_argument("--account", action="append", required=True, help="account alias; repeat for more")
     fetch.add_argument("--chats", type=int, default=25, help="how many chats to list")
-    fetch.add_argument("--channels", dest="channels", action="store_true", default=True)
-    fetch.add_argument("--no-channels", dest="channels", action="store_false",
-                       help="skip teams even when the sign-in allows them")
+    fetch.add_argument("--teams", dest="teams", action="store_true", default=True)
+    fetch.add_argument("--no-teams", dest="teams", action="store_false",
+                       help="skip the team list entirely - what the bar widget wants, since it "
+                            "only ever draws an unread chat count")
     fetch.add_argument("--demo", action="store_true", help="synthetic data, for building the layout")
     fetch.set_defaults(func=cmd_fetch)
 
@@ -742,6 +751,11 @@ def main():
     messages.add_argument("--top", type=int, default=30)
     messages.add_argument("--demo", action="store_true")
     messages.set_defaults(func=cmd_messages)
+
+    channels = with_account("channels", "one team's channels")
+    channels.add_argument("--team", required=True, help="team id from a fetch")
+    channels.add_argument("--demo", action="store_true")
+    channels.set_defaults(func=cmd_channels)
 
     send = with_account("send", "post a message to a chat or channel")
     send.add_argument("--chat", default="")

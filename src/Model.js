@@ -57,21 +57,18 @@ function accountView(snapshot, alias) {
   }
 }
 
-// The same view with a different team tree on it. Lets the sidebar draw the
-// tree from the last fetch that asked for one, rather than blinking empty on
-// every poll that skipped it.
-function withTeams(view, teams) {
-  var copy = {}
-  for (var key in view) copy[key] = view[key]
-  copy.teams = teams || []
-  return copy
-}
-
-// The sidebar: chats first, then each team with its channels indented under
-// it. Chats lead because they are where someone is being spoken to directly -
-// a channel is a room you visit, a chat is a tap on the shoulder.
-function conversationRows(view) {
+// The sidebar: chats, then teams as closed folders you open.
+//
+// Chats lead because they are where someone is speaking to you directly - a
+// channel is a room you visit, a chat is a tap on the shoulder.
+//
+// Teams are closed until opened, and their channels are fetched at that
+// moment. Listing every channel of every team up front is one request per team
+// and, on an account in 28 of them, two hundred rows nobody scrolls.
+function conversationRows(view, expanded, channelsByTeam, loadingTeamId) {
   var rows = []
+  var open = expanded || {}
+  var channels = channelsByTeam || {}
   var chats = (view && view.chats) || []
 
   if (chats.length > 0) rows.push({ kind: "heading", key: "h:chats", title: "Chats", depth: 0 })
@@ -91,17 +88,35 @@ function conversationRows(view) {
   }
 
   var teams = (view && view.teams) || []
+  if (teams.length > 0) rows.push({ kind: "heading", key: "h:teams", title: "Teams", depth: 0 })
   for (var t = 0; t < teams.length; t++) {
     var team = teams[t]
-    rows.push({ kind: "heading", key: "h:" + team.id, title: String(team.name || ""), depth: 0 })
-    var channels = team.channels || []
-    for (var n = 0; n < channels.length; n++) {
-      var channel = channels[n]
+    var id = String(team.id || "")
+    var isOpen = open[id] === true
+    var loading = String(loadingTeamId || "") === id
+    rows.push({
+      kind: "team",
+      key: "team:" + id,
+      id: id,
+      teamId: id,
+      title: String(team.name || ""),
+      subtitle: "",
+      when: "",
+      unread: false,
+      expanded: isOpen,
+      loading: loading,
+      depth: 0
+    })
+    if (!isOpen) continue
+
+    var list = channels[id] || []
+    for (var n = 0; n < list.length; n++) {
+      var channel = list[n]
       rows.push({
         kind: "channel",
         key: "channel:" + channel.id,
         id: String(channel.id || ""),
-        teamId: String(channel.teamId || team.id || ""),
+        teamId: id,
         title: "# " + String(channel.name || ""),
         subtitle: String(channel.description || ""),
         when: "",
@@ -111,6 +126,9 @@ function conversationRows(view) {
         depth: 1
       })
     }
+    if (list.length === 0 && !loading)
+      rows.push({ kind: "note", key: "note:" + id, title: "No channels", subtitle: "",
+                  when: "", unread: false, depth: 1 })
   }
   return rows
 }
@@ -126,7 +144,13 @@ function subtitleFor(chat) {
 // Rows that a cursor may land on - never a heading.
 function selectableRows(rows) {
   var out = []
-  for (var i = 0; i < (rows || []).length; i++) if (rows[i].kind !== "heading") out.push(i)
+  var list = rows || []
+  for (var i = 0; i < list.length; i++) {
+    var kind = list[i].kind
+    // A team is a target: opening it is an action. A heading and a "no
+    // channels" note are not - a cursor that stops on them stops on nothing.
+    if (kind === "chat" || kind === "channel" || kind === "team") out.push(i)
+  }
   return out
 }
 

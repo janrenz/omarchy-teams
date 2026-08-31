@@ -23,10 +23,6 @@ Item {
   // request per team - 29 of them on this tenant. So the widget turns it off
   // and the window turns it on; nothing draws a channel list nobody asked for.
   property bool includeTeams: true
-  // Teams and their channels change on the order of weeks, chats on the order
-  // of seconds. Polling both at the chat cadence is what made a refresh cost
-  // thirty requests instead of one.
-  readonly property int teamsIntervalSec: 900
   readonly property int chatCount: intSetting("chats", 25, 1, 40)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 120, 30, 3600)
 
@@ -46,10 +42,8 @@ Item {
   readonly property bool needsSignIn: view.errorCode === "auth_required"
   readonly property bool hasChannels: view.channels === true
   readonly property int unreadCount: view.unreadCount || 0
-  // The tree the sidebar draws: whatever the last fetch that asked for it
-  // returned, not whatever this poll happened to carry.
   readonly property var conversations: Model.conversationRows(
-    Model.withTeams(view, (view.teams && view.teams.length > 0) ? view.teams : cachedTeams))
+    view, expandedTeams, teamChannels, loadingTeamId)
   readonly property var warnings: view.warnings || []
 
   function setting(name, fallback) {
@@ -67,35 +61,81 @@ Item {
 
   // ---- fetching ---------------------------------------------------------
 
-  // When the team tree was last actually fetched, so it can be left alone on
-  // the polls in between.
-  property double teamsFetchedAt: 0
-  property var cachedTeams: []
-  property bool fetchingTeams: false
-
-  function teamsAreDue() {
-    return includeTeams && wantChannels
-      && (cachedTeams.length === 0 || Date.now() - teamsFetchedAt > teamsIntervalSec * 1000)
-  }
-
   function refresh() {
     if (!configured || fetchProc.running || pluginDir === "") return
     loading = true
-    var withTeams = teamsAreDue()
-    fetchingTeams = withTeams
     var command = ["python3", helper(), "fetch", "--account", alias,
                    "--chats", String(chatCount)]
-    if (!withTeams) command.push("--no-channels")
+    // The team list is one request now that channels are fetched on demand, so
+    // there is nothing left worth caching between polls - only the bar, which
+    // draws an unread count and nothing else, skips it.
+    if (!includeTeams || !wantChannels) command.push("--no-teams")
     if (setting("demo", false) === true) command.push("--demo")
     fetchProc.command = command
     fetchProc.running = true
   }
 
-  // Force the tree to be re-read on the next refresh - what the Refresh button
-  // means when someone has just been added to a team.
+  // What Refresh means: re-read the chats, the team list, and any team the
+  // user has open - somebody may have been added to a channel since.
   function refreshEverything() {
-    teamsFetchedAt = 0
+    teamChannels = ({})
     refresh()
+    for (var id in expandedTeams) if (expandedTeams[id] === true) { loadChannels(id); break }
+  }
+
+  // ---- teams open and shut ----------------------------------------------
+  //
+  // Closed until opened, and a team's channels are fetched at that moment.
+  // Listing every channel of every team up front is one request per team, and
+  // on an account in 28 of them that was 29 requests and two hundred rows.
+  property var expandedTeams: ({})
+  property var teamChannels: ({})
+  property string loadingTeamId: ""
+
+  function toggleTeam(teamId) {
+    var id = String(teamId || "")
+    if (id === "") return
+    var next = {}
+    for (var k in expandedTeams) next[k] = expandedTeams[k]
+    if (next[id] === true) delete next[id]
+    else next[id] = true
+    expandedTeams = next
+    if (next[id] === true && !teamChannels[id]) loadChannels(id)
+  }
+
+  function loadChannels(teamId) {
+    var id = String(teamId || "")
+    if (id === "" || channelsProc.running || pluginDir === "") return
+    loadingTeamId = id
+    var command = ["python3", helper(), "channels", "--account", alias, "--team", id]
+    if (setting("demo", false) === true) command.push("--demo")
+    channelsProc.command = command
+    channelsProc.running = true
+  }
+
+  Process {
+    id: channelsProc
+    running: false
+    stdout: StdioCollector { id: channelsOut; waitForEnd: true }
+    stderr: StdioCollector { id: channelsErr; waitForEnd: true }
+    onExited: function(exitCode) {
+      var wanted = root.loadingTeamId
+      root.loadingTeamId = ""
+      var parsed = Model.parseJson(channelsOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        // The team stays open showing "no channels" rather than snapping shut
+        // under the pointer; the warning line says what went wrong.
+        root.errorMessage = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(channelsErr.text || "Could not read that team's channels", 160)
+        root.errorCode = "channels_failed"
+        return
+      }
+      var next = {}
+      for (var k in root.teamChannels) next[k] = root.teamChannels[k]
+      next[String(parsed.teamId || wanted)] = parsed.channels || []
+      root.teamChannels = next
+    }
   }
 
   Process {
@@ -119,14 +159,6 @@ Item {
       root.errorCode = ""
       root.errorMessage = ""
       root.snapshot = parsed
-      if (root.fetchingTeams) {
-        var fetched = root.view.teams || []
-        // An empty list from a fetch that did ask is a real answer (no teams),
-        // so it replaces the cache rather than being treated as a miss.
-        root.cachedTeams = fetched
-        root.teamsFetchedAt = Date.now()
-        root.fetchingTeams = false
-      }
       // A conversation open while the list refreshed is still the one being
       // read; reloading it here would scroll the transcript out from under
       // whoever is reading it.

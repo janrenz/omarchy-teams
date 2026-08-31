@@ -163,10 +163,21 @@ Item {
                 font.pixelSize: Style.font.heading
               }
 
-              Text {
+              Spinner {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: service.loading || service.messagesLoading
-                text: "loading…"
+                color: Color.accent
+                dotSize: Style.space(4)
+              }
+
+              // Only for the first fetch, which is the slow one: it reads the
+              // whole team tree. Later refreshes are a second and need no
+              // explaining, and a line of text appearing every couple of
+              // minutes would push the header around.
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: service.loading && !service.signedIn
+                text: "loading chats and teams…"
                 textFormat: Text.PlainText
                 color: Qt.darker(Color.foreground, 1.5)
                 font.family: Style.font.family
@@ -335,7 +346,11 @@ Item {
             width: parent.width
             height: parent.height - y
             spacing: Style.spacing.xxl
-            visible: service.signedIn && !service.loggingIn
+            // Drawn during the first fetch too, so the placeholder rows below
+            // stand where the real ones will be. Before this the window was
+            // simply blank for the length of the fetch, which read as broken.
+            visible: (service.signedIn || service.loading) && !service.loggingIn
+                     && root.settingsError === "" && service.configured && !service.needsSignIn
 
             // A tiling compositor hands this window whatever the layout has
             // left - 672px here - and Style.space() scales with the font, so a
@@ -353,10 +368,21 @@ Item {
             readonly property real readerWidth: !showReader ? 0
               : (roomForBoth ? width - sidebarWidth - spacing * 2 - Style.space(1) : width)
 
+            // Nothing fetched yet. Rows rather than a spinner: they hold the
+            // sidebar at the size it is about to have, so the list does not
+            // shove the layout around when it lands.
+            LoadingRows {
+              width: columns.sidebarWidth
+              visible: columns.showSidebar && service.conversations.length === 0 && service.loading
+              rows: 7
+              fg: Color.foreground
+            }
+
             ScrollView {
               width: columns.sidebarWidth
               height: columns.height
               visible: columns.showSidebar
+                       && !(service.conversations.length === 0 && service.loading)
               clip: true
 
               ConversationList {
@@ -367,7 +393,10 @@ Item {
                 fg: Color.foreground
                 accent: Color.accent
                 fontFamily: Style.font.family
-                onPicked: function(row) { service.openChat(row) }
+                onPicked: function(row) {
+                  if (row.kind === "team") service.toggleTeam(row.id)
+                  else service.openChat(row)
+                }
               }
             }
 
@@ -413,9 +442,17 @@ Item {
                   font.pixelSize: Style.font.caption
                 }
 
+                LoadingRows {
+                  width: parent.width
+                  visible: service.messagesLoading && service.messages.length === 0
+                  rows: 5
+                  fg: Color.foreground
+                }
+
                 ScrollView {
                   id: transcript
                   width: parent.width
+                  visible: !(service.messagesLoading && service.messages.length === 0)
                   height: parent.height - composerBox.height - answer.height - parent.spacing * 2
                           - (service.messagesError !== "" ? Style.space(20) : 0)
                   clip: true

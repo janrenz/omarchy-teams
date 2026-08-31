@@ -43,6 +43,10 @@ Column {
       required property int index
 
       readonly property bool isHeading: modelData.kind === "heading"
+      readonly property bool isTeam: modelData.kind === "team"
+      readonly property bool isNote: modelData.kind === "note"
+      // Headings label; notes explain. Neither is something to click.
+      readonly property bool inert: isHeading || isNote
       readonly property bool selected: !isHeading && root.selectedKey === String(modelData.key)
       readonly property int pickIndex: root.selectable.indexOf(index)
       readonly property bool cursored: !isHeading && root.cursorIndex >= 0
@@ -52,7 +56,7 @@ Column {
       implicitHeight: body.implicitHeight + Style.spacing.sm * 2
       radius: Style.space(5)
       color: {
-        if (isHeading) return "transparent"
+        if (inert) return "transparent"
         if (selected) return Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.14)
         if (hover.containsMouse || cursored) return Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.08)
         return "transparent"
@@ -74,13 +78,41 @@ Column {
         color: root.accent
       }
 
+      // Which way a team is facing, so a closed one does not read as a team
+      // with no channels. Spins to point down as it opens.
+      Text {
+        id: chevron
+        anchors.left: parent.left
+        anchors.leftMargin: Style.spacing.sm
+        anchors.verticalCenter: parent.verticalCenter
+        visible: line.isTeam
+        text: "\uf0da"
+        textFormat: Text.PlainText
+        color: root.dim
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        rotation: line.modelData.expanded === true ? 90 : 0
+        Behavior on rotation { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
+      }
+
+      // Opening a team is a request; say so where the chevron is rather than
+      // leaving the row looking like it did nothing.
+      Spinner {
+        anchors.right: parent.right
+        anchors.rightMargin: Style.spacing.md
+        anchors.verticalCenter: parent.verticalCenter
+        visible: line.modelData.loading === true
+        color: root.accent
+        dotSize: Style.space(3)
+      }
+
       Column {
         id: body
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: Style.spacing.md + Style.space(8)
-                            + Style.space(10) * line.modelData.depth
+        anchors.leftMargin: Style.spacing.md + Style.space(10)
+                            + Style.space(12) * line.modelData.depth
         anchors.rightMargin: Style.spacing.md
         spacing: Style.spacing.xxs
 
@@ -89,16 +121,17 @@ Column {
           text: String(line.modelData.title || "")
           textFormat: Text.PlainText
           elide: Text.ElideRight
-          color: line.isHeading ? root.dim : root.fg
+          color: line.inert ? root.dim : root.fg
           font.family: root.fontFamily
           font.pixelSize: line.isHeading ? Style.font.caption : Style.font.body
           font.bold: line.isHeading || line.modelData.unread === true || line.selected
           font.capitalization: line.isHeading ? Font.AllUppercase : Font.MixedCase
+          font.italic: line.isNote
         }
 
         Text {
           width: parent.width
-          visible: !line.isHeading && String(line.modelData.subtitle || "") !== ""
+          visible: !line.inert && String(line.modelData.subtitle || "") !== ""
           text: String(line.modelData.subtitle || "")
           textFormat: Text.PlainText
           elide: Text.ElideRight
@@ -114,7 +147,7 @@ Column {
         anchors.rightMargin: Style.spacing.md
         anchors.top: parent.top
         anchors.topMargin: Style.spacing.sm
-        visible: !line.isHeading && String(line.modelData.when || "") !== ""
+        visible: !line.inert && String(line.modelData.when || "") !== ""
         text: Model.whenLabel(line.modelData.when, new Date())
         textFormat: Text.PlainText
         color: root.dim
@@ -125,9 +158,9 @@ Column {
       MouseArea {
         id: hover
         anchors.fill: parent
-        hoverEnabled: !line.isHeading
-        enabled: !line.isHeading
-        cursorShape: line.isHeading ? Qt.ArrowCursor : Qt.PointingHandCursor
+        hoverEnabled: !line.inert
+        enabled: !line.inert
+        cursorShape: line.inert ? Qt.ArrowCursor : Qt.PointingHandCursor
         onClicked: {
           root.cursorIndex = line.pickIndex
           root.picked(line.modelData)

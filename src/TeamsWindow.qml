@@ -210,7 +210,7 @@ Item {
                 foreground: Color.foreground
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
-                onClicked: service.refresh()
+                onClicked: service.refreshEverything()
               }
             }
           }
@@ -437,15 +437,17 @@ Item {
                         Repeater {
                           model: modelData.lines
 
-                          delegate: Text {
+                          // Selectable: the whole point of a transcript is
+                          // that you can take a line out of it. A plain Text
+                          // item cannot be selected at all.
+                          delegate: SelectableText {
                             required property var modelData
                             width: parent ? parent.width : 0
                             text: String(modelData.text || "")
                             // Rendered as text, always. A Teams message is
                             // HTML written by whoever sent it, and rich text
                             // fetches what it is told to fetch.
-                            textFormat: Text.PlainText
-                            wrapMode: Text.Wrap
+                            textFormat: TextEdit.PlainText
                             color: Color.foreground
                             font.family: Style.font.family
                             font.pixelSize: Style.font.bodySmall

@@ -272,6 +272,14 @@ def cmd_login_start(args):
             "channels": bool(args.channels),
             "interval": int(payload.get("interval", 5)),
             "expires_at": time.time() + int(payload.get("expires_in", 900)),
+            # Kept so a sign-in can be picked up again. Microsoft hands the
+            # user code back once; without it here, closing the window or
+            # reloading the plugin between "here is your code" and the user
+            # finishing in the browser loses the sign-in silently - the code
+            # they are typing stays valid for minutes with nothing left
+            # redeeming it.
+            "user_code": payload.get("user_code", ""),
+            "verification_uri": payload.get("verification_uri", "https://microsoft.com/devicelogin"),
         },
     )
     out({
@@ -281,6 +289,28 @@ def cmd_login_start(args):
         "verificationUri": payload.get("verification_uri", "https://microsoft.com/devicelogin"),
         "interval": int(payload.get("interval", 5)),
         "expiresIn": int(payload.get("expires_in", 900)),
+    })
+
+
+def cmd_login_status(args):
+    """Whether a sign-in is in flight, and the code it is waiting on.
+
+    What makes resuming possible: the shell can ask this on startup and pick up
+    a device-code flow somebody began before the window was closed.
+    """
+    pending = read_json(state_path(args.account, "pending"))
+    if not pending:
+        out({"ok": True, "pending": False})
+    remaining = int(pending.get("expires_at", 0) - time.time())
+    if remaining <= 0:
+        out({"ok": True, "pending": False, "expired": True})
+    out({
+        "ok": True,
+        "pending": True,
+        "userCode": pending.get("user_code", ""),
+        "verificationUri": pending.get("verification_uri", "https://microsoft.com/devicelogin"),
+        "channels": bool(pending.get("channels")),
+        "expiresIn": remaining,
     })
 
 
@@ -435,7 +465,10 @@ def chat_rows(token, me_id, top):
 
 def team_rows(token):
     """Joined teams and their channels, flattened for a sidebar."""
-    status, payload = graph_get(token, "/me/joinedTeams", {"$top": str(TEAM_CAP)})
+    # No $top: /me/joinedTeams rejects it outright ("Query option 'Top' is not
+    # allowed"), and so do the channel collections. Both are small enough to
+    # take whole and cap here instead.
+    status, payload = graph_get(token, "/me/joinedTeams")
     if status != 200:
         return [], graph_error(payload, "Could not read your teams")
 
@@ -443,9 +476,7 @@ def team_rows(token):
     for team in payload.get("value", [])[:TEAM_CAP]:
         team_id = team.get("id", "")
         channel_status, channel_payload = graph_get(
-            token, "/teams/%s/channels" % urllib.parse.quote(team_id, safe=""),
-            {"$top": str(CHANNEL_CAP)},
-        )
+            token, "/teams/%s/channels" % urllib.parse.quote(team_id, safe=""))
         channels = []
         if channel_status == 200:
             for channel in channel_payload.get("value", [])[:CHANNEL_CAP]:
@@ -693,6 +724,7 @@ def main():
     start.set_defaults(func=cmd_login_start)
 
     with_account("login-poll", "poll a pending sign-in").set_defaults(func=cmd_login_poll)
+    with_account("login-status", "report a sign-in left in flight").set_defaults(func=cmd_login_status)
 
     fetch = sub.add_parser("fetch", help="chats, and teams when allowed")
     fetch.add_argument("--account", action="append", required=True, help="account alias; repeat for more")

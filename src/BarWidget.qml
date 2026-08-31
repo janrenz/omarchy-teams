@@ -37,6 +37,9 @@ BarWidget {
     id: service
     settings: root.settings
     pluginDir: root.pluginDir
+    // The bar draws an unread count and nothing else, and the team tree costs
+    // a Graph request per team. The window asks for it; this must not.
+    includeTeams: false
   }
 
   BarIconButton {

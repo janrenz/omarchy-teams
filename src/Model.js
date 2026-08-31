@@ -57,6 +57,16 @@ function accountView(snapshot, alias) {
   }
 }
 
+// The same view with a different team tree on it. Lets the sidebar draw the
+// tree from the last fetch that asked for one, rather than blinking empty on
+// every poll that skipped it.
+function withTeams(view, teams) {
+  var copy = {}
+  for (var key in view) copy[key] = view[key]
+  copy.teams = teams || []
+  return copy
+}
+
 // The sidebar: chats first, then each team with its channels indented under
 // it. Chats lead because they are where someone is being spoken to directly -
 // a channel is a room you visit, a chat is a tap on the shoulder.

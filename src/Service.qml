@@ -19,6 +19,14 @@ Item {
   readonly property string clientId: String(setting("clientId", "")).trim()
   readonly property string authority: String(setting("authority", "")).trim()
   readonly property bool wantChannels: setting("channels", true) !== false
+  // The bar only ever draws an unread count, and the team tree costs one Graph
+  // request per team - 29 of them on this tenant. So the widget turns it off
+  // and the window turns it on; nothing draws a channel list nobody asked for.
+  property bool includeTeams: true
+  // Teams and their channels change on the order of weeks, chats on the order
+  // of seconds. Polling both at the chat cadence is what made a refresh cost
+  // thirty requests instead of one.
+  readonly property int teamsIntervalSec: 900
   readonly property int chatCount: intSetting("chats", 25, 1, 40)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 120, 30, 3600)
 
@@ -38,7 +46,10 @@ Item {
   readonly property bool needsSignIn: view.errorCode === "auth_required"
   readonly property bool hasChannels: view.channels === true
   readonly property int unreadCount: view.unreadCount || 0
-  readonly property var conversations: Model.conversationRows(view)
+  // The tree the sidebar draws: whatever the last fetch that asked for it
+  // returned, not whatever this poll happened to carry.
+  readonly property var conversations: Model.conversationRows(
+    Model.withTeams(view, (view.teams && view.teams.length > 0) ? view.teams : cachedTeams))
   readonly property var warnings: view.warnings || []
 
   function setting(name, fallback) {
@@ -56,15 +67,35 @@ Item {
 
   // ---- fetching ---------------------------------------------------------
 
+  // When the team tree was last actually fetched, so it can be left alone on
+  // the polls in between.
+  property double teamsFetchedAt: 0
+  property var cachedTeams: []
+  property bool fetchingTeams: false
+
+  function teamsAreDue() {
+    return includeTeams && wantChannels
+      && (cachedTeams.length === 0 || Date.now() - teamsFetchedAt > teamsIntervalSec * 1000)
+  }
+
   function refresh() {
     if (!configured || fetchProc.running || pluginDir === "") return
     loading = true
+    var withTeams = teamsAreDue()
+    fetchingTeams = withTeams
     var command = ["python3", helper(), "fetch", "--account", alias,
                    "--chats", String(chatCount)]
-    if (!wantChannels) command.push("--no-channels")
+    if (!withTeams) command.push("--no-channels")
     if (setting("demo", false) === true) command.push("--demo")
     fetchProc.command = command
     fetchProc.running = true
+  }
+
+  // Force the tree to be re-read on the next refresh - what the Refresh button
+  // means when someone has just been added to a team.
+  function refreshEverything() {
+    teamsFetchedAt = 0
+    refresh()
   }
 
   Process {
@@ -88,6 +119,14 @@ Item {
       root.errorCode = ""
       root.errorMessage = ""
       root.snapshot = parsed
+      if (root.fetchingTeams) {
+        var fetched = root.view.teams || []
+        // An empty list from a fetch that did ask is a real answer (no teams),
+        // so it replaces the cache rather than being treated as a miss.
+        root.cachedTeams = fetched
+        root.teamsFetchedAt = Date.now()
+        root.fetchingTeams = false
+      }
       // A conversation open while the list refreshed is still the one being
       // read; reloading it here would scroll the transcript out from under
       // whoever is reading it.
@@ -102,9 +141,9 @@ Item {
     onTriggered: root.refresh()
   }
 
-  onConfiguredChanged: if (configured) refresh()
-  onPluginDirChanged: if (configured) refresh()
-  onSettingsChanged: if (configured) refresh()
+  onConfiguredChanged: if (configured) { resumeLogin(); refresh() }
+  onPluginDirChanged: if (configured) { resumeLogin(); refresh() }
+  onSettingsChanged: if (configured) { resumeLogin(); refresh() }
 
   // ---- one conversation -------------------------------------------------
 
@@ -214,6 +253,41 @@ Item {
   property string verificationUri: ""
   property string loginMessage: ""
 
+  // Pick up a sign-in somebody started and did not finish.
+  //
+  // Without this, the device code lives in a file for fifteen minutes while
+  // nothing redeems it: close the window, or let the shell reload the plugin,
+  // and the code the user is typing into their browser has no reader left. It
+  // looks exactly like the sign-in silently failing, which is how this was
+  // found.
+  property bool resumeChecked: false
+
+  function resumeLogin() {
+    if (resumeChecked || !configured || pluginDir === "" || loggingIn) return
+    resumeChecked = true
+    resumeProc.command = ["python3", helper(), "login-status", "--account", alias]
+    resumeProc.running = true
+  }
+
+  Process {
+    id: resumeProc
+    running: false
+    stdout: StdioCollector { id: resumeOut; waitForEnd: true }
+    onExited: function(_exitCode) {
+      var parsed = Model.parseJson(resumeOut.text, null)
+      if (!parsed || parsed.ok === false || parsed.pending !== true) return
+      root.userCode = String(parsed.userCode || "")
+      root.verificationUri = String(parsed.verificationUri || "https://microsoft.com/devicelogin")
+      root.loginMessage = root.userCode !== ""
+        ? "Still waiting - enter the code at " + root.verificationUri
+        : "Finishing a sign-in started earlier…"
+      root.loggingIn = true
+      // A sign-in started before the code was recorded has no code to show, so
+      // the timer has to run on the device code in the pending file alone.
+      loginPollTimer.restart()
+    }
+  }
+
   function startLogin(withChannels) {
     if (!configured || loginStartProc.running) return
     loggingIn = true
@@ -256,7 +330,7 @@ Item {
     id: loginPollTimer
     interval: 5000
     repeat: true
-    running: root.loggingIn && root.userCode !== ""
+    running: root.loggingIn
     onTriggered: {
       if (loginPollProc.running) return
       loginPollProc.command = ["python3", root.helper(), "login-poll", "--account", root.alias]

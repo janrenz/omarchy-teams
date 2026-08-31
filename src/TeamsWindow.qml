@@ -511,11 +511,22 @@ Item {
             Row {
               id: heading
               anchors.left: parent.left
+              // Bounded by where the buttons start, so a long chat title runs
+              // out of room before it reaches them. elide does nothing on a
+              // Text that is free to be as wide as it likes, which is what let
+              // "Presidential & Head's Council" sit on top of Refresh.
+              anchors.right: headerActions.left
+              anchors.rightMargin: Style.spacing.lg
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.spacing.md
 
               Text {
                 anchors.verticalCenter: parent.verticalCenter
+                // Whatever the status bits beside it do not need. They are
+                // short and they come and go; the title is the part that has
+                // to give way.
+                width: Math.max(0, heading.width - status.width
+                                   - (status.width > 0 ? heading.spacing : 0))
                 text: service.openConversation ? String(service.openConversation.title || "") : "Teams"
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
@@ -524,41 +535,50 @@ Item {
                 font.pixelSize: Style.font.heading
               }
 
-              Spinner {
+              // Grouped so their combined width can be measured and taken off
+              // the title's, rather than each one pushing it along.
+              Row {
+                id: status
                 anchors.verticalCenter: parent.verticalCenter
-                visible: service.loading || service.messagesLoading
-                color: Color.accent
-                dotSize: Style.space(4)
-              }
+                spacing: Style.spacing.md
 
-              // Only for the first fetch, which is the slow one: it reads the
-              // whole team tree. Later refreshes are a second and need no
-              // explaining, and a line of text appearing every couple of
-              // minutes would push the header around.
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: service.loading && !service.signedIn
-                text: "loading chats and teams…"
-                textFormat: Text.PlainText
-                color: Qt.darker(Color.foreground, 1.5)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
-              }
+                Spinner {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: service.loading || service.messagesLoading
+                  color: Color.accent
+                  dotSize: Style.space(4)
+                }
 
-              // Said once, plainly, rather than on every channel that is not
-              // there: without the admin grant there are no channels to show.
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: service.signedIn && !service.hasChannels
-                text: "chats only"
-                textFormat: Text.PlainText
-                color: Qt.darker(Color.foreground, 1.5)
-                font.family: Style.font.family
-                font.pixelSize: Style.font.caption
+                // Only for the first fetch, which is the slow one: it reads the
+                // whole team tree. Later refreshes are a second and need no
+                // explaining, and a line of text appearing every couple of
+                // minutes would push the header around.
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: service.loading && !service.signedIn
+                  text: "loading chats and teams…"
+                  textFormat: Text.PlainText
+                  color: Qt.darker(Color.foreground, 1.5)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                // Said once, plainly, rather than on every channel that is not
+                // there: without the admin grant there are no channels to show.
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: service.signedIn && !service.hasChannels
+                  text: "chats only"
+                  textFormat: Text.PlainText
+                  color: Qt.darker(Color.foreground, 1.5)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
               }
             }
 
             Row {
+              id: headerActions
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.spacing.sm

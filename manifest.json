@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "id": "janrenz.omarchy.teams",
+  "name": "Microsoft Teams",
+  "version": "0.1.0",
+  "author": "Jan Renz",
+  "license": "MIT",
+  "description": "Teams chats and channels in the Omarchy bar and in a window of their own. Needs python3 (standard library only) and an Azure app registration of yours - see the README. Talks to Microsoft Graph and nothing else.",
+  "kinds": [
+    "bar-widget",
+    "panel"
+  ],
+  "entryPoints": {
+    "barWidget": "src/BarWidget.qml",
+    "panel": "src/TeamsWindow.qml"
+  },
+  "barWidget": {
+    "displayName": "Teams",
+    "description": "Unread chats in the bar; the conversations open in their own window.",
+    "category": "Communication",
+    "aliases": [
+      "teams",
+      "chat",
+      "microsoft",
+      "channels",
+      "messages"
+    ],
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "icon": "󰊻",
+      "label": "",
+      "chats": 25,
+      "channels": true,
+      "refreshIntervalSec": 120,
+      "tintOnUnread": true
+    },
+    "schema": [
+      {
+        "key": "account",
+        "type": "string",
+        "label": "Account name",
+        "description": "A short name for this sign-in, e.g. work. Letters, numbers, dot, dash and underscore."
+      },
+      {
+        "key": "clientId",
+        "type": "string",
+        "label": "Azure client id",
+        "description": "Required. Your own app registration's Application (client) ID. Teams cannot reuse a registration made for mail: a registration declares which permissions it may request. See the plugin README for the exact setup."
+      },
+      {
+        "key": "authority",
+        "type": "string",
+        "label": "Authority",
+        "description": "common, organizations, or your tenant id. Leave empty for common."
+      },
+      {
+        "key": "channels",
+        "type": "boolean",
+        "label": "Include teams and channels",
+        "description": "Off signs in for chats alone. On also asks for channel access, which normally needs an administrator to consent for the whole tenant - if that consent is refused the sign-in fails, and chats-only will still work.",
+        "defaultValue": true
+      },
+      {
+        "key": "chats",
+        "type": "integer",
+        "label": "Chats to list",
+        "min": 1,
+        "max": 40,
+        "step": 1,
+        "defaultValue": 25
+      },
+      {
+        "key": "refreshIntervalSec",
+        "type": "integer",
+        "label": "Refresh interval (seconds)",
+        "min": 30,
+        "max": 3600,
+        "step": 30,
+        "defaultValue": 120
+      },
+      {
+        "key": "icon",
+        "type": "string",
+        "label": "Bar icon",
+        "description": "Nerd Font glyph shown in the bar. Ignored when a label is set.",
+        "defaultValue": "󰊻"
+      },
+      {
+        "key": "label",
+        "type": "string",
+        "label": "Bar label",
+        "description": "Short text shown instead of the icon, e.g. TEAMS."
+      },
+      {
+        "key": "tintOnUnread",
+        "type": "boolean",
+        "label": "Highlight the bar icon when a chat is unread",
+        "defaultValue": true
+      }
+    ]
+  }
+}

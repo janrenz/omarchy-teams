@@ -18,6 +18,9 @@ Column {
   property int cursorIndex: -1
 
   signal picked(var row)
+  // Where the cursored row sits, so the pane holding this list can keep it on
+  // screen. The list cannot scroll itself: it does not know it is in one.
+  signal cursorMoved(real itemY, real itemHeight)
 
   spacing: Style.spacing.xxs
 
@@ -51,6 +54,7 @@ Column {
       readonly property int pickIndex: root.selectable.indexOf(index)
       readonly property bool cursored: !isHeading && root.cursorIndex >= 0
                                        && root.cursorIndex === pickIndex
+      onCursoredChanged: if (cursored) root.cursorMoved(y, height)
 
       width: parent ? parent.width : 0
       implicitHeight: body.implicitHeight + Style.spacing.sm * 2

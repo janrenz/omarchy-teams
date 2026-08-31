@@ -28,6 +28,50 @@ function plainText(value) {
   return String(value === undefined || value === null ? "" : value).replace(/</g, "")
 }
 
+// A message as markup with its links clickable.
+//
+// The text is escaped FIRST and links added afterwards, never the other way
+// round. The words come from whoever sent the message, so anything they wrote
+// that looks like markup has to stop being markup before this builds any - and
+// what this builds is only ever an <a>. Rich text fetches what it is told to
+// fetch, so a message must never get to choose the tags.
+//
+// Only http, https and mailto become links. A javascript: or data: URL is left
+// as the plain words it was.
+var LINKABLE = /\b(?:https?:\/\/|www\.)[^\s<>"'\)\]]+|(?:\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b)/g
+
+function escapeHtml(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+}
+
+function hasLink(text) {
+  LINKABLE.lastIndex = 0
+  return LINKABLE.test(String(text || ""))
+}
+
+function linkify(text) {
+  var escaped = escapeHtml(text)
+  LINKABLE.lastIndex = 0
+  var html = escaped.replace(LINKABLE, function(match) {
+    // Trailing punctuation is nearly always the sentence, not the address.
+    var trail = ""
+    while (match.length > 0 && ".,;:!?".indexOf(match.charAt(match.length - 1)) !== -1) {
+      trail = match.charAt(match.length - 1) + trail
+      match = match.substring(0, match.length - 1)
+    }
+    var href = match
+    if (match.indexOf("@") !== -1 && match.indexOf("//") === -1) href = "mailto:" + match
+    else if (match.toLowerCase().indexOf("www.") === 0) href = "https://" + match
+    return '<a href="' + href + '">' + match + '</a>' + trail
+  })
+  // Newlines carry no meaning in rich text, and a transcript is full of them.
+  return html.replace(/\n/g, "<br>")
+}
+
 // The one account, as a view the UI can bind to without null checks.
 function accountView(snapshot, alias) {
   var accounts = (snapshot && snapshot.accounts) || []

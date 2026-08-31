@@ -16,6 +16,7 @@ own, and only the person who owns the tenant can make one. See README.md.
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import os
@@ -43,7 +44,19 @@ DEFAULT_AUTHORITY = "common"
 # most tenants, and a device-code flow asking for it in one breath with the
 # chat scopes fails entirely rather than partly. Splitting them means a refused
 # channel consent costs the channels, not the whole plugin.
-SCOPES_CHATS = "openid profile offline_access User.Read Chat.Read ChatMessage.Send"
+# Chat.ReadWrite rather than Chat.Read: marking a chat read is a write, and
+# markChatReadForUser refuses anything less. It is still ordinary user consent
+# - nobody needs an administrator to let them read their own chats - so this
+# costs a re-sign-in and nothing more.
+# Chat.Create is listed separately from Chat.ReadWrite because POST /chats
+# asks for it by name. People.Read ranks the people you actually talk to;
+# User.ReadBasic.All is the fallback for everyone else in the directory. All
+# of these are ordinary user consent - no administrator involved - so they
+# cost one re-sign-in between them.
+SCOPES_CHATS = (
+    "openid profile offline_access User.Read Chat.ReadWrite Chat.Create ChatMessage.Send "
+    "People.Read User.ReadBasic.All"
+)
 SCOPES_CHANNELS = (
     SCOPES_CHATS
     + " Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send"
@@ -196,6 +209,45 @@ def store_tokens(alias, account, token_response):
         account["scopes"] = str(granted)
     write_json(state_path(alias), account)
     return account
+
+
+def can_mark_read(account):
+    """Whether this sign-in may mark a chat read.
+
+    A mailbox signed in before Chat.ReadWrite was asked for keeps working -
+    everything else needs only Chat.Read - so this is checked rather than
+    assumed, and opening a chat simply does not mark it read until the user
+    signs in again.
+    """
+    return "chat.readwrite" in str((account or {}).get("scopes", "")).lower()
+
+
+def can_create_chat(account):
+    """Whether this sign-in may start a chat with somebody."""
+    scopes = str((account or {}).get("scopes", "")).lower()
+    return "chat.create" in scopes or "chat.readwrite" in scopes
+
+
+def can_find_people(account):
+    """Whether this sign-in may look people up to start a chat with."""
+    scopes = str((account or {}).get("scopes", "")).lower()
+    return "people.read" in scopes or "user.readbasic.all" in scopes
+
+
+def token_claims(token):
+    """The claims inside an access token we were handed.
+
+    Not verified, and not trusted for anything: this is our own token, read
+    only for the two ids Graph wants echoed back at it. markChatReadForUser
+    wants the user's object id and tenant id, and no Graph call hands those
+    over as plainly as the token already does.
+    """
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except (IndexError, ValueError, TypeError):
+        return {}
 
 
 def has_channels(account):
@@ -598,6 +650,8 @@ def fetch_account(alias, args):
         "displayName": account.get("displayName", ""),
         "userId": account.get("userId", ""),
         "channels": has_channels(account),
+        "canMarkRead": can_mark_read(account),
+        "canStartChat": can_create_chat(account) and can_find_people(account),
         "chats": [],
         "teams": [],
         "unreadCount": 0,
@@ -734,6 +788,178 @@ def cmd_image(args):
     out({"ok": True, "path": path, "cached": False, "bytes": len(body), "contentType": content_type})
 
 
+def person_row(person, kind):
+    """One searchable person, however Graph happened to describe them."""
+    address = ""
+    for entry in person.get("scoredEmailAddresses") or []:
+        address = entry.get("address") or ""
+        if address:
+            break
+    if not address:
+        address = person.get("userPrincipalName") or person.get("mail") or ""
+    return {
+        "id": person.get("id", ""),
+        "name": (person.get("displayName") or address or "").strip(),
+        "address": address,
+        "subtitle": (person.get("jobTitle") or person.get("officeLocation") or "").strip(),
+        "source": kind,
+    }
+
+
+def cmd_people(args):
+    """People to start a chat with, best guesses first.
+
+    /me/people first: it ranks by who this user actually talks to, which is
+    almost always the person being looked for. The directory is the fallback
+    for everyone else, and needs the eventual-consistency header to be
+    searchable at all.
+    """
+    if args.demo:
+        out({"ok": True, "people": [
+            {"id": "demo-p1", "name": "Priya Raman", "address": "priya@example.com",
+             "subtitle": "Engineering", "source": "people"},
+            {"id": "demo-p2", "name": "Dana Okafor", "address": "dana@example.com",
+             "subtitle": "Design", "source": "people"},
+        ]})
+
+    query = str(args.query or "").strip()
+    if not query:
+        fail("empty_query", "Type a name to search for")
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_find_people(account):
+        fail("people_permission_required",
+             "This sign-in cannot look people up. Sign in again to allow it.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    found = []
+    seen = set()
+
+    status, payload = graph_get(token, "/me/people", {"$search": query, "$top": "15"})
+    if status == 200:
+        for person in payload.get("value", []):
+            # Rooms, groups and the like are not people you can open a chat
+            # with; only persons have a usable id here.
+            if person.get("personType", {}).get("class") not in (None, "Person"):
+                continue
+            row = person_row(person, "people")
+            if row["id"] and row["id"] not in seen:
+                seen.add(row["id"])
+                found.append(row)
+
+    if len(found) < 5:
+        status, payload = graph_get(
+            token, "/users",
+            {"$search": '"displayName:%s" OR "mail:%s"' % (query, query),
+             "$top": "15", "$select": "id,displayName,mail,userPrincipalName,jobTitle"},
+            {"ConsistencyLevel": "eventual"},
+        )
+        if status == 200:
+            for person in payload.get("value", []):
+                row = person_row(person, "directory")
+                if row["id"] and row["id"] not in seen:
+                    seen.add(row["id"])
+                    found.append(row)
+
+    out({"ok": True, "people": found[:20]})
+
+
+def cmd_new_chat(args):
+    """Start a chat with one person, or a group with several."""
+    people = [p for p in (args.user or []) if str(p).strip()]
+    if not people:
+        fail("no_people", "A chat needs somebody to be with")
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_create_chat(account):
+        fail("create_permission_required",
+             "This sign-in cannot start chats. Sign in again to allow it.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    claims = token_claims(token)
+    me = claims.get("oid") or account.get("userId") or ""
+    if not me:
+        fail("no_user_id", "Could not tell Graph who is starting the chat")
+    if me in people:
+        people.remove(me)
+    if not people:
+        fail("no_people", "A chat needs somebody other than yourself")
+
+    def member(user_id):
+        return {
+            "@odata.type": "#microsoft.graph.aadUserConversationMember",
+            "roles": ["owner"],
+            "user@odata.bind": "https://%s/v1.0/users('%s')" % (GRAPH_HOST, user_id),
+        }
+
+    # A two-person chat is oneOnOne, which Graph will hand back the existing
+    # one for rather than making a second - starting a chat with someone you
+    # already talk to should reopen that conversation, not split it in two.
+    group = len(people) > 1
+    body = {
+        "chatType": "group" if group else "oneOnOne",
+        "members": [member(me)] + [member(user_id) for user_id in people],
+    }
+    topic = str(getattr(args, "topic", "") or "").strip()
+    if group and topic:
+        body["topic"] = topic
+
+    status, payload = http(GRAPH + "/chats", method="POST", json_body=body,
+                           headers={"Authorization": "Bearer " + token})
+    if status == 403:
+        fail("create_permission_required",
+             graph_error(payload, "This sign-in cannot start chats. Sign in again to allow it."))
+    if status not in (200, 201):
+        fail("create_failed", graph_error(payload, "Could not start that chat"))
+    out({"ok": True, "id": (payload or {}).get("id", ""), "chatType": (payload or {}).get("chatType", "")})
+
+
+def cmd_mark_read(args):
+    """Mark one chat read, the way opening it in Teams would."""
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_mark_read(account):
+        fail("mark_read_permission_required",
+             "This sign-in cannot mark chats read. Sign in again to allow it.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    claims = token_claims(token)
+    user_id = claims.get("oid") or account.get("userId") or ""
+    tenant_id = claims.get("tid") or ""
+    if not user_id:
+        fail("no_user_id", "Could not tell Graph which user is reading")
+
+    body = {"user": {"id": user_id}}
+    if tenant_id:
+        body["user"]["tenantId"] = tenant_id
+
+    status, payload = http(
+        GRAPH + "/chats/%s/markChatReadForUser" % urllib.parse.quote(args.chat, safe=""),
+        method="POST", json_body=body,
+        headers={"Authorization": "Bearer " + token},
+    )
+    if status == 403:
+        fail("mark_read_permission_required",
+             graph_error(payload, "This sign-in cannot mark chats read. Sign in again to allow it."))
+    if status not in (200, 204):
+        fail("mark_read_failed", graph_error(payload, "Could not mark this chat read"))
+    out({"ok": True, "chat": args.chat})
+
+
 def cmd_send(args):
     text = str(args.text or "").strip()
     if not text:
@@ -826,6 +1052,8 @@ def demo_account(alias):
     return {
         "ok": True, "alias": alias, "username": "%s@example.com" % alias,
         "displayName": alias.capitalize(), "userId": "demo-me", "channels": True,
+        "canMarkRead": True,
+        "canStartChat": True,
         "chats": chats, "teams": teams,
         "unreadCount": sum(1 for row in chats if row["unread"]), "warnings": [],
     }
@@ -885,6 +1113,21 @@ def main():
     channels.add_argument("--team", required=True, help="team id from a fetch")
     channels.add_argument("--demo", action="store_true")
     channels.set_defaults(func=cmd_channels)
+
+    people = with_account("people", "find somebody to chat with")
+    people.add_argument("--query", required=True, help="part of a name or address")
+    people.add_argument("--demo", action="store_true")
+    people.set_defaults(func=cmd_people)
+
+    new_chat = with_account("new-chat", "start a chat")
+    new_chat.add_argument("--user", action="append", required=True,
+                          metavar="ID", help="a person's id; repeat for a group chat")
+    new_chat.add_argument("--topic", default="", help="a name, for a group chat")
+    new_chat.set_defaults(func=cmd_new_chat)
+
+    mark = with_account("mark-read", "mark one chat read")
+    mark.add_argument("--chat", required=True, help="chat id from a fetch")
+    mark.set_defaults(func=cmd_mark_read)
 
     image = with_account("image", "download one inline image, and say where it is")
     image.add_argument("--url", required=True, help="a graph.microsoft.com hostedContents URL from a message")

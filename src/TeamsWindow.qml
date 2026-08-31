@@ -100,7 +100,41 @@ Item {
   property string pane: "list"
   readonly property bool typing: service.reading
 
+  // A picture being looked at full size, over everything else.
+  property string viewerPath: ""
+
+  function viewImage(path) {
+    if (String(path || "") === "") return
+    viewerPath = String(path)
+    Qt.callLater(function() { viewerKeys.forceActiveFocus() })
+  }
+
+  function closeViewer() {
+    viewerPath = ""
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  // Escape unwinds one layer at a time, innermost first: the picture, then the
+  // conversation, then the window. Anything else and Escape from a photograph
+  // would shut the whole window.
+  property bool composingNew: false
+
+  function openNewChat() {
+    if (!service.canStartChat) return
+    service.clearPeople()
+    composingNew = true
+    Qt.callLater(function() { peopleField.forceActiveFocus() })
+  }
+
+  function closeNewChat() {
+    composingNew = false
+    service.clearPeople()
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
   function dismiss() {
+    if (composingNew) { closeNewChat(); return }
+    if (viewerPath !== "") { closeViewer(); return }
     if (service.reading) { service.closeConversation(); return }
     requestClose()
   }
@@ -111,6 +145,46 @@ Item {
   function focusComposer() {
     if (!service.reading) return
     composer.forceActiveFocus()
+  }
+
+  // ---- scrolling by keyboard ---------------------------------------------
+  //
+  // Which pane the scroll keys act on: the transcript while a conversation is
+  // open, otherwise the list. Whichever one the reader is looking at is the
+  // one they mean, and it is the one the cursor is in.
+  function scrollTarget() {
+    if (service.reading && transcript.visible) return transcript
+    return sidebarScroll.visible ? sidebarScroll : null
+  }
+
+  function scrollBy(view, dy) {
+    var flick = view ? view.contentItem : null
+    if (!flick) return
+    // Any deliberate scroll means the reader has taken over, so stop dragging
+    // them back to the newest message.
+    if (view === transcript) transcript.followNewest = false
+    var limit = Math.max(0, flick.contentHeight - flick.height)
+    flick.contentY = Math.max(0, Math.min(limit, flick.contentY + dy))
+  }
+
+  function scrollToEnd(view, toBottom) {
+    var flick = view ? view.contentItem : null
+    if (!flick) return
+    if (view === transcript) transcript.followNewest = toBottom === true
+    flick.contentY = toBottom === true ? Math.max(0, flick.contentHeight - flick.height) : 0
+  }
+
+  // Keep the cursored row on screen. Without this, j walks the cursor off the
+  // bottom of the list and there is no sign of where it went.
+  function ensureVisible(view, itemY, itemHeight) {
+    var flick = view ? view.contentItem : null
+    if (!flick || itemHeight <= 0) return
+    var margin = Style.spacing.lg
+    if (itemY - margin < flick.contentY)
+      flick.contentY = Math.max(0, itemY - margin)
+    else if (itemY + itemHeight + margin > flick.contentY + flick.height)
+      flick.contentY = Math.max(0, Math.min(Math.max(0, flick.contentHeight - flick.height),
+                                            itemY + itemHeight + margin - flick.height))
   }
 
   // Back to the conversation list, with the draft left exactly as it is. The
@@ -139,12 +213,272 @@ Item {
       anchors.fill: parent
       focus: true
 
+      // PanelKeyCatcher's vocabulary is Escape, Tab, the arrows, j/k/h/l and
+      // Return; Page, Home and End are not in it and arrive here instead.
+      // AfterItem so the catcher still gets first refusal on what it does know.
+      Keys.priority: Keys.AfterItem
+      Keys.onPressed: function(event) {
+        // While a field has focus these belong to the text in it.
+        if (composer.activeFocus || codeField.activeFocus) return
+        if (root.viewerPath !== "" || root.composingNew) return
+        var view = root.scrollTarget()
+        if (!view) return
+        var page = Math.max(Style.space(80), view.height * 0.9)
+        var half = page / 2
+        var control = (event.modifiers & Qt.ControlModifier) !== 0
+
+        if (event.key === Qt.Key_PageDown) root.scrollBy(view, page)
+        else if (event.key === Qt.Key_PageUp) root.scrollBy(view, -page)
+        else if (event.key === Qt.Key_Home) root.scrollToEnd(view, false)
+        else if (event.key === Qt.Key_End) root.scrollToEnd(view, true)
+        // The vim pair, for hands already on the home row.
+        else if (control && event.key === Qt.Key_D) root.scrollBy(view, half)
+        else if (control && event.key === Qt.Key_U) root.scrollBy(view, -half)
+        else if (control && event.key === Qt.Key_F) root.scrollBy(view, page)
+        else if (control && event.key === Qt.Key_B) root.scrollBy(view, -page)
+        else return
+        event.accepted = true
+      }
+
+      // Starting a chat: type a name, pick a person.
+      Item {
+        id: newChat
+        anchors.fill: parent
+        visible: root.composingNew
+        z: 90
+
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.96)
+
+          MouseArea { anchors.fill: parent; onClicked: root.closeNewChat() }
+
+          Column {
+            anchors.centerIn: parent
+            width: Math.min(Style.space(420), parent.width - Style.spacing.huge * 2)
+            spacing: Style.spacing.md
+
+            // Swallows clicks so picking inside the card does not dismiss it.
+            MouseArea { anchors.fill: parent; z: -1 }
+
+            Text {
+              width: parent.width
+              text: "New chat"
+              textFormat: Text.PlainText
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.subtitle
+              font.bold: true
+            }
+
+            TextField {
+              id: peopleField
+              width: parent.width
+              placeholderText: "Name or address"
+              foreground: Color.foreground
+              accent: Color.accent
+              // Searched as you type, but not on every keystroke - the
+              // directory is a network round trip.
+              onTextChanged: peopleDebounce.restart()
+              Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Escape) { root.closeNewChat(); event.accepted = true }
+              }
+            }
+
+            Timer {
+              id: peopleDebounce
+              interval: 300
+              onTriggered: service.searchPeople(peopleField.text)
+            }
+
+            Row {
+              spacing: Style.spacing.sm
+              visible: service.peopleSearching || service.peopleError !== ""
+                       || service.startingChat || service.startChatError !== ""
+
+              Spinner {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: service.peopleSearching || service.startingChat
+                color: Color.accent
+                dotSize: Style.space(4)
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                width: newChat.width * 0.5
+                visible: service.peopleError !== "" || service.startChatError !== ""
+                text: service.startChatError !== "" ? service.startChatError : service.peopleError
+                textFormat: Text.PlainText
+                elide: Text.ElideRight
+                color: Color.urgent
+                font.family: Style.font.family
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            Text {
+              width: parent.width
+              visible: !service.peopleSearching && service.peopleQuery.length >= 2
+                       && service.peopleResults.length === 0 && service.peopleError === ""
+              text: "Nobody found"
+              textFormat: Text.PlainText
+              color: Qt.darker(Color.foreground, 1.5)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.spacing.xxs
+
+              Repeater {
+                model: service.peopleResults
+
+                delegate: Rectangle {
+                  required property var modelData
+                  width: parent ? parent.width : 0
+                  implicitHeight: who.implicitHeight + Style.spacing.sm * 2
+                  radius: Style.space(5)
+                  color: pick.containsMouse
+                    ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.1)
+                    : "transparent"
+
+                  Column {
+                    id: who
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.margins: Style.spacing.md
+                    anchors.verticalCenter: parent.verticalCenter
+                    spacing: Style.spacing.xxs
+
+                    Text {
+                      width: parent.width
+                      text: String(modelData.name || "")
+                      textFormat: Text.PlainText
+                      elide: Text.ElideRight
+                      color: Color.foreground
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.body
+                    }
+
+                    Text {
+                      width: parent.width
+                      visible: text !== ""
+                      text: [String(modelData.address || ""), String(modelData.subtitle || "")]
+                            .filter(function(part) { return part !== "" }).join("  ·  ")
+                      textFormat: Text.PlainText
+                      elide: Text.ElideRight
+                      color: Qt.darker(Color.foreground, 1.5)
+                      font.family: Style.font.family
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+
+                  MouseArea {
+                    id: pick
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    enabled: !service.startingChat
+                    onClicked: service.startChat([String(modelData.id)], "")
+                  }
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              text: "Esc to close"
+              textFormat: Text.PlainText
+              color: Qt.darker(Color.foreground, 1.8)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+      }
+
+      // Over everything, and only when there is something to show. Its own key
+      // handling, because the panel catcher below is covered while this is up.
+      Item {
+        id: viewer
+        anchors.fill: parent
+        visible: root.viewerPath !== ""
+        z: 100
+
+        FocusScope {
+          id: viewerKeys
+          anchors.fill: parent
+          focus: viewer.visible
+
+          Keys.onPressed: function(event) {
+            if (event.key === Qt.Key_Escape || event.key === Qt.Key_Backspace) {
+              root.closeViewer()
+              event.accepted = true
+            } else if (event.key === Qt.Key_O) {
+              // Still one keystroke away from a real image viewer, for
+              // zooming, rotating, or saving it somewhere.
+              Quickshell.execDetached(["xdg-open", root.viewerPath])
+              event.accepted = true
+            }
+          }
+
+          Rectangle {
+            anchors.fill: parent
+            // Not fully opaque: it should read as the picture being held up in
+            // front of the conversation, not as a different screen.
+            color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.94)
+
+            MouseArea {
+              anchors.fill: parent
+              // Clicking the surround closes, the way every picture viewer
+              // does. Clicking the picture itself does not.
+              onClicked: root.closeViewer()
+            }
+
+            Image {
+              id: fullPicture
+              anchors.centerIn: parent
+              source: root.viewerPath !== "" ? "file://" + root.viewerPath : ""
+              fillMode: Image.PreserveAspectFit
+              asynchronous: true
+              width: Math.min(implicitWidth, parent.width - Style.spacing.huge * 2)
+              height: Math.min(implicitHeight, parent.height - Style.spacing.huge * 4)
+              // Decoded to the size it is drawn at; these are camera photos and
+              // the full thing is tens of megapixels.
+              sourceSize.width: Math.round(parent.width)
+
+              MouseArea { anchors.fill: parent }
+            }
+
+            Spinner {
+              anchors.centerIn: parent
+              visible: fullPicture.status === Image.Loading
+              color: Color.accent
+              dotSize: Style.space(5)
+            }
+
+            Text {
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.bottom: parent.bottom
+              anchors.bottomMargin: Style.spacing.xxl
+              text: "Esc to close · O to open in an image viewer"
+              textFormat: Text.PlainText
+              color: Qt.darker(Color.foreground, 1.5)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+          }
+        }
+      }
+
       PanelKeyCatcher {
         id: keyCatcher
         anchors.fill: parent
         // Stands down whenever a field has focus: it consumes bare letters to
         // drive the cursor, which would eat them out of a message.
         blocked: composer.activeFocus || codeField.activeFocus
+                 || peopleField.activeFocus || root.composingNew
         onMoveRequested: function(dx, dy) {
           if (dy !== 0) conversations.moveCursor(dy)
           else if (dx > 0) root.focusComposer()
@@ -222,6 +556,29 @@ Item {
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.spacing.sm
+
+              Button {
+                visible: service.signedIn && service.canStartChat
+                text: "New chat"
+                bordered: true
+                foreground: Color.accent
+                fontFamily: Style.font.family
+                fontSize: Style.font.caption
+                onClicked: root.openNewChat()
+              }
+
+              // Said where it can be acted on: the sign-in predates
+              // Chat.ReadWrite, so opening a chat leaves its dot lit.
+              Button {
+                visible: service.signedIn && !service.canMarkRead
+                text: "Allow marking read…"
+                tooltipText: "Sign in again so opening a chat clears its unread mark"
+                bordered: true
+                foreground: Qt.darker(Color.foreground, 1.4)
+                fontFamily: Style.font.family
+                fontSize: Style.font.caption
+                onClicked: service.startLogin(service.wantChannels)
+              }
 
               Button {
                 visible: service.signedIn && !service.hasChannels
@@ -400,6 +757,7 @@ Item {
             }
 
             ScrollView {
+              id: sidebarScroll
               width: columns.sidebarWidth
               height: columns.height
               visible: columns.showSidebar
@@ -408,6 +766,9 @@ Item {
 
               ConversationList {
                 id: conversations
+                onCursorMoved: function(itemY, itemHeight) {
+                  root.ensureVisible(sidebarScroll, itemY, itemHeight)
+                }
                 width: columns.sidebarWidth
                 rows: service.conversations
                 selectedKey: service.openConversation ? String(service.openConversation.key) : ""
@@ -551,13 +912,24 @@ Item {
                             SelectableText {
                               width: parent.width
                               visible: text !== ""
-                              text: String(modelData.text || "")
+                              // Escaped first, then links added - so a message
+                              // can never choose its own markup. Lines without
+                              // a link stay plain text, which is cheaper and
+                              // cannot be got wrong at all.
+                              readonly property bool linked: Model.hasLink(modelData.text)
+                              text: linked ? Model.linkify(modelData.text)
+                                           : String(modelData.text || "")
+                              onLinkActivated: function(url) { service.openUrl(url) }
+                              HoverHandler {
+                                enabled: parent.hoveredLink !== ""
+                                cursorShape: Qt.PointingHandCursor
+                              }
                               // Rendered as text, always. A Teams message is
                               // HTML written by whoever sent it, and rich text
                               // fetches what it is told to fetch. The emoji
                               // survive because teams.py turns each <emoji>
                               // tag into the character its alt already holds.
-                              textFormat: TextEdit.PlainText
+                              textFormat: linked ? TextEdit.RichText : TextEdit.PlainText
                               color: Color.foreground
                               font.family: Style.font.family
                               font.pixelSize: Style.font.bodySmall
@@ -575,6 +947,7 @@ Item {
                                 account: service.alias
                                 pluginDir: root.pluginDir
                                 maxWidth: Math.min(Style.space(320), columns.readerWidth - Style.spacing.xxl)
+                                onViewRequested: function(path) { root.viewImage(path) }
                               }
                             }
                           }

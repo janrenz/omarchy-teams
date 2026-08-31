@@ -41,6 +41,9 @@ Item {
   readonly property bool signedIn: view.ok === true
   readonly property bool needsSignIn: view.errorCode === "auth_required"
   readonly property bool hasChannels: view.channels === true
+  // Marking a chat read is a write, and needs Chat.ReadWrite. A sign-in from
+  // before that was asked for keeps working; it just cannot clear the dot.
+  readonly property bool canMarkRead: view.canMarkRead === true
   readonly property int unreadCount: view.unreadCount || 0
   readonly property var conversations: Model.conversationRows(
     view, expandedTeams, teamChannels, loadingTeamId)
@@ -203,6 +206,142 @@ Item {
     if (setting("demo", false) === true) command.push("--demo")
     messageProc.command = command
     messageProc.running = true
+
+    // Opening a chat is reading it. Only for chats - a channel has no read
+    // state Graph will tell us about - and only when it was actually unread,
+    // so this is not a write on every click.
+    if (row.kind === "chat" && row.unread === true) markRead(row.id)
+  }
+
+  // ---- starting a chat --------------------------------------------------
+
+  readonly property bool canStartChat: view.canStartChat === true
+
+  property string peopleQuery: ""
+  property var peopleResults: []
+  property bool peopleSearching: false
+  property string peopleError: ""
+  property bool startingChat: false
+  property string startChatError: ""
+  // The chat just created, so the window can open it once the list catches up.
+  property string pendingChatId: ""
+
+  function searchPeople(query) {
+    var text = String(query || "").trim()
+    peopleQuery = text
+    peopleError = ""
+    if (text.length < 2) { peopleResults = []; return }
+    if (peopleProc.running || pluginDir === "") return
+    peopleSearching = true
+    var command = ["python3", helper(), "people", "--account", alias, "--query", text]
+    if (setting("demo", false) === true) command.push("--demo")
+    peopleProc.command = command
+    peopleProc.running = true
+  }
+
+  function clearPeople() {
+    peopleQuery = ""
+    peopleResults = []
+    peopleError = ""
+    startChatError = ""
+  }
+
+  Process {
+    id: peopleProc
+    running: false
+    stdout: StdioCollector { id: peopleOut; waitForEnd: true }
+    stderr: StdioCollector { id: peopleErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.peopleSearching = false
+      var parsed = Model.parseJson(peopleOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.peopleError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(peopleErrOut.text || "Could not search for people", 160)
+        root.peopleResults = []
+        return
+      }
+      root.peopleError = ""
+      root.peopleResults = parsed.people || []
+    }
+  }
+
+  function startChat(userIds, topic) {
+    var ids = userIds || []
+    if (ids.length === 0 || startingChat || pluginDir === "") return
+    startingChat = true
+    startChatError = ""
+    var command = ["python3", helper(), "new-chat", "--account", alias]
+    for (var i = 0; i < ids.length; i++) command = command.concat(["--user", String(ids[i])])
+    if (String(topic || "").trim() !== "") command = command.concat(["--topic", String(topic).trim()])
+    newChatProc.command = command
+    newChatProc.running = true
+  }
+
+  Process {
+    id: newChatProc
+    running: false
+    stdout: StdioCollector { id: newChatOut; waitForEnd: true }
+    stderr: StdioCollector { id: newChatErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.startingChat = false
+      var parsed = Model.parseJson(newChatOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.startChatError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(newChatErrOut.text || "Could not start that chat", 160)
+        return
+      }
+      // Graph hands back the existing one-to-one rather than making a second,
+      // so starting a chat with someone you already talk to reopens it.
+      root.pendingChatId = String(parsed.id || "")
+      root.clearPeople()
+      root.refresh()
+    }
+  }
+
+  // Once the refreshed list contains the new chat, open it.
+  onConversationsChanged: {
+    if (pendingChatId === "") return
+    var rows = conversations
+    for (var i = 0; i < rows.length; i++) {
+      if (rows[i].kind === "chat" && String(rows[i].id) === pendingChatId) {
+        var row = rows[i]
+        pendingChatId = ""
+        openChat(row)
+        return
+      }
+    }
+  }
+
+  // ---- marking read -----------------------------------------------------
+
+  property string markReadError: ""
+
+  function markRead(chatId) {
+    var id = String(chatId || "")
+    if (id === "" || !canMarkRead || markReadProc.running || pluginDir === "") return
+    if (setting("demo", false) === true) return
+    markReadProc.command = ["python3", helper(), "mark-read", "--account", alias, "--chat", id]
+    markReadProc.running = true
+  }
+
+  Process {
+    id: markReadProc
+    running: false
+    stdout: StdioCollector { id: markReadOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = Model.parseJson(markReadOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.markReadError = parsed && parsed.error
+          ? String(parsed.error.message) : "Could not mark this chat read"
+        return
+      }
+      root.markReadError = ""
+      // The dot lives in the chat list, which this has just changed on the
+      // server; re-read it so the list agrees with what was done.
+      root.refresh()
+    }
   }
 
   function closeConversation() {

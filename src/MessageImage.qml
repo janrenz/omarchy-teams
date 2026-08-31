@@ -30,6 +30,11 @@ Item {
   readonly property real drawWidth: Math.min(maxWidth, parent ? parent.width : maxWidth)
   readonly property real drawHeight: Math.min(maxHeight, drawWidth * ratio)
 
+  // Asking the window to show it full size, rather than opening it here: a
+  // viewer inside the window can be closed with Escape, and one handed to
+  // xdg-open cannot.
+  signal viewRequested(string path)
+
   property string path: ""
   property string problem: ""
   property bool loading: false
@@ -110,9 +115,8 @@ Item {
       anchors.fill: parent
       enabled: root.path !== ""
       cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-      // The pane shows a thumbnail; the whole picture opens where pictures
-      // open on this machine.
-      onClicked: Quickshell.execDetached(["xdg-open", root.path])
+      // The pane shows a thumbnail; the whole picture opens over the window.
+      onClicked: root.viewRequested(root.path)
     }
   }
 }

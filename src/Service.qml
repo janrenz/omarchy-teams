@@ -185,9 +185,14 @@ Item {
     onTriggered: root.refresh()
   }
 
-  onConfiguredChanged: if (configured) { resumeLogin(); refresh() }
-  onPluginDirChanged: if (configured) { resumeLogin(); refresh() }
-  onSettingsChanged: if (configured) { resumeLogin(); refresh() }
+  onConfiguredChanged: if (configured) refresh()
+  onPluginDirChanged: if (configured) refresh()
+  onSettingsChanged: if (configured) refresh()
+
+  // After the first fetch has said so, not before it: whether a sign-in is
+  // worth resuming depends on whether we are signed in, and only the fetch
+  // knows that.
+  onNeedsSignInChanged: if (needsSignIn) resumeLogin()
 
   // ---- one conversation -------------------------------------------------
 
@@ -444,6 +449,11 @@ Item {
 
   function resumeLogin() {
     if (resumeChecked || !configured || pluginDir === "" || loggingIn) return
+    // Only when there is nothing to resume into. A pending file outlives a
+    // sign-in that succeeded by another route - a second window, a re-consent
+    // finished elsewhere - and picking that up put a "still waiting, enter
+    // this code" prompt over a mailbox that was already signed in.
+    if (signedIn) return
     resumeChecked = true
     resumeProc.command = ["python3", helper(), "login-status", "--account", alias]
     resumeProc.running = true

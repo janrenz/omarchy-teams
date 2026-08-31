@@ -102,7 +102,13 @@ function accountView(snapshot, alias) {
       username: data.username || "",
       displayName: data.displayName || "",
       userId: data.userId || "",
+      // Every capability the helper reports has to be carried across here.
+      // Missing one does not fail loudly: the flag reads undefined, which is
+      // falsey, so the feature quietly stays switched off and the button
+      // offering to enable it stays switched on for ever.
       channels: data.channels === true,
+      canMarkRead: data.canMarkRead === true,
+      canStartChat: data.canStartChat === true,
       chats: data.chats || [],
       teams: data.teams || [],
       unreadCount: Number(data.unreadCount || 0),
@@ -113,7 +119,8 @@ function accountView(snapshot, alias) {
   }
   return {
     alias: String(alias || ""), ok: false, loaded: false, username: "", displayName: "",
-    userId: "", channels: false, chats: [], teams: [], unreadCount: 0,
+    userId: "", channels: false, canMarkRead: false, canStartChat: false,
+    chats: [], teams: [], unreadCount: 0,
     errorCode: "", errorMessage: "", warnings: []
   }
 }

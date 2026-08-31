@@ -354,6 +354,15 @@ def cmd_login_status(args):
     pending = read_json(state_path(args.account, "pending"))
     if not pending:
         out({"ok": True, "pending": False})
+    # A sign-in that finished by some other route leaves this behind. Reporting
+    # it as in-flight would put a "still waiting for this code" prompt over an
+    # account that is already signed in, so it is cleared instead.
+    if read_json(state_path(args.account)):
+        try:
+            os.remove(state_path(args.account, "pending"))
+        except OSError:
+            pass
+        out({"ok": True, "pending": False, "superseded": True})
     remaining = int(pending.get("expires_at", 0) - time.time())
     if remaining <= 0:
         out({"ok": True, "pending": False, "expired": True})

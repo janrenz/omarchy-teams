@@ -71,6 +71,34 @@ test("a failed account carries its reason", () => {
   eq(view.errorCode, "auth_required")
 })
 
+test("every field the helper reports survives into the view", () => {
+  // This is a cross-check against teams.py rather than a list kept by hand,
+  // because the failure it guards is silent: a capability the helper reports
+  // and the view drops reads as undefined, which is falsey, so the feature
+  // switches itself off and the button offering to turn it on never goes away.
+  // That shipped once - canMarkRead and canStartChat were both dropped here.
+  const helper = fs.readFileSync(path.join(__dirname, "..", "src", "teams.py"), "utf8")
+  const block = helper.slice(helper.indexOf("    result = {"), helper.indexOf('        "warnings": [],'))
+  const keys = [...block.matchAll(/^\s*"([a-zA-Z]+)":/gm)].map((m) => m[1])
+  ok(keys.length > 5, "did not find the result keys in teams.py: " + keys)
+
+  const rich = {}
+  for (const key of keys) rich[key] = true
+  rich.alias = "work"
+  const view = Model.accountView(snapshot([rich]), "work")
+
+  // "ok" is the request's outcome, not a field of the account.
+  const carried = keys.filter((k) => k !== "ok")
+  const missing = carried.filter((k) => view[k] === undefined)
+  eq(missing, [], "teams.py reports these but accountView drops them")
+})
+
+test("the capability flags default to false, never undefined", () => {
+  const view = Model.accountView(snapshot([]), "work")
+  for (const key of ["channels", "canMarkRead", "canStartChat"])
+    eq(view[key], false, key + " should be false when nothing has been fetched")
+})
+
 test("another account's data is not this one's", () => {
   const view = Model.accountView(snapshot([{ alias: "other", ok: true, unreadCount: 9 }]), "work")
   eq(view.unreadCount, 0)

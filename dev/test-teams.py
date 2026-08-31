@@ -253,6 +253,54 @@ class MarkRead(unittest.TestCase):
         self.assertEqual(result["error"]["code"], "mark_read_permission_required")
 
 
+class PendingSignIn(unittest.TestCase):
+    """A sign-in left in flight, and one that was overtaken."""
+
+    def run_status(self, pending, account=None):
+        import types
+        args = types.SimpleNamespace(account="work")
+
+        def read_json(path, default=None):
+            return pending if path.endswith(".pending.json") else account
+
+        removed = []
+        original = (teams.read_json, teams.os.remove)
+        teams.read_json = read_json
+        teams.os.remove = lambda path: removed.append(path)
+        try:
+            return capture(teams.cmd_login_status, args), removed
+        finally:
+            teams.read_json, teams.os.remove = original
+
+    def test_nothing_in_flight_is_reported_as_nothing(self):
+        result, _ = self.run_status(None)
+        self.assertFalse(result["pending"])
+
+    def test_one_in_flight_hands_back_the_code_to_show(self):
+        # What makes resuming possible at all: Microsoft gives the user code
+        # once, so it has to have been kept.
+        result, _ = self.run_status(
+            {"expires_at": teams.time.time() + 600, "user_code": "ABC-123",
+             "verification_uri": "https://microsoft.com/devicelogin"})
+        self.assertTrue(result["pending"])
+        self.assertEqual(result["userCode"], "ABC-123")
+
+    def test_an_expired_one_is_not_in_flight(self):
+        result, _ = self.run_status({"expires_at": teams.time.time() - 1, "user_code": "OLD"})
+        self.assertFalse(result["pending"])
+
+    def test_one_overtaken_by_a_sign_in_elsewhere_is_cleared(self):
+        # This shipped: a pending file outlived a sign-in finished by another
+        # route, and the window put "still waiting, enter this code" over a
+        # mailbox that was already signed in.
+        result, removed = self.run_status(
+            {"expires_at": teams.time.time() + 600, "user_code": "STALE"},
+            account={"refresh_token": "r", "scopes": "Chat.ReadWrite"})
+        self.assertFalse(result["pending"])
+        self.assertTrue(result.get("superseded"))
+        self.assertEqual(len(removed), 1, "the stale pending file should have been removed")
+
+
 class ChatTitles(unittest.TestCase):
     def test_a_topic_wins(self):
         self.assertEqual(teams.chat_title({"topic": "Platform team", "members": []}, "me"),

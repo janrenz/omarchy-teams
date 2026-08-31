@@ -337,11 +337,21 @@ Item {
             spacing: Style.spacing.xxl
             visible: service.signedIn && !service.loggingIn
 
-            readonly property bool showSidebar: width >= Style.space(560)
-            readonly property real sidebarWidth: showSidebar
-              ? Math.max(Style.space(200), Math.min(Style.space(320), width * 0.28)) : 0
-            readonly property real readerWidth: width
-              - (showSidebar ? sidebarWidth + spacing * 2 + Style.space(1) : 0)
+            // A tiling compositor hands this window whatever the layout has
+            // left - 672px here - and Style.space() scales with the font, so a
+            // fixed "is there room for two columns" threshold is easily missed.
+            // When there is not room for both, show the one that is any use:
+            // the list until a conversation is picked, the transcript after.
+            // Escape goes back. Hiding the list and leaving an empty reader,
+            // which is what this did, left nothing to click at all.
+            readonly property bool roomForBoth: width >= Style.space(560)
+            readonly property bool showSidebar: roomForBoth || !service.reading
+            readonly property bool showReader: roomForBoth || service.reading
+            readonly property real sidebarWidth: !showSidebar ? 0
+              : (roomForBoth ? Math.max(Style.space(200), Math.min(Style.space(320), width * 0.28))
+                             : width)
+            readonly property real readerWidth: !showReader ? 0
+              : (roomForBoth ? width - sidebarWidth - spacing * 2 - Style.space(1) : width)
 
             ScrollView {
               width: columns.sidebarWidth
@@ -364,20 +374,21 @@ Item {
             Rectangle {
               width: Style.space(1)
               height: columns.height
-              visible: columns.showSidebar
+              visible: columns.roomForBoth
               color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
             }
 
             Item {
               width: columns.readerWidth
               height: columns.height
+              visible: columns.showReader
 
               Text {
                 anchors.centerIn: parent
                 width: parent.width - Style.spacing.xxl
                 horizontalAlignment: Text.AlignHCenter
                 wrapMode: Text.WordWrap
-                visible: !service.reading
+                visible: columns.roomForBoth && !service.reading
                 text: service.conversations.length === 0
                   ? "Nothing here yet" : "Pick a conversation"
                 textFormat: Text.PlainText

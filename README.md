@@ -16,6 +16,33 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 
 Python 3 standard library only. It talks to Microsoft Graph and nothing else. No token ever reaches the QML: `src/teams.py` holds them, and the shell reads JSON from it.
 
+## Installing
+
+```
+omarchy plugin add https://github.com/janrenz/omarchy-teams.git --enable
+omarchy bar set janrenz.omarchy.teams clientId <your-application-client-id>
+```
+
+The client id is not optional, and no default could stand in for it: the sign-in goes against an app registration of yours, described below. Reload the shell afterwards and the icon is in the bar.
+
+Nothing outside the plugin's own directory is written on install, and no configuration of yours is overwritten — the settings live in the widget's own entry in `~/.config/omarchy/shell.json`, alongside whatever else is already in there.
+
+## Removing
+
+```
+omarchy plugin remove janrenz.omarchy.teams
+```
+
+That takes the plugin off the disk. Three things of yours live outside it and are deliberately left behind — delete them yourself if you want them gone:
+
+| Path | What is in it |
+|---|---|
+| `~/.config/omarchy/shell.json` | Your settings, in the widget's entry. |
+| `~/.local/state/omarchy/teams/` | The tokens. Delete this to sign out. |
+| `~/.cache/omarchy/teams/images/` | Images already fetched from Graph. |
+
+The app registration in Azure is yours and is untouched either way; delete it in the portal if you are done with it.
+
 ## Keyboard
 
 Press `?` in the window for this same list. Omarchy is keyboard-first, so the
@@ -163,3 +190,7 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 | `demoOpen` | The id of a conversation to open by itself once the list loads, e.g. `demo-chat-0`. There is no key that opens a conversation — only a click, which an automated run cannot aim at a row whose position depends on the theme's font size. |
 
 `SHOWCASE_WIDTH` and `SHOWCASE_HEIGHT` override the window size it photographs (1080×720 by default).
+
+## License
+
+MIT — see [LICENSE](LICENSE). The only dependency is Python 3 from the standard library; nothing is vendored and nothing is installed with pip.

@@ -425,6 +425,28 @@ class SavingSettings(unittest.TestCase):
             self.config.out = original
 
 
+class FriendlyErrors(unittest.TestCase):
+    """Graph answers some refusals with a code and no sentence."""
+
+    def test_a_bare_code_becomes_a_sentence(self):
+        # This is what a real refusal looked like on screen: "AclCheckFailed",
+        # which tells the reader nothing they can do anything about.
+        self.assertIn("does not allow", teams.friendly("AclCheckFailed"))
+
+    def test_a_code_inside_a_longer_message_is_still_recognised(self):
+        said = teams.friendly("Failed with AclCheckFailed for the request")
+        self.assertIn("does not allow", said)
+        # ...and the original is kept, because it is what to search for.
+        self.assertIn("AclCheckFailed", said)
+
+    def test_a_message_that_is_already_a_sentence_is_left_alone(self):
+        self.assertEqual(teams.friendly("The mailbox is full."), "The mailbox is full.")
+
+    def test_nothing_still_says_something(self):
+        self.assertEqual(teams.friendly(""), "Something went wrong")
+        self.assertEqual(teams.friendly(None), "Something went wrong")
+
+
 class Aliases(unittest.TestCase):
     """An account name becomes a filename, so it is checked."""
 

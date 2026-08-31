@@ -797,6 +797,28 @@ def cmd_image(args):
     out({"ok": True, "path": path, "cached": False, "bytes": len(body), "contentType": content_type})
 
 
+# Graph answers some refusals with an internal code and no sentence. Passing
+# that straight to the user tells them nothing they can act on.
+GRAPH_PLAIN_ENGLISH = {
+    "aclcheckfailed": "Your organisation does not allow starting a chat with that person.",
+    "authorization_requestdenied": "This sign-in is not allowed to do that.",
+    "unauthenticated": "That sign-in has expired - sign in again.",
+    "requestthrottled": "Microsoft is rate-limiting this account; try again shortly.",
+}
+
+
+def friendly(message):
+    """Graph's message, or a sentence when all it gave was a code."""
+    text = str(message or "").strip()
+    known = GRAPH_PLAIN_ENGLISH.get(text.lower())
+    if known:
+        return known
+    for code, sentence in GRAPH_PLAIN_ENGLISH.items():
+        if code in text.lower().replace(" ", ""):
+            return sentence + "  (" + text + ")"
+    return text or "Something went wrong"
+
+
 def person_row(person, kind):
     """One searchable person, however Graph happened to describe them."""
     address = ""
@@ -848,8 +870,11 @@ def cmd_people(args):
 
     found = []
     seen = set()
+    problems = []
 
     status, payload = graph_get(token, "/me/people", {"$search": query, "$top": "15"})
+    if status != 200:
+        problems.append(graph_error(payload, "Could not search the people you talk to"))
     if status == 200:
         for person in payload.get("value", []):
             # Rooms, groups and the like are not people you can open a chat
@@ -868,6 +893,8 @@ def cmd_people(args):
              "$top": "15", "$select": "id,displayName,mail,userPrincipalName,jobTitle"},
             {"ConsistencyLevel": "eventual"},
         )
+        if status != 200:
+            problems.append(graph_error(payload, "Could not search the directory"))
         if status == 200:
             for person in payload.get("value", []):
                 row = person_row(person, "directory")
@@ -875,6 +902,10 @@ def cmd_people(args):
                     seen.add(row["id"])
                     found.append(row)
 
+    # Nothing found because nothing matched is a different thing from nothing
+    # found because both searches were refused, and they looked identical.
+    if not found and problems:
+        fail("people_search_failed", friendly(problems[0]))
     out({"ok": True, "people": found[:20]})
 
 
@@ -935,7 +966,7 @@ def cmd_new_chat(args):
         fail("create_permission_required",
              graph_error(payload, "This sign-in cannot start chats. Sign in again to allow it."))
     if status not in (200, 201):
-        fail("create_failed", graph_error(payload, "Could not start that chat"))
+        fail("create_failed", friendly(graph_error(payload, "Could not start that chat")))
     out({"ok": True, "id": (payload or {}).get("id", ""), "chatType": (payload or {}).get("chatType", "")})
 
 

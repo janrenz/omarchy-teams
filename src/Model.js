@@ -34,7 +34,10 @@ function plainText(value) {
 // hand-picked pixel values: the theme already decides what "a gap" is, and
 // this says how generous to be with it. Sizes still scale with the font that
 // way, which hand-picked numbers would stop doing.
-var DENSITY = { compact: 0.7, cosy: 1.0, roomy: 1.4, spacious: 1.8 }
+// The range is wide because the tokens it multiplies are small. The shell's
+// spacing steps are 2, 4, 6, 8px; 1.4 times 4px is one pixel of difference,
+// which is what the first attempt at this shipped and what nobody could see.
+var DENSITY = { compact: 0.6, cosy: 1.0, roomy: 1.7, spacious: 2.4 }
 
 function densityScale(name) {
   var found = DENSITY[String(name || "").toLowerCase()]

@@ -19,6 +19,15 @@ Column {
   // How generously to space the rows. 1.0 is the theme's own spacing.
   property real density: 1.0
 
+  // Properties, not a pad() call inside each binding. A binding that reaches
+  // its dependency through a function call does not reliably re-run when that
+  // dependency changes - which is exactly what happened here: the numbers
+  // changed and the rows did not move.
+  readonly property int rowGap: Math.max(1, Math.round(Style.spacing.sm * density))
+  readonly property int rowPadding: Math.max(1, Math.round(Style.spacing.md * density))
+  // Not scaled: a wider left margin on every row just narrows the names.
+  readonly property int rowIndent: Style.spacing.md
+
   function pad(px) { return Math.max(1, Math.round(px * density)) }
 
   signal picked(var row)
@@ -26,7 +35,7 @@ Column {
   // screen. The list cannot scroll itself: it does not know it is in one.
   signal cursorMoved(real itemY, real itemHeight)
 
-  spacing: pad(Style.spacing.xxs)
+  spacing: rowGap
 
   readonly property var selectable: Model.selectableRows(rows)
 
@@ -61,7 +70,10 @@ Column {
       onCursoredChanged: if (cursored) root.cursorMoved(y, height)
 
       width: parent ? parent.width : 0
-      implicitHeight: body.implicitHeight + root.pad(Style.spacing.sm) * 2
+      // The row's own padding, top and bottom, is what "spacing" is judged by.
+      // It comes off md rather than sm because a multiplier over 4px cannot
+      // produce a difference anybody can see.
+      implicitHeight: body.implicitHeight + root.rowPadding * 2
       radius: Style.space(5)
       color: {
         if (inert) return "transparent"
@@ -117,9 +129,12 @@ Column {
       Column {
         id: body
         anchors.left: parent.left
-        anchors.right: parent.right
+        // Stops where the timestamp starts. Without this the title is free to
+        // be as wide as it likes, elide does nothing, and a long name runs
+        // straight under the time - which it did, at compact spacing.
+        anchors.right: stamp.visible ? stamp.left : parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: root.pad(Style.spacing.md) + Style.space(10)
+        anchors.leftMargin: root.rowIndent + Style.space(10)
                             + Style.space(12) * line.modelData.depth
         anchors.rightMargin: Style.spacing.md
         spacing: Style.spacing.xxs
@@ -151,10 +166,11 @@ Column {
       }
 
       Text {
+        id: stamp
         anchors.right: parent.right
         anchors.rightMargin: Style.spacing.md
         anchors.top: parent.top
-        anchors.topMargin: Style.spacing.sm
+        anchors.topMargin: root.rowPadding
         visible: !line.inert && String(line.modelData.when || "") !== ""
         text: Model.whenLabel(line.modelData.when, new Date())
         textFormat: Text.PlainText

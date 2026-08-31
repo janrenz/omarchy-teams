@@ -8,13 +8,58 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
 - **Starting a chat** with anybody in the directory, and **marking a chat read** by opening it.
 - **Emoji, inline images and clickable links** in the transcript.
-- **Keyboard throughout.** `j`/`k` and the arrows move, `Enter` opens, `Tab` reaches the message box, `Page`/`Home`/`End` and `Ctrl-d`/`u`/`f`/`b` scroll, `u` filters to unread, `r` reloads, `,` opens settings, `Escape` goes back one layer at a time.
+- **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
 
 ![The conversation list, and a chat open beside it](showcase-conversation.png)
 
 ![The conversation list](showcase-conversations.png)
 
 Python 3 standard library only. It talks to Microsoft Graph and nothing else. No token ever reaches the QML: `src/teams.py` holds them, and the shell reads JSON from it.
+
+## Keyboard
+
+Press `?` in the window for this same list. Omarchy is keyboard-first, so the
+window is a focus ladder rather than a bag of shortcuts: **list → conversation
+→ message box**. `h` and `l` step between the rungs, `Escape` walks back out
+one rung at a time, and `j`/`k` always mean "down and up in whatever has
+focus".
+
+### Moving
+
+| Key | What it does |
+|---|---|
+| `j` / `k`, `↓` / `↑` | Down and up in whatever has focus — the list's cursor, or the transcript |
+| `Enter` | Open the conversation under the cursor, and move focus into it |
+| `h` / `←` | Back to the list, **leaving the conversation open**. Narrow windows slide the list out over it |
+| `l` / `→` | Into the conversation; again into the message box |
+| `Tab` or `i` | Straight to the message box |
+| `Escape` | Back one step: message box → conversation → list → close the conversation → close the window |
+
+Escape never skips a rung. Going back to the list does not close what you were
+reading, which is the step that used to be missing.
+
+### Scrolling
+
+| Key | What it does |
+|---|---|
+| `Page Up` / `Page Down` | A screenful of whatever has focus |
+| `Ctrl-u` / `Ctrl-d` | Half a screen |
+| `Ctrl-b` / `Ctrl-f` | A screen |
+| `g` / `G` | To the top / to the newest |
+| `Home` / `End` | The same as `g` / `G` |
+
+### Doing
+
+| Key | What it does |
+|---|---|
+| `Shift+Enter` or `Ctrl+Enter` | Send. Plain `Enter` is a newline |
+| `u` | Show only unread conversations |
+| `n` | Start a new chat |
+| `r` | Reload the open conversation |
+| `,` | Settings |
+| `?` | This list |
+
+Opening the window itself is `SUPER+G`, or *Teams* in the Omarchy menu.
 
 ## You need your own Azure app registration
 

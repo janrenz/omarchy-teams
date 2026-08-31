@@ -97,8 +97,55 @@ Item {
   }
 
   // ---- keyboard -----------------------------------------------------------
-  property string pane: "list"
-  readonly property bool typing: service.reading
+  //
+  // Omarchy is keyboard-first, so this is a focus ladder rather than a handful
+  // of shortcuts: list -> conversation -> message box, with h and l moving
+  // between them and Escape walking back out one rung at a time. j and k
+  // always mean "down and up in whatever has focus", which is the thing that
+  // was missing - they used to drive the list even while you were reading.
+  //
+  // "list" or "conversation". The message box is a real focus, so it is asked
+  // rather than tracked.
+  property string focusPane: "list"
+  property bool showHelp: false
+
+  readonly property bool typing: composer.activeFocus
+
+  // The list that is actually on screen: narrow, that is the drawer's copy.
+  function activeList() {
+    return listDrawerOpen ? drawerList : conversations
+  }
+
+  function focusList() {
+    focusPane = "list"
+    // Narrow, the list is not on screen at all - bringing it out is what
+    // "go back to the list" has to mean there.
+    if (!columns.roomForBoth && service.reading) listDrawerOpen = true
+    keyCatcher.forceActiveFocus()
+  }
+
+  function focusConversation() {
+    if (!service.reading) return
+    focusPane = "conversation"
+    listDrawerOpen = false
+    keyCatcher.forceActiveFocus()
+  }
+
+  // One line of the transcript, near enough, for j and k while reading.
+  readonly property int lineStep: Math.max(Style.space(18), Style.font.bodySmall * 2)
+
+  // Spacing, as properties rather than service.pad() calls inside each
+  // binding: a binding that reaches its dependency through a function call
+  // does not reliably re-run when that dependency changes.
+  readonly property real densityScale: service.densityScale
+  // Vertical only. Spacing is about how much air there is between things you
+  // read down a list; widening the left and right margins just takes width
+  // away from the words, which is the opposite of roomy.
+  readonly property int padPanel: Math.max(1, Math.round(Style.spacing.panelPadding * densityScale))
+  readonly property int padGap: Math.max(1, Math.round(Style.spacing.panelGap * densityScale))
+  readonly property int padMessages: Math.max(1, Math.round(Style.spacing.lg * densityScale))
+  readonly property int padLines: Math.max(1, Math.round(Style.spacing.xs * densityScale))
+  readonly property int padReading: Math.max(1, Math.round(Style.spacing.md * densityScale))
 
   property bool showSettings: false
   property bool composingNew: false
@@ -128,10 +175,16 @@ Item {
   // Escape unwinds one layer at a time, innermost first. A picture is not in
   // this list: it opens in its own window, so closing that closes the picture
   // and leaves Teams alone.
+  // Escape walks back out one rung at a time, and never further than one.
   function dismiss() {
+    if (showHelp) { showHelp = false; return }
     if (composingNew) { closeNewChat(); return }
     if (showSettings) { showSettings = false; return }
-    if (listDrawerOpen) { listDrawerOpen = false; return }
+    if (composer.activeFocus) { leaveComposer(); return }
+    if (listDrawerOpen) { listDrawerOpen = false; focusPane = "list"; return }
+    // Back to the list with the conversation still open, which is the step
+    // that was missing: Escape used to close the conversation outright.
+    if (focusPane === "conversation") { focusPane = "list"; return }
     if (service.reading) { service.closeConversation(); return }
     requestClose()
   }
@@ -150,7 +203,8 @@ Item {
   // open, otherwise the list. Whichever one the reader is looking at is the
   // one they mean, and it is the one the cursor is in.
   function scrollTarget() {
-    if (service.reading && transcript.visible) return transcript
+    if (listDrawerOpen) return drawerScroll
+    if (focusPane === "conversation" && service.reading && transcript.visible) return transcript
     return sidebarScroll.visible ? sidebarScroll : null
   }
 
@@ -188,6 +242,7 @@ Item {
   // key catcher is stood down while the composer has focus - it claims bare
   // letters - so this is the only way back to the keyboard without the mouse.
   function leaveComposer() {
+    focusPane = "conversation"
     keyCatcher.forceActiveFocus()
   }
 
@@ -292,6 +347,7 @@ Item {
               clip: true
 
               ConversationList {
+                id: drawerList
                 width: drawerPanel.width - Style.spacing.md * 2
                 density: service.densityScale
                 rows: service.conversations
@@ -303,9 +359,30 @@ Item {
                   if (row.kind === "team") { service.toggleTeam(row.id); return }
                   service.openChat(row)
                   root.listDrawerOpen = false
+                  if (service.reading) root.focusPane = "conversation"
                 }
               }
             }
+          }
+        }
+      }
+
+      // The keyboard, listed. Over everything, because ? works from anywhere.
+      Item {
+        anchors.fill: parent
+        visible: root.showHelp
+        z: 110
+
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.97)
+
+          MouseArea { anchors.fill: parent; onClicked: root.showHelp = false }
+
+          KeyHelp {
+            anchors.centerIn: parent
+            fg: Color.foreground
+            fontFamily: Style.font.family
           }
         }
       }
@@ -484,29 +561,48 @@ Item {
         blocked: composer.activeFocus || codeField.activeFocus
                  || peopleField.activeFocus || root.composingNew
         onMoveRequested: function(dx, dy) {
-          if (dy !== 0) conversations.moveCursor(dy)
-          else if (dx > 0) root.focusComposer()
-          // Left is "back towards the list". Where the list is not on screen,
-          // that means bringing it out rather than doing nothing.
-          else if (dx < 0 && !columns.roomForBoth && service.reading)
-            root.listDrawerOpen = true
+          if (dy !== 0) {
+            // Down and up in whatever has focus - the list's cursor, or the
+            // transcript itself.
+            if (root.focusPane === "list" || root.listDrawerOpen) root.activeList().moveCursor(dy)
+            else root.scrollBy(transcript, dy * root.lineStep)
+            return
+          }
+          // Left steps back towards the list, right steps in towards the
+          // message box, one rung per press.
+          if (dx < 0) {
+            if (root.focusPane === "conversation") root.focusList()
+          } else if (dx > 0) {
+            if (root.focusPane === "list") root.focusConversation()
+            else root.focusComposer()
+          }
         }
-        onActivateRequested: conversations.activateCursor()
+        onActivateRequested: root.activeList().activateCursor()
         onCloseRequested: root.dismiss()
         // Tab is how most people expect to reach the box they type in; l and
         // the right arrow already do it, but only for those who knew.
         onTabRequested: root.focusComposer()
         onTextKey: function(text) {
+          var view = root.scrollTarget()
           if (text === "r") service.reloadConversation()
           else if (text === "u") service.unreadOnly = !service.unreadOnly
           // The comma is what most applications use for preferences.
           else if (text === ",") root.showSettings = !root.showSettings
+          else if (text === "?") root.showHelp = !root.showHelp
+          // Where the hands already are, for the box you type in.
+          else if (text === "i") root.focusComposer()
+          else if (text === "n" && service.canStartChat) root.openNewChat()
+          else if (text === "g") root.scrollToEnd(view, false)
+          else if (text === "G") root.scrollToEnd(view, true)
         }
 
         Column {
           anchors.fill: parent
-          anchors.margins: service.pad(Style.spacing.panelPadding)
-          spacing: service.pad(Style.spacing.panelGap)
+          anchors.leftMargin: Style.spacing.panelPadding
+          anchors.rightMargin: Style.spacing.panelPadding
+          anchors.topMargin: root.padPanel
+          anchors.bottomMargin: root.padPanel
+          spacing: root.padGap
 
           // ---------------- header ----------------
           Item {
@@ -608,6 +704,17 @@ Item {
               // Last in the row and glyph-only, the way the mail plugin's is:
               // it is the way out of the window's normal business rather than
               // part of it.
+              Button {
+                visible: service.signedIn && !root.showSettings
+                text: "?"
+                tooltipText: "What the keyboard does"
+                bordered: true
+                foreground: Qt.darker(Color.foreground, 1.4)
+                fontFamily: Style.font.family
+                fontSize: Style.font.caption
+                onClicked: root.showHelp = !root.showHelp
+              }
+
               PanelActionButton {
                 // Braces matter: \u takes exactly four hex digits, so "\uF0493"
                 // is U+F049 followed by a literal "3" - which drew the wrong
@@ -812,7 +919,7 @@ Item {
             id: columns
             width: parent.width
             height: parent.height - y
-            spacing: service.pad(Style.spacing.xxl)
+            spacing: Style.spacing.xxl
             // Drawn during the first fetch too, so the placeholder rows below
             // stand where the real ones will be. Before this the window was
             // simply blank for the length of the fetch, which read as broken.
@@ -869,9 +976,10 @@ Item {
                 onPicked: function(row) {
                   if (row.kind === "team") { service.toggleTeam(row.id); return }
                   service.openChat(row)
-                  // Picking from the drawer is the end of what the drawer is
-                  // for; leaving it up would cover the thing just opened.
+                  // Opening something is a step inwards: the keys should now be
+                  // driving what was opened, not the list behind it.
                   root.listDrawerOpen = false
+                  if (service.reading) root.focusPane = "conversation"
                 }
               }
             }
@@ -904,7 +1012,7 @@ Item {
 
               Column {
                 anchors.fill: parent
-                spacing: service.pad(Style.spacing.md)
+                spacing: root.padReading
                 visible: service.reading
 
                 Text {
@@ -968,7 +1076,7 @@ Item {
 
                   Column {
                     width: transcript.width
-                    spacing: service.pad(Style.spacing.lg)
+                    spacing: root.padMessages
                     onHeightChanged: if (transcript.followNewest) transcript.toNewest()
 
                     Repeater {
@@ -1001,7 +1109,7 @@ Item {
                           delegate: Column {
                             required property var modelData
                             width: parent ? parent.width : 0
-                            spacing: service.pad(Style.spacing.xs)
+                            spacing: root.padLines
 
                             SelectableText {
                               width: parent.width

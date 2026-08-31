@@ -8,7 +8,11 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
 - **Starting a chat** with anybody in the directory, and **marking a chat read** by opening it.
 - **Emoji, inline images and clickable links** in the transcript.
-- **Keyboard throughout.** `j`/`k` and the arrows move, `Enter` opens, `Tab` reaches the message box, `Page`/`Home`/`End` and `Ctrl-d`/`u`/`f`/`b` scroll, `Escape` goes back one layer at a time.
+- **Keyboard throughout.** `j`/`k` and the arrows move, `Enter` opens, `Tab` reaches the message box, `Page`/`Home`/`End` and `Ctrl-d`/`u`/`f`/`b` scroll, `u` filters to unread, `r` reloads, `,` opens settings, `Escape` goes back one layer at a time.
+
+![The conversation list, and a chat open beside it](showcase-conversation.png)
+
+![The conversation list](showcase-conversations.png)
 
 Python 3 standard library only. It talks to Microsoft Graph and nothing else. No token ever reaches the QML: `src/teams.py` holds them, and the shell reads JSON from it.
 
@@ -57,6 +61,15 @@ What the tenant actually granted is recorded from the token response rather than
 
 ## Settings
 
+Open the window (`SUPER+G`) and press the gear, or `,`. The form writes into
+the widget's entry in `~/.config/omarchy/shell.json`; `omarchy bar set
+janrenz.omarchy.teams <key> <value>` does the same thing from a terminal.
+
+Nothing in the shell renders a settings form for a third-party bar widget - a
+manifest schema is declared, but the only reference to it anywhere in the
+shell is the line that writes it into the registry - so the plugin brings its
+own.
+
 | Key | Default | What it does |
 |---|---|---|
 | `account` | — | Short name for this sign-in. Letters, numbers, dot, dash, underscore. |
@@ -87,4 +100,21 @@ node dev/test-model.js                              # the shaping the window bin
 python3 src/teams.py fetch --account work --demo    # synthetic data, no sign-in
 ```
 
-`--demo` works through the whole plugin, so the layout can be built without a mailbox or a tenant.
+`--demo` works through the whole plugin, so the layout can be built without a mailbox or a tenant. Every read is answered from the fixtures in `src/teams.py`, and every write — sending, starting a chat, marking read — returns as if it had happened and posts nothing. That is what makes it safe to drive the window automatically.
+
+### The showcase images
+
+```
+dev/showcase.sh [outdir]     # regenerate showcase-*.png in the repo root
+```
+
+It saves your `shell.json`, installs one demo widget in place of yours, photographs the window, and puts your configuration back — including on failure or Ctrl-C. Nothing of yours is in the images: the widget it installs carries `"demo": true` and a placeholder account, client id and tenant, so the window is drawing invented people and is not signed in to anything.
+
+Two settings exist for its benefit, both ignored unless `demo` is on:
+
+| Key | Does |
+|---|---|
+| `demo` | Answer every read from the fixtures, and refuse every write. |
+| `demoOpen` | The id of a conversation to open by itself once the list loads, e.g. `demo-chat-0`. There is no key that opens a conversation — only a click, which an automated run cannot aim at a row whose position depends on the theme's font size. |
+
+`SHOWCASE_WIDTH` and `SHOWCASE_HEIGHT` override the window size it photographs (1080×720 by default).

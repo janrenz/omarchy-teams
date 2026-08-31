@@ -100,6 +100,7 @@ Item {
   property string pane: "list"
   readonly property bool typing: service.reading
 
+  property bool showSettings: false
   property bool composingNew: false
 
   function openNewChat() {
@@ -129,6 +130,7 @@ Item {
   // and leaves Teams alone.
   function dismiss() {
     if (composingNew) { closeNewChat(); return }
+    if (showSettings) { showSettings = false; return }
     if (listDrawerOpen) { listDrawerOpen = false; return }
     if (service.reading) { service.closeConversation(); return }
     requestClose()
@@ -497,6 +499,8 @@ Item {
         onTextKey: function(text) {
           if (text === "r") service.reloadConversation()
           else if (text === "u") service.unreadOnly = !service.unreadOnly
+          // The comma is what most applications use for preferences.
+          else if (text === ",") root.showSettings = !root.showSettings
         }
 
         Column {
@@ -589,6 +593,7 @@ Item {
               // shown is a button that teaches people to ignore buttons.
               Button {
                 visible: service.signedIn && !columns.roomForBoth && service.reading
+                          && !root.showSettings
                 text: "Conversations"
                 bordered: true
                 foreground: Color.foreground
@@ -600,8 +605,21 @@ Item {
                 onClicked: root.toggleListDrawer()
               }
 
+              // Last in the row and glyph-only, the way the mail plugin's is:
+              // it is the way out of the window's normal business rather than
+              // part of it.
+              PanelActionButton {
+                // Braces matter: \u takes exactly four hex digits, so "\uF0493"
+                // is U+F049 followed by a literal "3" - which drew the wrong
+                // glyph with a stray digit on top of it.
+                iconText: root.showSettings ? "\u{F0156}" : "\u{F0493}"
+                tooltipText: root.showSettings ? "Close settings" : "Settings"
+                foreground: Color.foreground
+                onClicked: root.showSettings = !root.showSettings
+              }
+
               Button {
-                visible: service.signedIn
+                visible: service.signedIn && !root.showSettings
                 text: "Unread"
                 tooltipText: service.unreadOnly
                   ? "Showing only unread chats" : "Show only unread chats"
@@ -614,7 +632,7 @@ Item {
               }
 
               Button {
-                visible: service.signedIn && service.canStartChat
+                visible: service.signedIn && service.canStartChat && !root.showSettings
                 text: "New chat"
                 bordered: true
                 foreground: Color.accent
@@ -626,7 +644,7 @@ Item {
               // Said where it can be acted on: the sign-in predates
               // Chat.ReadWrite, so opening a chat leaves its dot lit.
               Button {
-                visible: service.signedIn && !service.canMarkRead
+                visible: service.signedIn && !service.canMarkRead && !root.showSettings
                 text: "Allow marking read…"
                 tooltipText: "Sign in again so opening a chat clears its unread mark"
                 bordered: true
@@ -637,7 +655,7 @@ Item {
               }
 
               Button {
-                visible: service.signedIn && !service.hasChannels
+                visible: service.signedIn && !service.hasChannels && !root.showSettings
                 text: "Add channels…"
                 tooltipText: "Sign in again asking for team and channel access. Needs an administrator to consent."
                 bordered: true
@@ -648,7 +666,7 @@ Item {
               }
 
               Button {
-                visible: service.configured
+                visible: service.configured && !root.showSettings
                 enabled: !service.loading
                 text: "Refresh"
                 bordered: true
@@ -666,8 +684,9 @@ Item {
           Column {
             width: parent.width
             spacing: Style.spacing.md
-            visible: root.settingsError !== "" || !service.configured
-                     || service.needsSignIn || service.loggingIn
+            visible: !root.showSettings
+                     && (root.settingsError !== "" || !service.configured
+                         || service.needsSignIn || service.loggingIn)
 
             Text {
               width: parent.width
@@ -774,6 +793,20 @@ Item {
             }
           }
 
+          // ---------------- settings ----------------
+          ScrollView {
+            width: parent.width
+            height: parent.height - y
+            visible: root.showSettings
+            clip: true
+
+            SettingsForm {
+              width: parent.width - Style.spacing.xxl
+              service: service
+              onCloseRequested: root.showSettings = false
+            }
+          }
+
           // ---------------- the two columns ----------------
           Row {
             id: columns
@@ -784,7 +817,8 @@ Item {
             // stand where the real ones will be. Before this the window was
             // simply blank for the length of the fetch, which read as broken.
             visible: (service.signedIn || service.loading) && !service.loggingIn
-                     && root.settingsError === "" && service.configured && !service.needsSignIn
+                     && root.settingsError === "" && service.configured
+                     && !service.needsSignIn && !root.showSettings
 
             // A tiling compositor hands this window whatever the layout has
             // left - 672px here - and Style.space() scales with the font, so a

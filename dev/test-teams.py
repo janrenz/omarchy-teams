@@ -323,6 +323,108 @@ class ChatTitles(unittest.TestCase):
         self.assertEqual(teams.chat_title(chat, "me"), "(no one else here)")
 
 
+class SavingSettings(unittest.TestCase):
+    """Writing the widget's entry back into shell.json.
+
+    This one edits the file the whole shell reads, so the tests are about what
+    it must refuse as much as what it must do.
+    """
+
+    def setUp(self):
+        import tempfile, importlib.util
+        spec = importlib.util.spec_from_file_location(
+            "teamsconfig",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src", "config.py"))
+        self.config = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.config)
+        self.dir = tempfile.mkdtemp()
+        self.path = os.path.join(self.dir, "shell.json")
+
+    def write(self, layout):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            json.dump({"version": 1, "bar": {"layout": layout}}, handle)
+
+    def save(self, updates, plugin_id="janrenz.omarchy.teams"):
+        import types
+        args = types.SimpleNamespace(plugin_id=plugin_id, updates=json.dumps(updates),
+                                     shell_json=self.path, listing=False)
+        original = self.config.out
+        self.config.out = lambda payload: (_ for _ in ()).throw(Emitted(payload))
+        try:
+            self.config.save_settings(args)
+        except Emitted as emitted:
+            return emitted.payload
+        finally:
+            self.config.out = original
+        raise AssertionError("nothing was emitted")
+
+    def read_back(self):
+        with open(self.path, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def test_a_value_is_written_into_the_entry(self):
+        self.write({"right": [{"id": "janrenz.omarchy.teams", "account": "work"}]})
+        result = self.save({"density": "roomy"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.read_back()["bar"]["layout"]["right"][0]["density"], "roomy")
+
+    def test_the_rest_of_the_file_is_left_alone(self):
+        # It is the whole shell's config, not this plugin's.
+        self.write({"left": [{"id": "omarchy.clock", "format": "HH:mm"}],
+                    "right": [{"id": "janrenz.omarchy.teams"}]})
+        self.save({"chats": 30})
+        after = self.read_back()
+        self.assertEqual(after["bar"]["layout"]["left"][0], {"id": "omarchy.clock", "format": "HH:mm"})
+        self.assertEqual(after["version"], 1)
+
+    def test_an_empty_string_removes_the_key(self):
+        # Clearing a field puts the plugin's default back rather than pinning
+        # an empty value that would read as a deliberate choice.
+        self.write({"right": [{"id": "janrenz.omarchy.teams", "density": "roomy"}]})
+        self.save({"density": ""})
+        self.assertNotIn("density", self.read_back()["bar"]["layout"]["right"][0])
+
+    def test_the_id_can_never_be_rewritten(self):
+        self.write({"right": [{"id": "janrenz.omarchy.teams"}]})
+        self.save({"id": "something.else", "chats": 5})
+        self.assertEqual(self.read_back()["bar"]["layout"]["right"][0]["id"],
+                         "janrenz.omarchy.teams")
+
+    def test_a_widget_that_is_not_there_is_refused(self):
+        self.write({"right": [{"id": "omarchy.clock"}]})
+        result = self.save({"chats": 5})
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "not_found")
+
+    def test_two_of_them_is_refused_rather_than_guessed_at(self):
+        self.write({"left": [{"id": "janrenz.omarchy.teams"}],
+                    "right": [{"id": "janrenz.omarchy.teams"}]})
+        result = self.save({"chats": 5})
+        self.assertEqual(result["error"]["code"], "ambiguous")
+
+    def test_a_broken_config_is_not_overwritten(self):
+        with open(self.path, "w", encoding="utf-8") as handle:
+            handle.write("{not json")
+        result = self.save({"chats": 5})
+        self.assertEqual(result["error"]["code"], "bad_config")
+        with open(self.path, encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "{not json", "the file should be untouched")
+
+    def test_nonsense_in_the_patch_is_refused_before_the_file_is_opened(self):
+        self.write({"right": [{"id": "janrenz.omarchy.teams"}]})
+        import types
+        args = types.SimpleNamespace(plugin_id="janrenz.omarchy.teams", updates="{not json",
+                                     shell_json=self.path, listing=False)
+        original = self.config.out
+        self.config.out = lambda payload: (_ for _ in ()).throw(Emitted(payload))
+        try:
+            self.config.save_settings(args)
+        except Emitted as emitted:
+            self.assertEqual(emitted.payload["error"]["code"], "bad_json")
+        finally:
+            self.config.out = original
+
+
 class Aliases(unittest.TestCase):
     """An account name becomes a filename, so it is checked."""
 

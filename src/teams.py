@@ -27,7 +27,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 USER_AGENT = "omarchy-teams-plugin/1.0"
@@ -884,6 +884,12 @@ def cmd_new_chat(args):
     if not people:
         fail("no_people", "A chat needs somebody to be with")
 
+    # Demo mode answers as if the chat were made. It has to short-circuit here,
+    # above the token, because the showcase script drives the window with
+    # synthetic keystrokes and a stray Return must never reach a real tenant.
+    if args.demo:
+        out({"ok": True, "id": "demo-chat-0", "chatType": "oneOnOne"})
+
     account = read_json(state_path(args.account))
     if not account:
         fail("auth_required", "Not signed in")
@@ -935,6 +941,9 @@ def cmd_new_chat(args):
 
 def cmd_mark_read(args):
     """Mark one chat read, the way opening it in Teams would."""
+    if args.demo:
+        out({"ok": True, "chat": args.chat})
+
     account = read_json(state_path(args.account))
     if not account:
         fail("auth_required", "Not signed in")
@@ -973,6 +982,11 @@ def cmd_send(args):
     text = str(args.text or "").strip()
     if not text:
         fail("empty", "Nothing to send")
+
+    # The empty check runs first so demo behaves like the real thing, then the
+    # message goes nowhere. Anything below this line would post to Graph.
+    if args.demo:
+        out({"ok": True, "id": "demo-sent"})
 
     account = read_json(state_path(args.account))
     if not account:
@@ -1034,18 +1048,28 @@ def cmd_remove(args):
 # demo data, so the layout can be built without anyone signing in
 # --------------------------------------------------------------------------
 
+def iso_z(when):
+    """UTC as Graph writes it, so the fixtures parse the same way real data does."""
+    return when.isoformat().replace("+00:00", "Z")
+
+
 DEMO_CHATS = [
-    ("Priya Raman", "oneOnOne", "Priya Raman", "Can you look at the deploy before standup?", True),
-    ("Platform team", "group", "Tomás Lindqvist", "Rolling back the 14:02 release.", True),
-    ("Dana Okafor", "oneOnOne", "you", "Sent - thanks!", False),
-    ("Sprint 24 planning", "group", "Ana Beltrán", "Moved the retro to Thursday.", False),
+    ("Priya Raman", "oneOnOne", "Priya Raman", "Can you look at the deploy before standup?", True, 3),
+    ("Platform team", "group", "Tomás Lindqvist", "Rolling back the 14:02 release.", True, 11),
+    ("Dana Okafor", "oneOnOne", "you", "Sent - thanks!", False, 47),
+    ("Sprint 24 planning", "group", "Ana Beltrán", "Moved the retro to Thursday.", False, 96),
+    ("Mikael Sørensen", "oneOnOne", "Mikael Sørensen", "The staging certificate expires on Friday.", False, 210),
+    ("Design review", "group", "Yuki Tanaka", "New mockups are in the channel.", False, 1500),
 ]
 
 
 def demo_account(alias):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     chats = []
-    for index, (title, kind, who, text, unread) in enumerate(DEMO_CHATS):
+    for index, (title, kind, who, text, unread, ago) in enumerate(DEMO_CHATS):
+        # Staggered rather than all "now": a list where every row carries the
+        # same timestamp reads as broken, and the showcase images are the first
+        # thing anyone sees of this plugin.
         chats.append({
             "id": "demo-chat-%d" % index,
             "kind": "chat",
@@ -1053,7 +1077,7 @@ def demo_account(alias):
             "chatType": kind,
             "lastFrom": who,
             "lastText": text,
-            "when": now.isoformat().replace("+00:00", "Z"),
+            "when": iso_z(now - timedelta(minutes=ago)),
             "unread": unread,
         })
     teams = [{"id": "demo-team-0", "name": "Engineering", "description": ""},
@@ -1068,14 +1092,51 @@ def demo_account(alias):
     }
 
 
-def demo_messages(_target):
+# The transcripts the demo hands back, keyed by the chat that asked. A showcase
+# image of a chat window wants a conversation with some shape to it - turns of
+# different lengths, both sides of the thread, one that was edited - which two
+# lines of "Looking now." does not have.
+DEMO_TRANSCRIPTS = {
+    "demo-chat-0": [
+        ("Priya Raman", "p1", 34, "Morning! Can you look at the deploy before standup?", False),
+        ("Priya Raman", "p1", 33, "The 14:02 build is red on staging but green locally, which is the "
+                                  "annoying combination.", False),
+        ("You", "demo-me", 21, "Looking now.", False),
+        ("You", "demo-me", 12, "Found it - the migration ran twice because the job was queued from "
+                               "both the tag and the branch push.", True),
+        ("Priya Raman", "p1", 8, "Ah, that would do it.", False),
+        ("Priya Raman", "p1", 3, "Can you put that in the release notes so the next person does not "
+                                 "spend an hour on it?", False),
+    ],
+    "demo-chat-1": [
+        ("Tomás Lindqvist", "t1", 26, "Rolling back the 14:02 release.", False),
+        ("Ana Beltrán", "a1", 24, "Ack. Anything for me to do?", False),
+        ("Tomás Lindqvist", "t1", 18, "No - the rollback is clean. I will write it up after standup.", False),
+        ("You", "demo-me", 11, "Thanks both.", False),
+    ],
+}
+
+DEMO_FALLBACK_TRANSCRIPT = [
+    ("Yuki Tanaka", "y1", 90, "New mockups are in the channel.", False),
+    ("You", "demo-me", 62, "Looks good to me - shipping the spacing change with it.", False),
+]
+
+
+def demo_messages(target):
     now = datetime.now(timezone.utc).replace(microsecond=0)
-    return {"ok": True, "messages": [
-        {"id": "d1", "from": "Priya Raman", "fromId": "p", "when": now.isoformat().replace("+00:00", "Z"),
-         "text": "Can you look at the deploy before standup?", "edited": False, "system": False},
-        {"id": "d2", "from": "You", "fromId": "demo-me", "when": now.isoformat().replace("+00:00", "Z"),
-         "text": "Looking now.", "edited": False, "system": False},
-    ]}
+    turns = DEMO_TRANSCRIPTS.get(str(target or ""), DEMO_FALLBACK_TRANSCRIPT)
+    messages = []
+    for index, (who, who_id, ago, text, edited) in enumerate(turns):
+        messages.append({
+            "id": "d%d" % (index + 1),
+            "from": who,
+            "fromId": who_id,
+            "when": iso_z(now - timedelta(minutes=ago)),
+            "text": text,
+            "edited": edited,
+            "system": False,
+        })
+    return {"ok": True, "messages": messages}
 
 
 # --------------------------------------------------------------------------
@@ -1132,10 +1193,12 @@ def main():
     new_chat.add_argument("--user", action="append", required=True,
                           metavar="ID", help="a person's id; repeat for a group chat")
     new_chat.add_argument("--topic", default="", help="a name, for a group chat")
+    new_chat.add_argument("--demo", action="store_true")
     new_chat.set_defaults(func=cmd_new_chat)
 
     mark = with_account("mark-read", "mark one chat read")
     mark.add_argument("--chat", required=True, help="chat id from a fetch")
+    mark.add_argument("--demo", action="store_true")
     mark.set_defaults(func=cmd_mark_read)
 
     image = with_account("image", "download one inline image, and say where it is")
@@ -1147,6 +1210,7 @@ def main():
     send.add_argument("--team", default="")
     send.add_argument("--channel", default="")
     send.add_argument("--text", required=True)
+    send.add_argument("--demo", action="store_true")
     send.set_defaults(func=cmd_send)
 
     sub.add_parser("list", help="list configured accounts").set_defaults(func=cmd_list)

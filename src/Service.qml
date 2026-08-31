@@ -232,6 +232,44 @@ Item {
     if (row.kind === "chat" && row.unread === true) markRead(row.id)
   }
 
+  // ---- saving settings --------------------------------------------------
+
+  property bool saving: false
+  property string saveError: ""
+  signal settingsSaved()
+
+  function saveSettings(patch) {
+    if (saving || pluginDir === "") return false
+    saving = true
+    saveError = ""
+    saveProc.command = ["python3", pluginDir + "/config.py",
+                        "--plugin-id", "janrenz.omarchy.teams",
+                        "--set", JSON.stringify(patch || {})]
+    saveProc.running = true
+    return true
+  }
+
+  Process {
+    id: saveProc
+    running: false
+    stdout: StdioCollector { id: saveOut; waitForEnd: true }
+    stderr: StdioCollector { id: saveErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.saving = false
+      var parsed = Model.parseJson(saveOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.saveError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(saveErrOut.text || "Could not save these settings", 160)
+        return
+      }
+      root.saveError = ""
+      // The shell watches shell.json and hands the new values back through
+      // `settings`; this only says the write landed.
+      root.settingsSaved()
+    }
+  }
+
   // ---- starting a chat --------------------------------------------------
 
   readonly property bool canStartChat: view.canStartChat === true
@@ -293,6 +331,7 @@ Item {
     var command = ["python3", helper(), "new-chat", "--account", alias]
     for (var i = 0; i < ids.length; i++) command = command.concat(["--user", String(ids[i])])
     if (String(topic || "").trim() !== "") command = command.concat(["--topic", String(topic).trim()])
+    if (setting("demo", false) === true) command.push("--demo")
     newChatProc.command = command
     newChatProc.running = true
   }
@@ -319,8 +358,29 @@ Item {
     }
   }
 
+  // ---- demo auto-open -----------------------------------------------------
+  //
+  // Screenshots have to be reproducible, and there is no key that opens a
+  // conversation - only a click, which an automated run cannot aim at a row
+  // whose position depends on the theme's font size. So demo mode can be told
+  // which conversation to open and does it itself, as soon as the list is
+  // there. Ignored unless "demo" is on, so it can never touch a real account.
+  readonly property string demoOpen: setting("demo", false) === true
+    ? String(setting("demoOpen", "")).trim() : ""
+  property bool demoOpened: false
+
   // Once the refreshed list contains the new chat, open it.
   onConversationsChanged: {
+    if (demoOpen !== "" && !demoOpened) {
+      var demoRows = conversations
+      for (var d = 0; d < demoRows.length; d++) {
+        if (String(demoRows[d].id) === demoOpen) {
+          demoOpened = true
+          openChat(demoRows[d])
+          return
+        }
+      }
+    }
     if (pendingChatId === "") return
     var rows = conversations
     for (var i = 0; i < rows.length; i++) {
@@ -410,6 +470,7 @@ Item {
     var command = ["python3", helper(), "send", "--account", alias, "--text", draft]
     if (row.kind === "chat") command = command.concat(["--chat", String(row.id)])
     else command = command.concat(["--team", String(row.teamId), "--channel", String(row.id)])
+    if (setting("demo", false) === true) command.push("--demo")
     sendProc.command = command
     sendProc.running = true
   }

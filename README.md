@@ -177,7 +177,7 @@ python3 src/teams.py fetch --account work --demo    # synthetic data, no sign-in
 ### The showcase images
 
 ```
-dev/showcase.sh [outdir]     # regenerate showcase-*.png in the repo root
+dev/showcase.sh [outdir]     # regenerate showcase-*.png and preview.png in the repo root
 ```
 
 It saves your `shell.json`, installs one demo widget in place of yours, photographs the window, and puts your configuration back — including on failure or Ctrl-C. Nothing of yours is in the images: the widget it installs carries `"demo": true` and a placeholder account, client id and tenant, so the window is drawing invented people and is not signed in to anything.
@@ -190,6 +190,8 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 | `demoOpen` | The id of a conversation to open by itself once the list loads, e.g. `demo-chat-0`. There is no key that opens a conversation — only a click, which an automated run cannot aim at a row whose position depends on the theme's font size. |
 
 `SHOWCASE_WIDTH` and `SHOWCASE_HEIGHT` override the window size it photographs (1080×720 by default).
+
+`preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## License
 

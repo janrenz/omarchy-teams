@@ -204,4 +204,11 @@ capture() {
 capture "showcase-conversations" '{}'
 capture "showcase-conversation"  '{"demoOpen": "demo-chat-0"}'
 
+# The marketplace looks for preview.png in the repository root and nothing
+# else - showcase-*.png is invisible to it - so the card image is kept in step
+# with the showcase rather than left to rot at whatever the layout was months
+# ago.
+cp "$OUT/showcase-conversation.png" "$OUT/preview.png"
+echo "  -> $OUT/preview.png  (marketplace card)"
+
 echo "showcase: done"

@@ -5,7 +5,10 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **A bar icon** that tints when a chat is unread, with a tooltip naming the account and the count.
 - **A window** — a real Hyprland toplevel, tiled like anything else — with conversations on the left, the transcript on the right, and a box to answer in. Bound to `SUPER+G`, also on the Omarchy menu under *Teams*.
 - **Chats and channels.** One-to-one chats, group chats, and the channels of every team you have joined.
-- **Replying**, to a chat or a channel. `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
+- **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
+- **Starting a chat** with anybody in the directory, and **marking a chat read** by opening it.
+- **Emoji, inline images and clickable links** in the transcript.
+- **Keyboard throughout.** `j`/`k` and the arrows move, `Enter` opens, `Tab` reaches the message box, `Page`/`Home`/`End` and `Ctrl-d`/`u`/`f`/`b` scroll, `Escape` goes back one layer at a time.
 
 Python 3 standard library only. It talks to Microsoft Graph and nothing else. No token ever reaches the QML: `src/teams.py` holds them, and the shell reads JSON from it.
 
@@ -23,12 +26,19 @@ An Azure app registration declares up front which delegated permissions it is al
    | Permission | For | Consent |
    |---|---|---|
    | `User.Read` | knowing who you are | user |
-   | `Chat.Read` | reading your chats | user |
+   | `Chat.ReadWrite` | reading your chats, and marking one read by opening it | user |
+   | `Chat.Create` | starting a new chat | user |
    | `ChatMessage.Send` | replying in a chat | user |
+   | `People.Read` | finding the people you talk to | user |
+   | `User.ReadBasic.All` | finding everybody else | user |
    | `Team.ReadBasic.All` | listing your teams | user |
    | `Channel.ReadBasic.All` | listing their channels | user |
    | `ChannelMessage.Read.All` | reading channel messages | **admin** |
    | `ChannelMessage.Send` | posting in a channel | user |
+
+   `Chat.ReadWrite` rather than `Chat.Read` on purpose: marking a chat read is
+   a write, and `markChatReadForUser` refuses anything less. Everything in that
+   list except the channel row is ordinary user consent.
 
 5. Copy the **Application (client) ID**.
 6. In Omarchy, open the Teams widget's settings and fill in **Account name** (a short label such as `work`) and **Azure client id**.
@@ -62,9 +72,11 @@ What the tenant actually granted is recorded from the token response rather than
 ## What it does not do
 
 - **No unread counts for channels.** Graph will say whether a *chat* has been read since its last message, but exposes nothing equivalent for channels. Rather than invent a number, channels carry no unread mark at all.
+- **Teams are closed until opened.** Their channels are one request per team; listing all of them up front cost 29 requests and two hundred rows on an account in 28 teams.
 - **No live updates.** It polls on the interval above. Graph change notifications need a public webhook endpoint, which a desktop shell has no business running.
-- **Messages render as plain text.** A Teams message is HTML written by whoever sent it, and Qt's rich text fetches what it is told to fetch — a remote image would be a tracking pixel firing from your IP on render. The markup is flattened in `teams.py` before it reaches the window.
-- **No attachments, reactions, threads or presence.** Reading and answering, nothing more.
+- **A message never chooses its own markup.** A Teams message is HTML written by whoever sent it, and Qt's rich text fetches what it is told to fetch. So the markup is flattened in `teams.py`, and the only tag the window ever builds is an `<a>` around a link it found in text it escaped first. Emoji come from the character Teams already puts in the tag's `alt`.
+- **Images are fetched by the helper, never by the window.** They live behind the Graph API and need your token; the host is checked before that token is attached, so an `<img src="https://evil/">` in a message cannot be used to collect it. Anything not on `graph.microsoft.com` is dropped from the message entirely.
+- **No unread counts for channels**, no live updates (it polls), and no attachments, reactions, threads or presence.
 
 ## Development
 

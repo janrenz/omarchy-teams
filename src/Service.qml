@@ -54,8 +54,13 @@ Item {
   // before that was asked for keeps working; it just cannot clear the dot.
   readonly property bool canMarkRead: view.canMarkRead === true
   readonly property int unreadCount: view.unreadCount || 0
+  // Show only what is waiting. A view of the list rather than a setting, so it
+  // is not remembered between sessions: it answers "what needs me now", and
+  // that question is asked fresh each time.
+  property bool unreadOnly: false
+
   readonly property var conversations: Model.conversationRows(
-    view, expandedTeams, teamChannels, loadingTeamId)
+    view, expandedTeams, teamChannels, loadingTeamId, unreadOnly)
   readonly property var warnings: view.warnings || []
 
   function setting(name, fallback) {

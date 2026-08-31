@@ -187,6 +187,53 @@ test("every row has a key, and they are all distinct", () => {
   eq(new Set(keys).size, keys.length, "keys should be unique")
 })
 
+// ------------------------------------------------------------ unread filter
+
+test("filtering to unread keeps only the unread chats", () => {
+  const rows = Model.conversationRows(chatty, {}, {}, "", true)
+  const chats = rows.filter((r) => r.kind === "chat")
+  eq(chats.length, 1)
+  eq(chats[0].title, "Priya")
+})
+
+test("filtering leaves the teams out", () => {
+  // Graph exposes no read state for a channel, so every team would be neither
+  // kept nor excluded. Listing them all under an unread filter would be a lie.
+  const rows = Model.conversationRows(chatty, {}, {}, "", true)
+  eq(rows.filter((r) => r.kind === "team").length, 0)
+  eq(rows.filter((r) => r.kind === "channel").length, 0)
+})
+
+test("an opened team stays opened for when the filter comes off again", () => {
+  const expanded = { t1: true }
+  const channels = { t1: [{ id: "ch1", name: "General", teamId: "t1" }] }
+  eq(Model.conversationRows(chatty, expanded, channels, "", true)
+       .filter((r) => r.kind === "channel").length, 0)
+  // The filter is a view, not a state change: turning it off restores exactly
+  // what was there.
+  eq(Model.conversationRows(chatty, expanded, channels, "", false)
+       .filter((r) => r.kind === "channel").length, 1)
+})
+
+test("nothing unread says so rather than showing an empty pane", () => {
+  const allRead = { chats: [{ id: "c2", title: "Team", unread: false }], teams: chatty.teams }
+  const rows = Model.conversationRows(allRead, {}, {}, "", true)
+  eq(rows.length, 1)
+  eq(rows[0].kind, "note")
+  eq(rows[0].title, "Nothing unread")
+})
+
+test("the empty note is not something the cursor can land on", () => {
+  const allRead = { chats: [{ id: "c2", title: "Team", unread: false }], teams: [] }
+  const rows = Model.conversationRows(allRead, {}, {}, "", true)
+  eq(Model.selectableRows(rows), [])
+})
+
+test("not filtering is the same as before the filter existed", () => {
+  eq(Model.conversationRows(chatty, {}, {}, "", false),
+     Model.conversationRows(chatty, {}, {}, ""))
+})
+
 // ---------------------------------------------------------- selectableRows
 
 test("the cursor may land on chats, channels and teams", () => {

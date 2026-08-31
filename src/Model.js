@@ -133,11 +133,13 @@ function accountView(snapshot, alias) {
 // Teams are closed until opened, and their channels are fetched at that
 // moment. Listing every channel of every team up front is one request per team
 // and, on an account in 28 of them, two hundred rows nobody scrolls.
-function conversationRows(view, expanded, channelsByTeam, loadingTeamId) {
+function conversationRows(view, expanded, channelsByTeam, loadingTeamId, unreadOnly) {
   var rows = []
   var open = expanded || {}
   var channels = channelsByTeam || {}
-  var chats = (view && view.chats) || []
+  var onlyUnread = unreadOnly === true
+  var all = (view && view.chats) || []
+  var chats = onlyUnread ? all.filter(function(chat) { return chat.unread === true }) : all
 
   if (chats.length > 0) rows.push({ kind: "heading", key: "h:chats", title: "Chats", depth: 0 })
   for (var c = 0; c < chats.length; c++) {
@@ -153,6 +155,16 @@ function conversationRows(view, expanded, channelsByTeam, loadingTeamId) {
       unread: chat.unread === true,
       depth: 0
     })
+  }
+
+  // Filtering to unread leaves the teams out rather than listing them all
+  // under a filter they cannot answer: Graph exposes no read state for a
+  // channel, so every one of them would be neither kept nor excluded.
+  if (onlyUnread) {
+    if (rows.length === 0)
+      rows.push({ kind: "note", key: "note:nothing-unread", title: "Nothing unread",
+                  subtitle: "", when: "", unread: false, depth: 0 })
+    return rows
   }
 
   var teams = (view && view.teams) || []

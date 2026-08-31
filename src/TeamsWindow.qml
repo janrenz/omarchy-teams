@@ -496,6 +496,7 @@ Item {
         onTabRequested: root.focusComposer()
         onTextKey: function(text) {
           if (text === "r") service.reloadConversation()
+          else if (text === "u") service.unreadOnly = !service.unreadOnly
         }
 
         Column {
@@ -597,6 +598,19 @@ Item {
                 // row of buttons must never be.
                 fontSize: Style.font.caption
                 onClicked: root.toggleListDrawer()
+              }
+
+              Button {
+                visible: service.signedIn
+                text: "Unread"
+                tooltipText: service.unreadOnly
+                  ? "Showing only unread chats" : "Show only unread chats"
+                selected: service.unreadOnly
+                bordered: true
+                foreground: service.unreadOnly ? Color.accent : Color.foreground
+                fontFamily: Style.font.family
+                fontSize: Style.font.caption
+                onClicked: service.unreadOnly = !service.unreadOnly
               }
 
               Button {

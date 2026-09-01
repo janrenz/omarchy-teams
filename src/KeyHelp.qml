@@ -28,6 +28,7 @@ Column {
     ["g / G", "To the top / to the newest", "Scrolling"],
 
     ["e or +", "React to the message under the cursor", "Doing"],
+    ["s / o", "In a picture: save a copy / open it elsewhere", "Doing"],
     ["1 - 6", "Pick that reaction, or take yours back", "Doing"],
     ["Shift+Enter", "Send what you have typed", "Doing"],
     ["u", "Show only unread conversations", "Doing"],

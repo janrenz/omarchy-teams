@@ -7,6 +7,7 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **Chats and channels.** One-to-one chats, group chats, and the channels of every team you have joined.
 - **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
 - **Starting a chat** with anybody in the directory, and **marking a chat read** by opening it.
+- **A picture opens in the window**, whole rather than cropped to the thumbnail, with **Save as…** to keep a copy — a real save dialog, starting in your Downloads folder and suggesting a name from what the message called the picture. `s` saves, `o` hands it to whatever else views images, `Escape` closes. It used to go straight to `xdg-open`, which took the one thing anybody opens a picture for somewhere this plugin could not follow.
 - **Emoji, inline images and clickable links** in the transcript. Both kinds of link: an address somebody typed out in full, and one behind its own words — the composer's link button writes `<a href="…">the release notes</a>`, and the words are all a reader would otherwise get. They open in your browser, tinted from the running theme rather than in Qt's blue.
 - **Presence.** Beside each one-to-one chat: a filled circle for available, a filled circle for busy, a ring for away, a dim circle for offline — in the running theme's own colours. Group chats have none, because a group is not away. Told apart from unread by shape and place, not by hue: presence sits immediately in front of the name because it is about the person, unread is a bar down the leading edge because it is about the conversation, and a chat can show both. Needs `Presence.Read.All` — ordinary user consent.
 - **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
@@ -83,6 +84,7 @@ reading, which is the step that used to be missing.
 |---|---|
 | `e` or `+` | React to the message under the cursor. Again, or `Escape`, closes the picker |
 | `1` – `6` | Pick that reaction. The one you already gave takes it back |
+| `s` / `o` | In a picture: save a copy / open it elsewhere |
 | `Shift+Enter` or `Ctrl+Enter` | Send. Plain `Enter` is a newline |
 | `u` | Show only unread conversations |
 | `n` | Start a new chat |

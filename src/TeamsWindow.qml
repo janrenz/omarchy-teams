@@ -158,6 +158,24 @@ Item {
   // mouse are opening the same thing.
   property string pickingMessageId: ""
 
+  // ---- the picture being looked at ----------------------------------------
+  //
+  // A layer of the window rather than a handoff. Empty when nothing is open.
+  property string viewingImagePath: ""
+  property string viewingImageAlt: ""
+  readonly property bool viewingImage: viewingImagePath !== ""
+
+  function viewImage(path, alt) {
+    if (!path) return
+    viewingImagePath = String(path)
+    viewingImageAlt = String(alt || "")
+  }
+
+  function closeImage() {
+    viewingImagePath = ""
+    viewingImageAlt = ""
+  }
+
   function messageById(id) {
     var list = service.messages
     for (var i = 0; i < list.length; i++)
@@ -230,6 +248,13 @@ Item {
   readonly property int padLines: Math.max(1, Math.round(Style.spacing.xs * densityScale))
   readonly property int padReading: Math.max(1, Math.round(Style.spacing.md * densityScale))
 
+  // The corner mark. This window and the Slack one are the same shape, the
+  // same kit and usually the same size, so nothing on screen said which of
+  // the two you had just summoned. The app's own glyph, in the app's own
+  // colour, where a title bar would carry its icon, says it at a glance.
+  readonly property color brandColor: "#5B5FC7"
+  readonly property int markSize: Math.round(Style.font.heading + Style.spacing.md * 2)
+
   // The list's marker column - the unread dot and the team chevron. It comes
   // out of the panel's left padding rather than out of the rows, so CHATS,
   // every chat name and the window title all begin on the same line. Taken
@@ -268,6 +293,8 @@ Item {
   // and leaves Teams alone.
   // Escape walks back out one rung at a time, and never further than one.
   function dismiss() {
+    // Outermost layer on screen, so the first thing Escape takes back.
+    if (viewingImage) { closeImage(); return }
     if (showHelp) { showHelp = false; return }
     if (composingNew) { closeNewChat(); return }
     if (showSettings) { showSettings = false; return }
@@ -457,6 +484,25 @@ Item {
               }
             }
           }
+        }
+      }
+
+      // A picture, opened from the transcript. Built when it is wanted rather
+      // than kept hidden, so a conversation full of photographs is not a stack
+      // of decoded full-size images sitting behind the window.
+      Loader {
+        id: imageLayer
+        anchors.fill: parent
+        active: root.viewingImage
+        z: 105
+
+        sourceComponent: ImageViewer {
+          path: root.viewingImagePath
+          alt: root.viewingImageAlt
+          fg: Color.foreground
+          accent: Color.accent
+          fontFamily: Style.font.family
+          onCloseRequested: root.closeImage()
         }
       }
 
@@ -678,6 +724,13 @@ Item {
         onTabRequested: root.focusComposer()
         onTextKey: function(text) {
           var view = root.scrollTarget()
+          // A picture is over everything, so it takes the keys while it is up.
+          if (root.viewingImage) {
+            if (!imageLayer.item) return
+            if (text === "s") imageLayer.item.save()
+            else if (text === "o") imageLayer.item.openExternally()
+            return
+          }
           // While the picker is open the digits are the choices, and nothing
           // else should be acting on the conversation behind it.
           if (root.pickingMessageId !== "") {
@@ -709,11 +762,36 @@ Item {
           // ---------------- header ----------------
           Item {
             width: parent.width
-            height: heading.implicitHeight
+            height: Math.max(heading.implicitHeight, appMark.height)
+
+            // Which of the two this is - see brandColor above. A tinted tile
+            // rather than a bare glyph, so it reads as the window's mark and
+            // not as the first character of the title.
+            Rectangle {
+              id: appMark
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: root.markSize
+              height: root.markSize
+              radius: Style.cornerRadius
+              color: Util.alpha(root.brandColor, 0.16)
+
+              // Nerd Font logos are not centred in their own advance width;
+              // OpticalGlyph puts the painted shape in the middle of the tile
+              // rather than the box Qt reserves for it.
+              OpticalGlyph {
+                anchors.fill: parent
+                text: "\u{F02BB}"   // nf-md-microsoft-teams
+                color: root.brandColor
+                fontFamily: Style.font.family
+                fontSize: Style.font.iconLarge
+              }
+            }
 
             Row {
               id: heading
-              anchors.left: parent.left
+              anchors.left: appMark.right
+              anchors.leftMargin: Style.spacing.md
               // Bounded by where the buttons start, so a long chat title runs
               // out of room before it reaches them. elide does nothing on a
               // Text that is free to be as wide as it likes, which is what let
@@ -824,6 +902,11 @@ Item {
                 iconText: root.showSettings ? "\u{F0156}" : "\u{F0493}"
                 tooltipText: root.showSettings ? "Close settings" : "Settings"
                 foreground: Color.foreground
+                // Boxed, and the height of the outlined buttons on either
+                // side of it. A bare glyph between two boxes reads as a stray
+                // character rather than as the next control along.
+                bordered: true
+                size: refreshButton.height
                 onClicked: root.showSettings = !root.showSettings
               }
 
@@ -875,6 +958,9 @@ Item {
               }
 
               Button {
+                // Named because the settings button measures itself against
+                // it; height is computed even while this one is hidden.
+                id: refreshButton
                 visible: service.configured && !root.showSettings
                 enabled: !service.loading
                 text: "Refresh"
@@ -1402,6 +1488,7 @@ Item {
 
                               delegate: MessageImage {
                                 required property var modelData
+                                onOpenRequested: function(path, alt) { root.viewImage(path, alt) }
                                 url: String(modelData.url || "")
                                 alt: String(modelData.alt || "")
                                 intrinsicWidth: Number(modelData.width || 0)

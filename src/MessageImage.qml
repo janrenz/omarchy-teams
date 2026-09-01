@@ -24,6 +24,10 @@ Item {
   property real maxWidth: Style.space(320)
   property real maxHeight: Style.space(260)
 
+  // Asked for, not acted on: the whole picture is a layer of the window, and
+  // the thumbnail has no business knowing how the window draws it.
+  signal openRequested(string path, string alt)
+
   readonly property real ratio: (intrinsicWidth > 0 && intrinsicHeight > 0)
     ? intrinsicHeight / intrinsicWidth : 0.62
 
@@ -110,10 +114,11 @@ Item {
       anchors.fill: parent
       enabled: root.path !== ""
       cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
-      // The pane shows a thumbnail; the whole picture opens in whatever views
-      // images on this machine. That is its own window - closing it closes the
-      // picture and leaves Teams where it was.
-      onClicked: Quickshell.execDetached(["xdg-open", root.path])
+      // The pane shows a thumbnail cropped to a tidy rectangle; the whole
+      // picture opens in the window, where it can also be saved. It used to go
+      // straight to xdg-open, which took the one thing anybody opens a picture
+      // for - keeping a copy - somewhere this plugin could not follow.
+      onClicked: root.openRequested(root.path, root.alt)
     }
   }
 }

@@ -63,6 +63,9 @@ BarWidget {
         ? "no unread chats"
         : (service.unreadCount === 1 ? "1 unread chat" : service.unreadCount + " unread chats"))
       if (!service.hasChannels) lines.push("chats only - channels not consented")
+      // A bar that is not moving because nobody is at the machine looks exactly
+      // like a bar that is broken. Say which.
+      if (service.pollReason !== "") lines.push(service.pollReason)
       for (var i = 0; i < service.warnings.length; i++)
         lines.push(Model.plainText(service.warnings[i].message))
       return lines.join("\n")

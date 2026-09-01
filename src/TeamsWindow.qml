@@ -32,6 +32,9 @@ Item {
   // panel it loads and would overwrite it with null for a plugin that declares
   // no service kind.
   readonly property alias teamsService: service
+  // The toplevel itself, so a harness can photograph what this draws without
+  // the shell in the way. Nothing in the plugin uses it.
+  readonly property alias floatingWindow: window
 
   function open(_payloadJson) {
     closingFromHost = false

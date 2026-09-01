@@ -9,7 +9,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 repo="$(cd .. && pwd)"
 
-STAGE="${TEAMS_DEV_STAGE:-${XDG_RUNTIME_DIR:-/tmp}/omarchy-teams-dev}"
+. ./stage.sh
 rm -rf "$STAGE"; mkdir -p "$STAGE"
 
 ln -sfn /usr/share/omarchy/shell/Commons "$STAGE/Commons"
@@ -17,4 +17,5 @@ ln -sfn /usr/share/omarchy/shell/Ui "$STAGE/Ui"
 for f in "$repo"/src/*.qml "$repo"/src/Model.js "$repo"/src/*.py; do
   ln -sfn "$f" "$STAGE/$(basename "$f")"
 done
+ln -sfn "$(pwd)/shell.qml" "$STAGE/shell.qml"
 echo "$STAGE"

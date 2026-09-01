@@ -84,8 +84,16 @@ Item {
 
   // ---- fetching ---------------------------------------------------------
 
+  // A fetch that was asked for while one was already in flight. Dropping it is
+  // fine when the two would have asked the same question - and they might not:
+  // the settings arriving is itself a reason to refresh, and the fetch already
+  // running was started before them. So it is remembered and run after.
+  property bool refreshQueued: false
+
   function refresh() {
-    if (!configured || fetchProc.running || pluginDir === "") return
+    if (!configured || pluginDir === "") return
+    if (fetchProc.running) { refreshQueued = true; return }
+    refreshQueued = false
     loading = true
     var command = ["python3", helper(), "fetch", "--account", alias,
                    "--chats", String(chatCount)]
@@ -179,12 +187,14 @@ Item {
       if (exitCode !== 0) {
         root.errorCode = "helper_failed"
         root.errorMessage = Model.oneLine(fetchErr.text || "The helper could not be run", 160)
+        if (root.refreshQueued) Qt.callLater(root.refresh)
         return
       }
       var parsed = Model.parseJson(fetchOut.text, null)
       if (!parsed) {
         root.errorCode = "bad_output"
         root.errorMessage = "Could not read the helper's response"
+        if (root.refreshQueued) Qt.callLater(root.refresh)
         return
       }
       root.errorCode = ""
@@ -194,13 +204,35 @@ Item {
       // A conversation open while the list refreshed is still the one being
       // read; reloading it here would scroll the transcript out from under
       // whoever is reading it.
+      if (root.refreshQueued) Qt.callLater(root.refresh)
     }
   }
 
+  // ---- when it is worth asking at all -------------------------------------
+  //
+  // See PollGate.qml. It gates the timer only: a refresh anybody asked for by
+  // hand still goes out, because a failure the user can see beats a silence
+  // they cannot.
+  // A poll is also a token refresh, and Graph counts every one.
+  readonly property bool pausePolling: setting("pausePolling", true) !== false
+
+  PollGate {
+    id: poll
+    pauseWhenAway: root.pausePolling
+    pauseWhenOffline: root.pausePolling
+    slowOnBattery: root.pausePolling
+  }
+
+  // For a host that wants to explain a sidebar that is not moving.
+  readonly property string pollReason: poll.reason
+
+  // triggeredOnStart is what makes waking up and coming back online immediate:
+  // the gate opening restarts this timer, and a restarted timer fires at once
+  // rather than an interval later.
   Timer {
-    interval: root.refreshIntervalSec * 1000
+    interval: root.refreshIntervalSec * 1000 * poll.intervalScale
     repeat: true
-    running: root.configured
+    running: root.configured && !poll.paused
     triggeredOnStart: true
     onTriggered: root.refresh()
   }
@@ -211,10 +243,38 @@ Item {
 
   // ---- telling you something arrived --------------------------------------
 
+  // The argv omarchy's notification service runs when a toast is clicked. It
+  // goes through the shell rather than the window, because the click may
+  // arrive when no window is loaded - summon() mounts it and hands the payload
+  // to open(), and delivers it straight away when it is already up.
+  readonly property string pluginId: "janrenz.omarchy.teams"
+
+  function summonArgv(payloadJson) {
+    return ["omarchy-shell", "shell", "summon", pluginId, String(payloadJson || "{}")]
+  }
+
+  // A chat, or a channel inside a team - the window needs to be told which,
+  // because Graph addresses them differently. JSON.stringify rather than a
+  // hand-built string: these ids come from the server.
+  // messageId is accepted for the day a row carries one; today it is always
+  // empty, and the window opens the chat on its newest message.
+  function openChatArgv(id, messageId) {
+    return summonArgv(JSON.stringify({
+      chat: String(id || ""),
+      message: String(messageId || "")
+    }))
+  }
+
   Notifier {
     id: notifier
     appName: "Teams"
     plural: "new messages"
+    // The same glyph the bar widget defaults to, so the toast is recognisably
+    // this plugin's at a glance.
+    glyph: "󰊻"
+    // Clicking a digest opens the window on whatever it was showing: a digest
+    // is about several chats, so there is no one chat to open.
+    defaultExec: root.summonArgv("{}")
     // Not while the demo fixtures are on: dev/showcase.sh turns them on to
     // take the README's pictures, and a screenshot run should not push six
     // notifications about invented people onto a real desktop.
@@ -249,7 +309,17 @@ Item {
         summary: title,
         // A one-to-one chat is titled with the person's name, so repeating it
         // in front of every line only takes room from what they said.
-        body: (from !== "" && from !== title ? from + ": " : "") + String(chat.lastText || "")
+        body: (from !== "" && from !== title ? from + ": " : "") + String(chat.lastText || ""),
+        // Clicking it opens that chat. No message id: a chat row carries the
+        // preview's text and time but not its id, and the chat opened on its
+        // newest message is where that preview came from anyway.
+        exec: root.openChatArgv(chat.id, ""),
+        // Three messages in one chat are one chat with something to say, so the
+        // newest updates the toast the last one left rather than stacking a
+        // third under it. Keyed by the chat, which is exactly what the
+        // announced id is not: that one carries the timestamp, so that a *new*
+        // message counts as news.
+        replaceKey: String(chat.id || "")
       })
     }
     notifier.observe("", fresh, present)
@@ -300,6 +370,42 @@ Item {
     // state Graph will tell us about - and only when it was actually unread,
     // so this is not a write on every click.
     if (row.kind === "chat" && row.unread === true) markRead(row.id)
+  }
+
+  // The sidebar row for a key, when there is one. A team that has never been
+  // expanded has no channel rows at all, so this often finds nothing - which is
+  // what the synthetic row below is for.
+  function rowFor(key) {
+    var rows = conversations
+    for (var i = 0; i < rows.length; i++)
+      if (String(rows[i].key) === String(key)) return rows[i]
+    return null
+  }
+
+  // A conversation named by ids alone: a clicked notification, or a draft
+  // coming back from a coding agent. Given the same shape a sidebar row has, so
+  // the header, the composer and marking read carry on without knowing the
+  // difference. A chat is its own id; a channel needs the team as well.
+  function openByIds(chatId, teamId, channelId, title) {
+    var chat = String(chatId || "")
+    var channel = String(channelId || "")
+    if (chat === "" && channel === "") return
+    var key = chat !== "" ? "chat:" + chat : "channel:" + channel
+    // Already reading it. openChat would take this for the sidebar's toggle and
+    // close the conversation, which is the opposite of what was asked.
+    if (openConversation && String(openConversation.key) === key) return
+    var known = rowFor(key)
+    if (known) {
+      if (String(title || "") !== "") known.title = String(title)
+      openChat(known)
+      return
+    }
+    openChat(chat !== ""
+      ? { kind: "chat", key: key, id: chat, teamId: "", title: String(title || ""),
+          subtitle: "", when: "", unread: false, presence: "", presenceActivity: "",
+          depth: 0 }
+      : { kind: "channel", key: key, id: channel, teamId: String(teamId || ""),
+          title: String(title || ""), subtitle: "", when: "", unread: false, depth: 1 })
   }
 
   // ---- saving settings --------------------------------------------------

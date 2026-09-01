@@ -19,6 +19,10 @@ Item {
   readonly property string clientId: String(setting("clientId", "")).trim()
   readonly property string authority: String(setting("authority", "")).trim()
   readonly property bool wantChannels: setting("channels", true) !== false
+  // Whether to ask for Files.ReadWrite at the next sign-in. Off by default:
+  // an app registration that does not declare a permission fails the whole
+  // sign-in when it is requested, so this is the user saying theirs does.
+  readonly property bool wantFiles: setting("sendFiles", false) === true
   // The bar only ever draws an unread count, and the team tree costs one Graph
   // request per team - 29 of them on this tenant. So the widget turns it off
   // and the window turns it on; nothing draws a channel list nobody asked for.
@@ -59,6 +63,7 @@ Item {
   // Marking a chat read is a write, and needs Chat.ReadWrite. A sign-in from
   // before that was asked for keeps working; it just cannot clear the dot.
   readonly property bool canMarkRead: view.canMarkRead === true
+  readonly property bool canUpload: view.canUpload === true
   readonly property int unreadCount: view.unreadCount || 0
   // Show only what is waiting. A view of the list rather than a setting, so it
   // is not remembered between sessions: it answers "what needs me now", and
@@ -658,6 +663,68 @@ Item {
 
   property string markReadError: ""
 
+  // ---- sending a file ------------------------------------------------------
+  //
+  // Three requests inside teams.py - OneDrive, a sharing link, the message -
+  // and the path goes in over stdin rather than on the command line, because
+  // where a file is can be as telling as what is in it.
+
+  property bool uploading: false
+  property string uploadError: ""
+  property string uploadNotice: ""
+  property string uploadPath: ""
+
+  function uploadFile(path) {
+    var file = String(path || "").trim()
+    if (uploading || !openConversation || file === "" || pluginDir === "") return
+    if (!canUpload) {
+      uploadError = "This sign-in cannot send files. Add Files.ReadWrite to your app "
+                  + "registration, turn on Send files in settings, and sign in again."
+      return
+    }
+    if (String(openConversation.kind || "") !== "chat") {
+      uploadError = "Files can go into a chat, not into a channel - a channel's files live "
+                  + "in the team's SharePoint library."
+      return
+    }
+    uploading = true
+    uploadError = ""
+    uploadNotice = ""
+    uploadPath = file
+    var command = ["python3", helper(), "upload", "--account", alias,
+                   "--chat", String(openConversation.id), "--stdin"]
+    if (setting("demo", false) === true) command.push("--demo")
+    uploadProc.command = command
+    uploadProc.running = true
+  }
+
+  Process {
+    id: uploadProc
+    running: false
+    stdinEnabled: true
+    stdout: StdioCollector { id: uploadOut; waitForEnd: true }
+    stderr: StdioCollector { id: uploadErrOut; waitForEnd: true }
+    // Whatever is in the message box goes with the file as its comment, which
+    // is what Teams itself does when you drop one on a conversation.
+    onStarted: uploadProc.write(JSON.stringify({
+      file: root.uploadPath, comment: root.draft
+    }) + "\n")
+    onExited: function(exitCode) {
+      root.uploading = false
+      var parsed = Model.parseJson(uploadOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.uploadError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(uploadErrOut.text || "Could not send that file", 160)
+        return
+      }
+      root.uploadNotice = "Sent " + String(parsed.name || "that file")
+      root.draft = ""
+      root.reloadConversation()
+      root.refresh()
+    }
+  }
+
   function markRead(chatId) {
     var id = String(chatId || "")
     if (id === "" || !canMarkRead || markReadProc.running || pluginDir === "") return
@@ -816,6 +883,10 @@ Item {
     var command = ["python3", helper(), "login-start", "--account", alias, "--client-id", clientId]
     if (authority !== "") command = command.concat(["--authority", authority])
     if (withChannels === true) command.push("--channels")
+    // Asked for only when the setting says so, because a scope the app
+    // registration does not declare fails the whole sign-in rather than just
+    // itself - see the comment on SCOPES_FILES in teams.py.
+    if (wantFiles) command.push("--files")
     loginStartProc.command = command
     loginStartProc.running = true
   }

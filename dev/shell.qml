@@ -129,6 +129,13 @@ ShellRoot {
                          channels: true, chats: 25, density: dev.density }
     }
 
+    // The two routes into uploadFile() without a mouse: the file chooser and a
+    // drop both end at sendFile(), so this is what a drag onto the window does.
+    function attach(path: string): string {
+      panel.sendFile("file://" + path)
+      return "ok"
+    }
+
     // What the service thinks is going on, for when the window comes up empty
     // and the log says nothing. Returned rather than logged, so it lands in the
     // terminal that asked.
@@ -143,6 +150,9 @@ ShellRoot {
         error: svc.errorCode + (svc.errorMessage ? ": " + svc.errorMessage : ""),
         settingsError: panel.settingsError,
         pollReason: svc.pollReason,
+        uploading: svc.uploading,
+        uploadError: svc.uploadError,
+        uploadNotice: svc.uploadNotice,
         chats: (svc.view && svc.view.chats ? svc.view.chats.length : -1),
         teams: (svc.view && svc.view.teams ? svc.view.teams.length : -1),
         pluginDir: panel.pluginDir

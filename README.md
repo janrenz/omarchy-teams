@@ -117,6 +117,8 @@ An Azure app registration declares up front which delegated permissions it is al
    | `Channel.ReadBasic.All` | listing their channels | user |
    | `ChannelMessage.Read.All` | reading channel messages | **admin** |
    | `ChannelMessage.Send` | posting in a channel | user |
+   | `Files.ReadWrite` | sending a file into a chat — optional, see below | user |
+
 
    `Chat.ReadWrite` rather than `Chat.Read` on purpose: marking a chat read is
    a write, and `markChatReadForUser` refuses anything less. Everything in that
@@ -154,6 +156,7 @@ own.
 | `clientId` | — | **Required.** Your app registration's Application (client) ID. |
 | `authority` | `common` | `common`, `organizations`, or your tenant id. |
 | `channels` | `true` | Whether to ask for team and channel access at sign-in. |
+| `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. Your app registration has to declare it first. |
 | `chats` | `25` | How many chats to list (1–40). |
 | `density` | `cosy` | How much room the window gives things: `compact`, `cosy`, `roomy`, `spacious`. A multiplier over the theme's own spacing, so it follows your font size rather than fighting it. |
 | `refreshIntervalSec` | `120` | How often to poll (30–3600). |
@@ -178,6 +181,35 @@ Anything you ask for by hand still goes out, offline included: a failure you can
 
 They are raised from behind the bar icon, not from the window, so they arrive whether or not the window is open — and only once, though both have a service of their own polling the same account.
 
+## Sending a file
+
+With `Files.ReadWrite` granted and **Send files** on, a chat gets an **Attach**
+button beside Send, and a file dropped anywhere on the window goes to the chat
+on screen. Whatever is in the message box goes with it as its comment.
+
+Graph has no "post a file to a chat", and this does what Teams itself does: the
+file goes to your own OneDrive, into the same **Microsoft Teams Chat Files**
+folder, a sharing link is made for it, and the message carries a reference to
+that link. Three requests, and only the last one puts anything in front of
+anybody — so if that one fails, the plugin says the file is in your OneDrive
+rather than calling it a failure, because that is where it is.
+
+Two limits, both deliberate:
+
+- **Chats only, not channels.** A channel's files live in the team's SharePoint
+  library, and writing there needs `Files.ReadWrite.All` — a permission most
+  tenants keep behind an administrator. The button is not offered in a channel
+  rather than failing there.
+- **4 MB.** That is Graph's limit for putting a file in one request. More than
+  that needs an upload session, whose URL is on a SharePoint host, and this
+  plugin talks to `graph.microsoft.com` and nothing else — which is the rule
+  that stops a crafted message from making it fetch or send anything anywhere.
+  The refusal says so.
+
+Sending a file appears in your own OneDrive as well as in the chat, exactly as
+it does when Teams sends one. Names collide by adding a number rather than
+replacing what was there.
+
 ## What it does not do
 
 - **Only the six reactions Teams offers.** 👍 ❤️ 😂 😮 😢 😡. Graph refuses anything else with "Unicode ... is not supported", so the picker offers exactly what will work rather than letting you pick something that silently fails.
@@ -186,7 +218,7 @@ They are raised from behind the bar icon, not from the window, so they arrive wh
 - **No live updates.** It polls on the interval above. Graph change notifications need a public webhook endpoint, which a desktop shell has no business running.
 - **A message never chooses its own markup.** A Teams message is HTML written by whoever sent it, and Qt's rich text fetches what it is told to fetch. So the markup is flattened in `teams.py`, and the only tag the window ever builds is an `<a>` around text it escaped first. Emoji come from the character Teams already puts in the tag's `alt`. A link keeps its address, but as an offset into the flattened text rather than as a tag — so what reaches the window is still only words, and the window still builds every tag it draws. Only `http`, `https` and `mailto` become links, checked in `teams.py`, again in `Model.js` where the anchor is written, and once more in `openUrl` before `xdg-open` sees it; anything else stays the plain words it was.
 - **Images are fetched by the helper, never by the window.** They live behind the Graph API and need your token; the host is checked before that token is attached, so an `<img src="https://evil/">` in a message cannot be used to collect it. Anything not on `graph.microsoft.com` is dropped from the message entirely.
-- **No unread counts for channels**, no live updates (it polls), and no attachments, reactions, threads or presence.
+- **Files go into chats, not channels, and up to 4 MB.** See [Sending a file](#sending-a-file) for why both of those are where they are.
 
 ## Development
 

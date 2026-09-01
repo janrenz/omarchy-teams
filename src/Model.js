@@ -232,6 +232,7 @@ function accountView(snapshot, alias) {
       // offering to enable it stays switched on for ever.
       channels: data.channels === true,
       canMarkRead: data.canMarkRead === true,
+      canUpload: data.canUpload === true,
       canStartChat: data.canStartChat === true,
       presence: data.presence === true,
       chats: data.chats || [],
@@ -244,7 +245,7 @@ function accountView(snapshot, alias) {
   }
   return {
     alias: String(alias || ""), ok: false, loaded: false, username: "", displayName: "",
-    userId: "", channels: false, canMarkRead: false, canStartChat: false, presence: false,
+    userId: "", channels: false, canMarkRead: false, canUpload: false, canStartChat: false, presence: false,
     chats: [], teams: [], unreadCount: 0,
     errorCode: "", errorMessage: "", warnings: []
   }

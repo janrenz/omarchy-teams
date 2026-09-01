@@ -20,6 +20,9 @@ src/Service.qml         Owns the Processes that run teams.py, the poll timer,
                         and the state the UI binds to.
 src/BarWidget.qml       The bar icon. Opens the window; there is no dropdown.
 src/TeamsWindow.qml     The window. Sidebar, transcript, message box. ~1.7k lines.
+                        Also the file chooser and the window-wide DropArea, which
+                        both end at sendFile() - the one place a file:// URL
+                        becomes a path.
 src/Notifier.qml        omarchy-notification-send, the prime-then-announce rule,
                         and the click that opens the chat.
 src/PollGate.qml        Whether it is worth polling at all: idle, network, battery.
@@ -37,10 +40,14 @@ Nothing goes back the other way except a command line and a stdin payload.
    machine can read another process's command line) and never in `shell.json`
    (world-readable). `clientId` and `authority` are the only settings that
    belong there.
-2. **The window never fetches anything remote.** Inline images live behind Graph
-   and need the token; the helper fetches them, and the host is checked *before*
-   the token is attached. Anything not on `graph.microsoft.com` is dropped from
-   the message entirely.
+2. **The window never fetches anything remote, and nothing but Graph is talked
+   to in either direction.** Inline images live behind Graph and need the token;
+   the helper fetches them, and the host is checked *before* the token is
+   attached. Anything not on `graph.microsoft.com` is dropped from the message
+   entirely. The same rule is why a file being *sent* is capped at 4 MB: that is
+   the limit of a single content PUT to Graph, and the documented route past it
+   is an upload session on a `*.sharepoint.com` host. Keeping the one-host rule
+   is worth more than the megabytes.
 3. **A message never chooses its own markup.** A Teams message is HTML written by
    whoever sent it, and Qt's rich text fetches what it is told to fetch — so
    `teams.py` flattens it, and the only tag the window ever builds is an `<a>`
@@ -152,6 +159,22 @@ fatal QML error makes it exit instead.
   two-monitor desktop with the window open polls the account three times an
   interval. The mail plugin solved the same problem by moving the data into a
   `kinds: ["service"]` singleton (`Store.qml`); this plugin has not yet.
+- **Sending a file is three requests, and Graph has no "post a file".** A file
+  lives in a drive and a message points at it, which is what Teams itself does:
+  the bytes go to the sender's own OneDrive (into the same "Microsoft Teams Chat
+  Files" folder), a sharing link is made, and the chatMessage carries a
+  `reference` attachment. Two things bite. The attachment's `id` must be the
+  driveItem's eTag GUID - anything else posts a message whose attachment no
+  client can resolve, so a missing eTag fails rather than being invented
+  around. And the body has to be `html` for `<attachment id=…>` to mean
+  anything, which is the one place in this helper where text is *not* sent as
+  text - so a comment is escaped there.
+- **`Files.ReadWrite` is opt-in for a reason that is not consent.** An app
+  registration declares which permissions it may *request*; asking for one it
+  does not declare fails the whole sign-in, not just that scope. So the setting
+  is the user saying their registration has it, `SCOPES_FILES` is only appended
+  when it is on, and `can_upload()` reads the answer back off the granted
+  scopes.
 - **Graph refuses reactions outside 👍 ❤️ 😂 😮 😢 😡** with "Unicode ... is not
   supported". The picker offers exactly what will work rather than letting
   someone pick something that silently fails.

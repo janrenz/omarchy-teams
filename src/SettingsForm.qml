@@ -200,6 +200,26 @@ Column {
     onClicked: root.change("channels", !(root.current("channels", true) !== false))
   }
 
+  Toggle {
+    width: parent.width
+    label: "Send files"
+    description: "An Attach button in a chat, and a file dropped on the window. The file goes to your own OneDrive first - into the same folder Teams itself uses - and the message points at it, which is how Teams does it. Needs Files.ReadWrite on your app registration; turn this on only once it has that permission, because a scope the registration does not declare fails the whole sign-in rather than just itself. Takes effect at the next sign-in."
+    checked: root.current("sendFiles", false) === true
+    onClicked: root.change("sendFiles", !(root.current("sendFiles", false) === true))
+  }
+
+  Text {
+    width: parent.width
+    visible: !!root.service && root.service.signedIn && root.service.wantFiles
+             && !root.service.canUpload
+    text: "This sign-in cannot send files yet. Sign in again to ask for Files.ReadWrite."
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Color.urgent
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
   Text {
     width: parent.width
     visible: !!root.service && root.service.signedIn && !root.service.hasChannels

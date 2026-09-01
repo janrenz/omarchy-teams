@@ -61,6 +61,15 @@ SCOPES_CHANNELS = (
     SCOPES_CHATS
     + " Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All ChannelMessage.Send"
 )
+# Sending a file is a third tier, and opt-in for a reason that is not about
+# consent: an app registration declares which permissions it may *request*, so
+# asking for one it does not declare fails the whole sign-in rather than that
+# one scope. A user whose registration predates this feature must add the
+# permission and tick the setting; until then can_upload() reads false off the
+# granted scopes and no button appears. Files.ReadWrite is ordinary user
+# consent - it is the user's own OneDrive, which is where Teams itself puts the
+# files people send in a chat.
+SCOPES_FILES = " Files.ReadWrite"
 
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
@@ -76,8 +85,9 @@ MESSAGE_CAP = 50
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
-def scopes_for(channels):
-    return SCOPES_CHANNELS if channels else SCOPES_CHATS
+def scopes_for(channels, files=False):
+    scopes = SCOPES_CHANNELS if channels else SCOPES_CHATS
+    return scopes + (SCOPES_FILES if files else "")
 
 
 # --------------------------------------------------------------------------
@@ -151,13 +161,21 @@ def read_capped(response, limit=MAX_RESPONSE_BYTES):
     return body
 
 
-def http(url, *, method="GET", data=None, json_body=None, headers=None, timeout=20):
-    """Return (status, parsed_json). Non-2xx comes back with its body parsed."""
+def http(url, *, method="GET", data=None, json_body=None, raw=None, headers=None, timeout=20):
+    """Return (status, parsed_json). Non-2xx comes back with its body parsed.
+
+    `raw` is for the one request that is not JSON in either direction: the
+    bytes of a file being uploaded. It still comes back as JSON, because Graph
+    answers a content PUT with the driveItem it made.
+    """
     body = None
     request_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
     if data is not None:
         body = urllib.parse.urlencode(data).encode()
         request_headers["Content-Type"] = "application/x-www-form-urlencoded"
+    elif raw is not None:
+        body = raw
+        request_headers["Content-Type"] = "application/octet-stream"
     elif json_body is not None:
         body = json.dumps(json_body).encode()
         request_headers["Content-Type"] = "application/json"
@@ -310,7 +328,7 @@ def cmd_login_start(args):
     status, payload = http(
         authority_base(authority) + "/oauth2/v2.0/devicecode",
         method="POST",
-        data={"client_id": client_id, "scope": scopes_for(args.channels)},
+        data={"client_id": client_id, "scope": scopes_for(args.channels, args.files)},
     )
     if status != 200 or "device_code" not in payload:
         fail("devicecode_failed",
@@ -754,6 +772,7 @@ def fetch_account(alias, args):
         "userId": account.get("userId", ""),
         "channels": has_channels(account),
         "canMarkRead": can_mark_read(account),
+        "canUpload": can_upload(account),
         "canStartChat": can_create_chat(account) and can_find_people(account),
         "presence": can_see_presence(account),
         "chats": [],
@@ -992,6 +1011,16 @@ def cmd_palette(_args):
     colors = {name: parsed[name] for name in PALETTE_NAMES
               if isinstance(parsed.get(name), str) and parsed[name].startswith("#")}
     out({"ok": True, "mode": parsed.get("mode", "dark"), "colors": colors})
+
+
+def can_upload(account):
+    """Whether this sign-in may put a file in the user's OneDrive.
+
+    Read back off the granted scopes like every other capability here: a
+    registration that gained the permission after the fact starts working at
+    the next sign-in without anything being assumed in between.
+    """
+    return "files.readwrite" in str((account or {}).get("scopes", "")).lower()
 
 
 def can_see_presence(account):
@@ -1279,6 +1308,188 @@ def cmd_mark_read(args):
     out({"ok": True, "chat": args.chat})
 
 
+# --------------------------------------------------------------------------
+# sending a file
+#
+# Graph has no "post a file to a chat". A file lives in a drive and a message
+# points at it, which is what Teams itself does: the file goes to the sender's
+# OneDrive, into the same "Microsoft Teams Chat Files" folder Teams uses, and
+# the message carries a reference attachment to it. So this is three requests -
+# upload, share, post - and only the last one puts anything in front of anybody.
+#
+# A simple content PUT is capped by Graph at 4 MB. Past that the documented
+# route is an upload session, whose URL is on a *.sharepoint.com host - and this
+# plugin talks to graph.microsoft.com and nothing else, which is the rule that
+# keeps a crafted message from being able to send anything anywhere. Keeping
+# that rule is worth more than the megabytes, so the cap is the PUT's own limit
+# and the refusal says why.
+# --------------------------------------------------------------------------
+
+UPLOAD_CAP = 4 * 1024 * 1024
+CHAT_FILES_FOLDER = "Microsoft Teams Chat Files"
+
+
+def read_stdin_json():
+    """One JSON object, on one line, from whoever started this.
+
+    The path to send comes in this way rather than as an argument. Anyone on
+    this machine can read /proc/<pid>/cmdline; nobody can read another
+    process's stdin - and where a file is can be as telling as what is in it.
+    """
+    try:
+        line = sys.stdin.readline()
+    except (OSError, ValueError):
+        return {}
+    try:
+        parsed = json.loads(line or "{}")
+    except ValueError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def read_upload(path):
+    """The bytes to send, or a refusal a person can act on."""
+    if not path:
+        fail("no_file", "No file to send")
+    if not os.path.isfile(path):
+        fail("no_file", "There is no file at %s" % path)
+    try:
+        size = os.path.getsize(path)
+    except OSError as error:
+        fail("unreadable", "Could not read %s: %s" % (path, error))
+    if size == 0:
+        fail("empty_file", "That file is empty")
+    if size > UPLOAD_CAP:
+        fail("too_large",
+             "That file is %.1f MB. Graph takes up to %d MB in one request; more than that "
+             "needs an upload session on a SharePoint host, and this plugin only ever talks "
+             "to graph.microsoft.com." % (size / 1048576.0, UPLOAD_CAP // 1048576))
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(UPLOAD_CAP + 1)
+    except OSError as error:
+        fail("unreadable", "Could not read %s: %s" % (path, error))
+
+
+def attachment_guid(item):
+    """The id a Teams attachment is keyed by.
+
+    Teams uses the driveItem's eTag, which arrives as '"{GUID},1"'. Anything
+    else and the message posts with an attachment nobody's client can resolve,
+    so a missing eTag is worth failing on rather than inventing a GUID for.
+    """
+    etag = str((item or {}).get("eTag") or "")
+    start = etag.find("{")
+    end = etag.find("}", start + 1)
+    if start == -1 or end == -1:
+        return ""
+    return etag[start + 1:end]
+
+
+def cmd_upload(args):
+    """Send a file into a chat: upload, share, post."""
+    path = str(args.file or "")
+    comment = str(args.comment or "")
+    if args.stdin:
+        payload = read_stdin_json()
+        path = str(payload.get("file") or path)
+        comment = str(payload.get("comment") or comment)
+    path = os.path.expanduser(path.strip())
+    name = os.path.basename(path)
+
+    if not args.chat:
+        # A channel's files live in the team's SharePoint library, not in the
+        # sender's OneDrive, and writing there needs Files.ReadWrite.All - a
+        # permission most tenants gate behind an administrator. Saying so is
+        # better than a 403 from a request nobody expected to make.
+        fail("channel_files_unsupported",
+             "Files can be sent into a chat, not into a channel: a channel's files live in "
+             "the team's SharePoint library, which needs Files.ReadWrite.All and usually an "
+             "administrator. Send it in a chat, or share a link in the channel instead.")
+
+    # Every check that does not need the network runs before the demo bail-out,
+    # so demo refuses exactly what the real thing refuses. Anything below this
+    # line reaches Graph.
+    body = read_upload(path)
+    if args.demo:
+        out({"ok": True, "id": "demo-file", "name": name, "bytes": len(body)})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_upload(account):
+        fail("permission_required",
+             "This sign-in cannot send files. Add Files.ReadWrite to your app registration, "
+             "turn on \"Send files\" in this widget's settings, and sign in again.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    headers = {"Authorization": "Bearer " + token}
+
+    # conflictBehavior=rename, so sending two screenshots called Screenshot.png
+    # does not quietly replace the first one in the user's own drive.
+    target = "/me/drive/root:/%s/%s:/content?@microsoft.graph.conflictBehavior=rename" % (
+        urllib.parse.quote(CHAT_FILES_FOLDER), urllib.parse.quote(name))
+    status, item = http(GRAPH + target, method="PUT", raw=body, headers=headers, timeout=120)
+    if status not in (200, 201):
+        fail("upload_failed", graph_error(item, "Could not put that file in your OneDrive"))
+
+    item_id = str(item.get("id") or "")
+    guid = attachment_guid(item)
+    if not item_id or not guid:
+        fail("upload_failed", "OneDrive took the file but did not say enough about it to share")
+
+    # A link, so the people in the chat can open it. Organisation scope first
+    # because that is what Teams does; a tenant that forbids it gets whatever
+    # its default is, and failing that the item's own URL, which at least works
+    # for anybody who already has access.
+    url = ""
+    for wanted in ({"type": "view", "scope": "organization"}, {"type": "view"}):
+        status, link = http(
+            GRAPH + "/me/drive/items/%s/createLink" % urllib.parse.quote(item_id, safe=""),
+            method="POST", json_body=wanted, headers=headers)
+        if status in (200, 201):
+            url = str((link.get("link") or {}).get("webUrl") or "")
+            if url:
+                break
+    if not url:
+        url = str(item.get("webUrl") or "")
+    if not url:
+        fail("share_failed",
+             "The file is in your OneDrive but could not be shared, so nothing was posted")
+
+    # contentType html, because an attachment is referenced by markup - which
+    # means a comment has to be escaped here. Text sent as text elsewhere in
+    # this helper for exactly the reason it has to be escaped here.
+    escaped = comment.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    content = ("%s<br><attachment id=\"%s\"></attachment>" % (escaped, guid)) if escaped \
+        else ("<attachment id=\"%s\"></attachment>" % guid)
+    status, posted = http(
+        GRAPH + "/me/chats/%s/messages" % urllib.parse.quote(args.chat, safe=""),
+        method="POST",
+        json_body={
+            "body": {"contentType": "html", "content": content},
+            "attachments": [{
+                "id": guid,
+                "contentType": "reference",
+                "contentUrl": url,
+                "name": name,
+            }],
+        },
+        headers=headers)
+    if status not in (200, 201):
+        # The file is in the user's OneDrive and in no conversation. Say that,
+        # rather than "failed" - it is in a different place than before.
+        fail("post_failed",
+             "That file is in your OneDrive but could not be posted: %s"
+             % graph_error(posted, "Teams refused the message"))
+
+    out({"ok": True, "id": str(posted.get("id") or ""), "name": name,
+         "bytes": len(body), "url": url})
+
+
 def cmd_send(args):
     text = str(args.text or "").strip()
     if not text:
@@ -1387,6 +1598,9 @@ def demo_account(alias):
         "ok": True, "alias": alias, "username": "%s@example.com" % alias,
         "displayName": alias.capitalize(), "userId": "demo-me", "channels": True,
         "canMarkRead": True,
+        # On in the demo, so the harness and the showcase show the Attach
+        # button. A real account gets this from its granted scopes.
+        "canUpload": True,
         "canStartChat": True,
         "chats": chats, "teams": teams,
         "unreadCount": sum(1 for row in chats if row["unread"]), "warnings": [],
@@ -1467,6 +1681,8 @@ def main():
     start.add_argument("--authority", default="", help="common, organizations, or a tenant id")
     start.add_argument("--channels", action="store_true",
                        help="also ask for team and channel access (needs admin consent)")
+    start.add_argument("--files", action="store_true",
+                       help="also ask for Files.ReadWrite, for sending a file into a chat")
     start.set_defaults(func=cmd_login_start)
 
     with_account("login-poll", "poll a pending sign-in").set_defaults(func=cmd_login_poll)
@@ -1534,6 +1750,15 @@ def main():
     send.add_argument("--text", required=True)
     send.add_argument("--demo", action="store_true")
     send.set_defaults(func=cmd_send)
+
+    upload = with_account("upload", "send a file into a chat")
+    upload.add_argument("--chat", default="")
+    upload.add_argument("--file", default="", help="path to send; --stdin is what the window uses")
+    upload.add_argument("--comment", default="", help="a message to go with it")
+    upload.add_argument("--stdin", action="store_true",
+                        help='read {"file": "...", "comment": "..."} from stdin')
+    upload.add_argument("--demo", action="store_true")
+    upload.set_defaults(func=cmd_upload)
 
     sub.add_parser("palette", help="the active theme's named colours").set_defaults(func=cmd_palette)
 

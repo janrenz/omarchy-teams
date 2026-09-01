@@ -32,6 +32,7 @@
       "label": "",
       "chats": 25,
       "channels": true,
+      "sendFiles": false,
       "refreshIntervalSec": 120,
       "pausePolling": true,
       "tintOnUnread": true,
@@ -63,6 +64,13 @@
         "label": "Include teams and channels",
         "description": "Off signs in for chats alone. On also asks for channel access, which normally needs an administrator to consent for the whole tenant - if that consent is refused the sign-in fails, and chats-only will still work.",
         "defaultValue": true
+      },
+      {
+        "key": "sendFiles",
+        "type": "boolean",
+        "label": "Send files",
+        "description": "Adds an Attach button and lets a file dropped on the window go into the chat you are reading. It needs Files.ReadWrite on your app registration - the file goes to your own OneDrive first, into the same folder Teams itself uses, and the message points at it. Turn this on only once the registration has that permission: a scope it does not declare fails the whole sign-in, not just itself. Changing this means signing in again.",
+        "defaultValue": false
       },
       {
         "key": "chats",

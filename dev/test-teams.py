@@ -643,6 +643,123 @@ class Reacting(unittest.TestCase):
             self.assertTrue(result["ok"], "%s should be sendable" % emoji)
 
 
+class SendingAFile(unittest.TestCase):
+    """Upload, share, post - and what happens when one of the three fails."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.file = os.path.join(self.dir, "shot.png")
+        with open(self.file, "wb") as handle:
+            handle.write(b"\x89PNG\r\n" + b"x" * 40)
+
+    ITEM = {"id": "01ITEM", "eTag": '"{5B33B0FF-1111-2222-3333-44444455DDEE},1"',
+            "webUrl": "https://x-my.sharepoint.com/personal/item"}
+    LINK = {"link": {"webUrl": "https://x-my.sharepoint.com/:i:/g/shared"}}
+
+    def run_upload(self, responses=None, scopes="Chat.ReadWrite Files.ReadWrite",
+                   chat="19:abc", comment="", file=None):
+        import types
+        self.calls = []
+        queue = list(responses if responses is not None
+                     else [(201, self.ITEM), (201, self.LINK), (201, {"id": "msg-9"})])
+
+        def http(url, method="GET", data=None, json_body=None, raw=None,
+                 headers=None, timeout=20):
+            self.calls.append({"url": url, "method": method, "body": json_body,
+                               "raw": raw, "headers": headers})
+            return queue.pop(0) if queue else (200, {})
+
+        args = types.SimpleNamespace(account="work", chat=chat,
+                                     file=self.file if file is None else file,
+                                     comment=comment, stdin=False, demo=False)
+        patched = {
+            "read_json": lambda *a, **k: {"scopes": scopes},
+            "access_token": lambda alias, account: ("token", account),
+            "http": http,
+        }
+        original = {name: getattr(teams, name) for name in patched}
+        for name, stub in patched.items():
+            setattr(teams, name, stub)
+        try:
+            return capture(teams.cmd_upload, args)
+        finally:
+            for name, value in original.items():
+                setattr(teams, name, value)
+
+    def test_the_file_goes_to_the_folder_teams_itself_uses(self):
+        result = self.run_upload()
+        self.assertTrue(result["ok"])
+        put = self.calls[0]
+        self.assertEqual(put["method"], "PUT")
+        self.assertIn("Microsoft%20Teams%20Chat%20Files/shot.png:/content", put["url"])
+        # rename, so a second Screenshot.png does not replace the first.
+        self.assertIn("conflictBehavior=rename", put["url"])
+        self.assertEqual(put["raw"][:4], b"\x89PNG")
+
+    def test_the_message_carries_the_attachment_keyed_by_the_items_etag(self):
+        self.run_upload()
+        post = self.calls[-1]
+        self.assertIn("/me/chats/19:abc/messages", post["url"].replace("%3A", ":"))
+        attachment = post["body"]["attachments"][0]
+        self.assertEqual(attachment["id"], "5B33B0FF-1111-2222-3333-44444455DDEE")
+        self.assertEqual(attachment["contentType"], "reference")
+        self.assertEqual(attachment["contentUrl"], self.LINK["link"]["webUrl"])
+        self.assertIn('<attachment id="5B33B0FF-1111-2222-3333-44444455DDEE">',
+                      post["body"]["body"]["content"])
+
+    def test_a_comment_is_escaped_because_the_body_has_to_be_html(self):
+        self.run_upload(comment="a < b & c")
+        content = self.calls[-1]["body"]["body"]["content"]
+        self.assertTrue(content.startswith("a &lt; b &amp; c<br><attachment"))
+
+    def test_organisation_scope_is_asked_for_first_and_a_refusal_falls_back(self):
+        result = self.run_upload(responses=[
+            (201, self.ITEM), (403, {"error": {"message": "no"}}),
+            (201, self.LINK), (201, {"id": "msg-9"})])
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.calls[1]["body"], {"type": "view", "scope": "organization"})
+        self.assertEqual(self.calls[2]["body"], {"type": "view"})
+
+    def test_a_file_in_the_drive_that_could_not_be_posted_says_where_it_is(self):
+        result = self.run_upload(responses=[
+            (201, self.ITEM), (201, self.LINK), (403, {"error": {"message": "nope"}})])
+        self.assertEqual(result["error"]["code"], "post_failed")
+        self.assertIn("in your OneDrive", result["error"]["message"])
+
+    def test_a_sign_in_without_the_permission_refuses_before_any_request(self):
+        result = self.run_upload(scopes="Chat.ReadWrite")
+        self.assertEqual(result["error"]["code"], "permission_required")
+        self.assertEqual(self.calls, [])
+
+    def test_a_channel_is_refused_with_the_reason_rather_than_attempted(self):
+        result = self.run_upload(chat="")
+        self.assertEqual(result["error"]["code"], "channel_files_unsupported")
+        self.assertEqual(self.calls, [])
+
+    def test_an_item_without_an_etag_is_not_guessed_a_guid_for(self):
+        item = dict(self.ITEM)
+        del item["eTag"]
+        result = self.run_upload(responses=[(201, item)])
+        self.assertEqual(result["error"]["code"], "upload_failed")
+
+    def test_the_cap_is_the_one_request_limit_and_says_so(self):
+        big = os.path.join(self.dir, "big.bin")
+        with open(big, "wb") as handle:
+            handle.truncate(teams.UPLOAD_CAP + 1)
+        result = self.run_upload(file=big)
+        self.assertEqual(result["error"]["code"], "too_large")
+        self.assertIn("graph.microsoft.com", result["error"]["message"])
+
+    def test_files_are_a_third_tier_of_scopes_asked_for_only_when_wanted(self):
+        # A registration that does not declare a permission fails the whole
+        # sign-in when it is requested, so this one is opt-in.
+        self.assertNotIn("Files.ReadWrite", teams.scopes_for(False))
+        self.assertNotIn("Files.ReadWrite", teams.scopes_for(True))
+        self.assertIn("Files.ReadWrite", teams.scopes_for(False, True))
+        self.assertIn("Chat.ReadWrite", teams.scopes_for(False, True))
+
+
 class Aliases(unittest.TestCase):
     """An account name becomes a filename, so it is checked."""
 

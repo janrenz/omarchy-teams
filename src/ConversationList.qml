@@ -35,9 +35,9 @@ Column {
   // much of its own left padding to stand in, so that the labels - not the
   // markers - line up with the window title. Carved out of the rows instead,
   // it read as an unexplained indent in front of every name.
-  // Room for the unread bar and the presence circle side by side, since a row
-  // can now show both.
-  property int markerGutter: rowIndent + Style.space(14)
+  // Only the unread bar lives in the gutter now; the presence circle sits
+  // against the name instead.
+  property int markerGutter: rowIndent + Style.space(6)
 
   function pad(px) { return Math.max(1, Math.round(px * density)) }
 
@@ -120,26 +120,6 @@ Column {
         color: root.accent
       }
 
-      Rectangle {
-        id: dot
-        anchors.left: parent.left
-        anchors.leftMargin: Style.spacing.sm + Style.space(4)
-        anchors.verticalCenter: parent.verticalCenter
-        width: Style.space(7)
-        height: width
-        radius: width
-        visible: Model.presenceColor(line.modelData.presence, root.palette) !== ""
-        // Available and busy are filled; away is a ring. Shape again rather
-        // than hue, so the states stay apart on a theme whose yellow and green
-        // sit close together, and for anyone who cannot tell those apart.
-        color: String(line.modelData.presence) === "away"
-               ? "transparent"
-               : Model.presenceColor(line.modelData.presence, root.palette)
-        opacity: String(line.modelData.presence) === "offline" ? 0.75 : 1.0
-        border.width: String(line.modelData.presence) === "away" ? Style.space(2) : 0
-        border.color: Model.presenceColor(line.modelData.presence, root.palette)
-      }
-
       // Which way a team is facing, so a closed one does not read as a team
       // with no channels. Spins to point down as it opens.
       Text {
@@ -181,17 +161,45 @@ Column {
         anchors.rightMargin: Style.spacing.md
         spacing: Style.spacing.xxs
 
-        Text {
+        // The name, with the person's presence immediately in front of it -
+        // it is about them, so it belongs against their name rather than out
+        // in the gutter with the unread mark, which is about the conversation.
+        Row {
           width: parent.width
-          text: String(line.modelData.title || "")
-          textFormat: Text.PlainText
-          elide: Text.ElideRight
-          color: line.inert ? root.dim : root.fg
-          font.family: root.fontFamily
-          font.pixelSize: line.isHeading ? Style.font.caption : Style.font.body
-          font.bold: line.isHeading || line.modelData.unread === true || line.selected
-          font.capitalization: line.isHeading ? Font.AllUppercase : Font.MixedCase
-          font.italic: line.isNote
+          spacing: Style.spacing.xs
+
+          Rectangle {
+            id: dot
+            anchors.verticalCenter: title.verticalCenter
+            width: Style.space(7)
+            height: width
+            radius: width
+            visible: Model.presenceColor(line.modelData.presence, root.palette) !== ""
+            // Available and busy are filled; away is a ring. Shape again
+            // rather than hue, so the states stay apart on a theme whose
+            // yellow and green sit close together, and for anyone who cannot
+            // tell those apart.
+            color: String(line.modelData.presence) === "away"
+                   ? "transparent"
+                   : Model.presenceColor(line.modelData.presence, root.palette)
+            opacity: String(line.modelData.presence) === "offline" ? 0.75 : 1.0
+            border.width: String(line.modelData.presence) === "away" ? Style.space(2) : 0
+            border.color: Model.presenceColor(line.modelData.presence, root.palette)
+          }
+
+          Text {
+            id: title
+            width: parent.width - (dot.visible ? dot.width + parent.spacing : 0)
+            text: String(line.modelData.title || "")
+            textFormat: Text.PlainText
+            elide: Text.ElideRight
+            color: line.inert ? root.dim : root.fg
+            font.family: root.fontFamily
+            font.pixelSize: line.isHeading ? Style.font.caption : Style.font.body
+            font.bold: line.isHeading || line.modelData.unread === true || line.selected
+            font.capitalization: line.isHeading ? Font.AllUppercase : Font.MixedCase
+            font.italic: line.isNote
+          }
         }
 
         Text {

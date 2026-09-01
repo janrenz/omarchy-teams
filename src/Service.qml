@@ -25,6 +25,12 @@ Item {
   property bool includeTeams: true
   readonly property int chatCount: intSetting("chats", 25, 1, 40)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 120, 30, 3600)
+  readonly property bool notifyOnNew: setting("notify", true) !== false
+  // Whose job it is to announce new messages. There is a Service behind the
+  // bar icon and another behind the window, both polling the same account, and
+  // both announcing would say everything twice. The bar's is the one that is
+  // always there, so the bar's is the one that speaks.
+  property bool notifies: false
 
   // How much room to give things. A multiplier over the theme's spacing rather
   // than pixel values of our own, so it still follows the font size.
@@ -176,6 +182,7 @@ Item {
       root.errorCode = ""
       root.errorMessage = ""
       root.snapshot = parsed
+      root.announceNewChats()
       // A conversation open while the list refreshed is still the one being
       // read; reloading it here would scroll the transcript out from under
       // whoever is reading it.
@@ -190,9 +197,55 @@ Item {
     onTriggered: root.refresh()
   }
 
-  onConfiguredChanged: if (configured) refresh()
+  onConfiguredChanged: if (configured) { loadReactionChoices(); refresh() }
   onPluginDirChanged: if (configured) refresh()
   onSettingsChanged: if (configured) refresh()
+
+  // ---- telling you something arrived --------------------------------------
+
+  Notifier {
+    id: notifier
+    appName: "Teams"
+    plural: "new messages"
+    // Not while the demo fixtures are on: dev/showcase.sh turns them on to
+    // take the README's pictures, and a screenshot run should not push six
+    // notifications about invented people onto a real desktop.
+    enabled: root.notifies && root.notifyOnNew && root.setting("demo", false) !== true
+  }
+
+  // Another account's chats are not this one's, and a sign-out means the next
+  // sign-in starts over: prime again rather than announce the backlog.
+  onAliasChanged: notifier.forget()
+  onSignedInChanged: if (!signedIn) notifier.forget()
+
+  function announceNewChats() {
+    var chats = view.chats || []
+    var me = String(view.displayName || "")
+    var fresh = []
+    var present = []
+    for (var i = 0; i < chats.length; i++) {
+      var chat = chats[i]
+      // The chat and when it last spoke. The next message in the same chat is
+      // a new thing to be told about; the same message polled again is not.
+      var id = String(chat.id || "") + "@" + String(chat.when || "")
+      present.push(id)
+      if (chat.unread !== true) continue
+      // Your own last word is not news. Graph leaves a chat you just spoke in
+      // unread until the read mark catches up, which is long enough to be
+      // told about what you just said yourself.
+      var from = String(chat.lastFrom || "")
+      if (me !== "" && from === me) continue
+      var title = String(chat.title || "")
+      fresh.push({
+        id: id,
+        summary: title,
+        // A one-to-one chat is titled with the person's name, so repeating it
+        // in front of every line only takes room from what they said.
+        body: (from !== "" && from !== title ? from + ": " : "") + String(chat.lastText || "")
+      })
+    }
+    notifier.observe("", fresh, present)
+  }
 
   // After the first fetch has said so, not before it: whether a sign-in is
   // worth resuming depends on whether we are signed in, and only the fetch
@@ -390,6 +443,68 @@ Item {
         openChat(row)
         return
       }
+    }
+  }
+
+  // ---- reactions --------------------------------------------------------
+
+  // What may be sent, asked of the helper rather than listed here: Graph
+  // refuses anything outside its set, so the picker and the sender have to
+  // agree, and one of them should not be a copy of the other.
+  property var reactionChoices: []
+  property bool reacting: false
+  property string reactError: ""
+
+  function loadReactionChoices() {
+    if (reactionChoicesProc.running || pluginDir === "" || reactionChoices.length > 0) return
+    reactionChoicesProc.command = ["python3", helper(), "reactions"]
+    reactionChoicesProc.running = true
+  }
+
+  Process {
+    id: reactionChoicesProc
+    running: false
+    stdout: StdioCollector { id: reactionChoicesOut; waitForEnd: true }
+    onExited: function(_exitCode) {
+      var parsed = Model.parseJson(reactionChoicesOut.text, null)
+      if (parsed && parsed.ok !== false) root.reactionChoices = parsed.reactions || []
+    }
+  }
+
+  function react(messageId, emoji, remove) {
+    var id = String(messageId || "")
+    if (id === "" || !openConversation || reacting || pluginDir === "") return
+    if (setting("demo", false) === true) return
+    reacting = true
+    reactError = ""
+    var row = openConversation
+    var command = ["python3", helper(), "react", "--account", alias,
+                   "--message", id, "--emoji", String(emoji)]
+    if (row.kind === "chat") command = command.concat(["--chat", String(row.id)])
+    else command = command.concat(["--team", String(row.teamId), "--channel", String(row.id)])
+    if (remove === true) command.push("--remove")
+    reactProc.command = command
+    reactProc.running = true
+  }
+
+  Process {
+    id: reactProc
+    running: false
+    stdout: StdioCollector { id: reactOut; waitForEnd: true }
+    stderr: StdioCollector { id: reactErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.reacting = false
+      var parsed = Model.parseJson(reactOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.reactError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(reactErrOut.text || "Could not change that reaction", 160)
+        return
+      }
+      root.reactError = ""
+      // Re-read rather than guess at the new count: somebody else may have
+      // reacted in the meantime, and the transcript should show what is there.
+      root.reloadConversation()
     }
   }
 

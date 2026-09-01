@@ -28,6 +28,13 @@ Column {
   // Not scaled: a wider left margin on every row just narrows the names.
   readonly property int rowIndent: Style.spacing.md
 
+  // The column the unread dot and the team chevron stand in, to the left of
+  // every label. The pane holding this list is expected to hand the list this
+  // much of its own left padding to stand in, so that the labels - not the
+  // markers - line up with the window title. Carved out of the rows instead,
+  // it read as an unexplained indent in front of every name.
+  property int markerGutter: rowIndent + Style.space(10)
+
   function pad(px) { return Math.max(1, Math.round(px * density)) }
 
   signal picked(var row)
@@ -134,7 +141,7 @@ Column {
         // straight under the time - which it did, at compact spacing.
         anchors.right: stamp.visible ? stamp.left : parent.right
         anchors.verticalCenter: parent.verticalCenter
-        anchors.leftMargin: root.rowIndent + Style.space(10)
+        anchors.leftMargin: root.markerGutter
                             + Style.space(12) * line.modelData.depth
         anchors.rightMargin: Style.spacing.md
         spacing: Style.spacing.xxs

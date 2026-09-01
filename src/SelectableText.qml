@@ -28,6 +28,14 @@ TextEdit {
   clip: singleLine
   textFormat: TextEdit.PlainText
   color: Color.foreground
+  // Links, in the theme's accent rather than in Qt's built-in blue, which
+  // belongs to no Omarchy theme and sat oddly against every one of them. It
+  // goes through the palette and not through `linkColor`, which is a Text
+  // property that a TextEdit does not have. Markup that colours its own
+  // anchors - which plenty of HTML mail does - still wins; this is the colour
+  // for links that state no preference, and those are all of them here.
+  palette.link: Color.accent
+  palette.linkVisited: Color.accent
   // A TextEdit shows an I-beam and a blinking caret by default; read-only text
   // should look like text, not like a field somebody forgot to disable.
   cursorVisible: false

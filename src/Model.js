@@ -278,7 +278,8 @@ function groupMessages(messages, meId) {
     var last = groups.length > 0 ? groups[groups.length - 1] : null
     if (last && !message.system && !last.system && String(last.fromId) === String(message.fromId || "")) {
       last.lines.push({ id: message.id, text: message.text, when: message.when,
-                        edited: message.edited === true, images: message.images || [] })
+                        edited: message.edited === true, images: message.images || [],
+                        reactions: message.reactions || [] })
       last.when = message.when
       continue
     }
@@ -290,7 +291,8 @@ function groupMessages(messages, meId) {
       system: message.system === true,
       when: message.when,
       lines: [{ id: message.id, text: message.text, when: message.when,
-                edited: message.edited === true, images: message.images || [] }]
+                edited: message.edited === true, images: message.images || [],
+                reactions: message.reactions || [] }]
     })
   }
   return groups

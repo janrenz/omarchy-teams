@@ -8,6 +8,7 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
 - **Starting a chat** with anybody in the directory, and **marking a chat read** by opening it.
 - **Emoji, inline images and clickable links** in the transcript.
+- **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours, or `+` to pick from the six Teams takes.
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
 
 ![The conversation list, and a chat open beside it](showcase-conversation.png)
@@ -153,9 +154,19 @@ own.
 | `refreshIntervalSec` | `120` | How often to poll (30–3600). |
 | `icon` / `label` | `󰊻` | Bar glyph, or text instead of it. |
 | `tintOnUnread` | `true` | Highlight the bar icon while a chat is unread. |
+| `notify` | `true` | Desktop notification when a chat has something new in it. |
+
+## Notifications
+
+A chat with something new in it raises a desktop notification: the chat's name, and a line of what was said. More than three arriving in one poll become a single summary instead of a stack.
+
+What counts as new is *new since the shell started watching*, not *unread*. The first answer after a sign-in — or after a laptop wakes up to a morning of messages — is an entire backlog at once, and announcing all of it is what makes people turn notifications off for good. So the first poll of an account primes quietly and only what turns up after it is announced. Nothing you sent yourself is announced either: Graph leaves a chat you just spoke in unread until the read mark catches up.
+
+They are raised from behind the bar icon, not from the window, so they arrive whether or not the window is open — and only once, though both have a service of their own polling the same account.
 
 ## What it does not do
 
+- **Only the six reactions Teams offers.** 👍 ❤️ 😂 😮 😢 😡. Graph refuses anything else with "Unicode ... is not supported", so the picker offers exactly what will work rather than letting you pick something that silently fails.
 - **No unread counts for channels.** Graph will say whether a *chat* has been read since its last message, but exposes nothing equivalent for channels. Rather than invent a number, channels carry no unread mark at all.
 - **Teams are closed until opened.** Their channels are one request per team; listing all of them up front cost 29 requests and two hundred rows on an account in 28 teams.
 - **No live updates.** It polls on the interval above. Graph change notifications need a public webhook endpoint, which a desktop shell has no business running.

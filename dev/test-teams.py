@@ -447,6 +447,112 @@ class FriendlyErrors(unittest.TestCase):
         self.assertEqual(teams.friendly(None), "Something went wrong")
 
 
+class Reactions(unittest.TestCase):
+    """Counting them for display, and sending one."""
+
+    def message(self, *pairs):
+        return {"reactions": [
+            {"reactionType": emoji, "displayName": "Like",
+             "user": {"user": {"id": who}}}
+            for emoji, who in pairs]}
+
+    def test_the_same_emoji_from_several_people_is_one_chip(self):
+        rows = teams.reaction_summary(self.message(("👍", "a"), ("👍", "b")), "me")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["count"], 2)
+
+    def test_it_knows_whether_you_are_one_of_them(self):
+        # This is what makes the chip a toggle rather than a label.
+        mine = teams.reaction_summary(self.message(("👍", "me")), "me")
+        self.assertTrue(mine[0]["mine"])
+        theirs = teams.reaction_summary(self.message(("👍", "someone")), "me")
+        self.assertFalse(theirs[0]["mine"])
+
+    def test_the_busiest_reaction_comes_first(self):
+        rows = teams.reaction_summary(
+            self.message(("😂", "a"), ("👍", "b"), ("👍", "c")), "me")
+        self.assertEqual(rows[0]["emoji"], "👍")
+        self.assertEqual([r["count"] for r in rows], [2, 1])
+
+    def test_a_tie_is_ordered_the_same_way_every_time(self):
+        # Otherwise chips shuffle between fetches while nothing has changed.
+        first = teams.reaction_summary(self.message(("😂", "a"), ("👍", "b")), "me")
+        second = teams.reaction_summary(self.message(("👍", "b"), ("😂", "a")), "me")
+        self.assertEqual([r["emoji"] for r in first], [r["emoji"] for r in second])
+
+    def test_no_reactions_is_an_empty_list(self):
+        self.assertEqual(teams.reaction_summary({}, "me"), [])
+        self.assertEqual(teams.reaction_summary({"reactions": None}, "me"), [])
+
+    def test_an_unknown_user_does_not_count_as_you(self):
+        rows = teams.reaction_summary(self.message(("👍", "")), "")
+        self.assertFalse(rows[0]["mine"])
+
+
+class Reacting(unittest.TestCase):
+    def run_react(self, emoji="👍", remove=False, chat="19:abc", team="", channel="",
+                  responses=None):
+        import types
+        self.calls = []
+        queue = list(responses or [(204, {})])
+
+        def http(url, method="GET", data=None, json_body=None, headers=None, timeout=20):
+            self.calls.append({"url": url, "method": method, "body": json_body})
+            return queue.pop(0) if queue else (204, {})
+
+        args = types.SimpleNamespace(account="work", message="msg-1", emoji=emoji,
+                                     chat=chat, team=team, channel=channel, remove=remove)
+        patched = {
+            "read_json": lambda *a, **k: {"scopes": "Chat.ReadWrite"},
+            "access_token": lambda alias, account: ("token", account),
+            "http": http,
+        }
+        original = {name: getattr(teams, name) for name in patched}
+        for name, stub in patched.items():
+            setattr(teams, name, stub)
+        try:
+            return capture(teams.cmd_react, args)
+        finally:
+            for name, value in original.items():
+                setattr(teams, name, value)
+
+    def test_it_posts_to_setReaction_under_chats_not_me_chats(self):
+        # /me/chats answers 404 "Requested API is not supported" for this;
+        # /chats works. Getting this wrong is silent until someone reacts.
+        result = self.run_react()
+        self.assertTrue(result["ok"])
+        url = self.calls[0]["url"]
+        self.assertIn("/chats/", url)
+        self.assertNotIn("/me/chats/", url)
+        self.assertTrue(url.endswith("/setReaction"))
+
+    def test_removing_posts_to_unsetReaction(self):
+        self.run_react(remove=True)
+        self.assertTrue(self.calls[0]["url"].endswith("/unsetReaction"))
+
+    def test_the_emoji_itself_is_the_reaction_type(self):
+        # Graph takes the character, not a name, and hands the same back.
+        self.run_react()
+        self.assertEqual(self.calls[0]["body"], {"reactionType": "👍"})
+
+    def test_a_channel_message_goes_to_its_team_and_channel(self):
+        self.run_react(chat="", team="t1", channel="c1")
+        self.assertIn("/teams/t1/channels/c1/messages/", self.calls[0]["url"])
+
+    def test_an_emoji_teams_does_not_take_is_refused_before_the_request(self):
+        result = self.run_react(emoji="🦄")
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["code"], "bad_reaction")
+        self.assertEqual(self.calls, [], "nothing should have been sent")
+
+    def test_every_offered_reaction_is_one_the_sender_accepts(self):
+        # The picker and the sender must agree, or a chip does nothing.
+        for emoji, _ in teams.REACTIONS:
+            self.assertIn(emoji, teams.REACTION_EMOJI)
+            result = self.run_react(emoji=emoji)
+            self.assertTrue(result["ok"], "%s should be sendable" % emoji)
+
+
 class Aliases(unittest.TestCase):
     """An account name becomes a filename, so it is checked."""
 

@@ -37,6 +37,9 @@ BarWidget {
     id: service
     settings: root.settings
     pluginDir: root.pluginDir
+    // The bar is always here and the window is not, so new messages are
+    // announced from behind the icon rather than from behind the window.
+    notifies: true
     // The bar draws an unread count and nothing else, and the team tree costs
     // a Graph request per team. The window asks for it; this must not.
     includeTeams: false

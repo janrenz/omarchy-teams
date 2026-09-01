@@ -546,7 +546,7 @@ def chat_title(chat, me_id):
     return "%s and %d others" % (", ".join(names[:3]), len(names) - 3)
 
 
-def message_row(message):
+def message_row(message, me_id=""):
     sender = ((message.get("from") or {}).get("user") or {})
     body = (message.get("body") or {})
     return {
@@ -557,6 +557,7 @@ def message_row(message):
         "text": plain_text(body.get("content")),
         "edited": bool(message.get("lastEditedDateTime")),
         "images": message_images(body.get("content")),
+        "reactions": reaction_summary(message, me_id),
         # A system message ("X added Y to the chat") has no sender and reads
         # oddly in a list of things people said.
         "system": message.get("messageType", "message") != "message",
@@ -730,7 +731,8 @@ def cmd_messages(args):
     if status != 200:
         fail("messages_failed", graph_error(payload, "Could not read this conversation"))
 
-    rows = [message_row(message) for message in payload.get("value", [])]
+    me_id = token_claims(token).get("oid") or account.get("userId") or ""
+    rows = [message_row(message, me_id) for message in payload.get("value", [])]
     # Graph returns newest first; a transcript reads the other way.
     rows.reverse()
     out({"ok": True, "messages": rows})
@@ -817,6 +819,44 @@ def friendly(message):
         if code in text.lower().replace(" ", ""):
             return sentence + "  (" + text + ")"
     return text or "Something went wrong"
+
+
+# What Teams offers on the reaction bar. reactionType is the character itself,
+# not a name - which is also how it comes back on a message, so the same value
+# round-trips. Anything outside this set is refused by Graph with "Unicode ...
+# is not supported", so the picker offers exactly these.
+REACTIONS = [
+    ("\U0001F44D", "Like"),
+    ("\u2764\uFE0F", "Heart"),
+    ("\U0001F602", "Laugh"),
+    ("\U0001F62E", "Surprised"),
+    ("\U0001F622", "Sad"),
+    ("\U0001F621", "Angry"),
+]
+REACTION_EMOJI = [emoji for emoji, _ in REACTIONS]
+
+
+def reaction_summary(message, me_id):
+    """A message's reactions as one row per emoji.
+
+    Graph lists them one per person; a transcript wants them counted, and
+    wants to know whether you are one of the people counted - that is what
+    makes the chip a toggle rather than a label.
+    """
+    counts = {}
+    for reaction in message.get("reactions") or []:
+        emoji = str(reaction.get("reactionType") or "").strip()
+        if not emoji:
+            continue
+        who = (((reaction.get("user") or {}).get("user") or {}).get("id") or "")
+        row = counts.setdefault(emoji, {"emoji": emoji, "count": 0, "mine": False,
+                                        "name": reaction.get("displayName") or ""})
+        row["count"] += 1
+        if me_id and str(who) == str(me_id):
+            row["mine"] = True
+    # Most-reacted first, then by the character, so the order is stable between
+    # fetches rather than shuffling as people react.
+    return sorted(counts.values(), key=lambda row: (-row["count"], row["emoji"]))
 
 
 def person_row(person, kind):
@@ -968,6 +1008,53 @@ def cmd_new_chat(args):
     if status not in (200, 201):
         fail("create_failed", friendly(graph_error(payload, "Could not start that chat")))
     out({"ok": True, "id": (payload or {}).get("id", ""), "chatType": (payload or {}).get("chatType", "")})
+
+
+def conversation_path(args):
+    """The chat or channel a message lives in.
+
+    /chats and not /me/chats: the reaction endpoints are not published under
+    /me at all - that path answers 404 "Requested API is not supported" while
+    the same call under /chats works.
+    """
+    if args.chat:
+        return "/chats/%s" % urllib.parse.quote(args.chat, safe="")
+    if args.team and args.channel:
+        return "/teams/%s/channels/%s" % (urllib.parse.quote(args.team, safe=""),
+                                          urllib.parse.quote(args.channel, safe=""))
+    fail("bad_target", "Give either --chat, or --team with --channel")
+
+
+def cmd_react(args):
+    """Add or remove one of your reactions on a message."""
+    emoji = str(args.emoji or "").strip()
+    if emoji not in REACTION_EMOJI:
+        fail("bad_reaction", "Teams does not take that as a reaction")
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    verb = "unsetReaction" if args.remove else "setReaction"
+    url = "%s%s/messages/%s/%s" % (GRAPH, conversation_path(args),
+                                   urllib.parse.quote(args.message, safe=""), verb)
+    status, payload = http(url, method="POST", json_body={"reactionType": emoji},
+                           headers={"Authorization": "Bearer " + token})
+    if status == 403:
+        fail("react_permission_required",
+             friendly(graph_error(payload, "This sign-in may not react to messages")))
+    if status not in (200, 201, 204):
+        fail("react_failed", friendly(graph_error(payload, "Could not change that reaction")))
+    out({"ok": True, "emoji": emoji, "removed": bool(args.remove)})
+
+
+def cmd_reactions(_args):
+    """The reactions this plugin can send, for the picker."""
+    out({"ok": True, "reactions": [{"emoji": e, "name": n} for e, n in REACTIONS]})
 
 
 def cmd_mark_read(args):
@@ -1166,6 +1253,11 @@ def demo_messages(target):
             "text": text,
             "edited": edited,
             "system": False,
+            "images": [],
+            # One of them carries a reaction so the chip can be laid out
+            # without anybody having to react to anything.
+            "reactions": ([{"emoji": "\U0001F44D", "count": 2, "mine": index == 1, "name": "Like"}]
+                          if index == 1 else []),
         })
     return {"ok": True, "messages": messages}
 
@@ -1226,6 +1318,17 @@ def main():
     new_chat.add_argument("--topic", default="", help="a name, for a group chat")
     new_chat.add_argument("--demo", action="store_true")
     new_chat.set_defaults(func=cmd_new_chat)
+
+    react = with_account("react", "add or remove your reaction on a message")
+    react.add_argument("--message", required=True, help="message id from `messages`")
+    react.add_argument("--emoji", required=True, help="one of the reactions Teams takes")
+    react.add_argument("--chat", default="")
+    react.add_argument("--team", default="")
+    react.add_argument("--channel", default="")
+    react.add_argument("--remove", action="store_true", help="take yours off instead")
+    react.set_defaults(func=cmd_react)
+
+    sub.add_parser("reactions", help="the reactions that can be sent").set_defaults(func=cmd_reactions)
 
     mark = with_account("mark-read", "mark one chat read")
     mark.add_argument("--chat", required=True, help="chat id from a fetch")

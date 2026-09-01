@@ -34,6 +34,7 @@
       "channels": true,
       "refreshIntervalSec": 120,
       "tintOnUnread": true,
+      "notify": true,
       "density": "cosy"
     },
     "schema": [
@@ -110,6 +111,13 @@
         "key": "tintOnUnread",
         "type": "boolean",
         "label": "Highlight the bar icon when a chat is unread",
+        "defaultValue": true
+      },
+      {
+        "key": "notify",
+        "type": "boolean",
+        "label": "Notify when a new message arrives",
+        "description": "A desktop notification for each chat that has something new in it. What was already waiting when the shell started is not announced, and neither is anything you sent yourself.",
         "defaultValue": true
       }
     ]

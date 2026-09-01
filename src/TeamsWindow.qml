@@ -147,6 +147,14 @@ Item {
   readonly property int padLines: Math.max(1, Math.round(Style.spacing.xs * densityScale))
   readonly property int padReading: Math.max(1, Math.round(Style.spacing.md * densityScale))
 
+  // The list's marker column - the unread dot and the team chevron. It comes
+  // out of the panel's left padding rather than out of the rows, so CHATS,
+  // every chat name and the window title all begin on the same line. Taken
+  // out of the rows, as it was, it pushed the whole list a clear step right
+  // of the title with nothing but a 6px dot to show for it. Unscaled, for the
+  // reason rowIndent is unscaled: this is a column, not breathing room.
+  readonly property int listGutter: Style.spacing.md + Style.space(10)
+
   property bool showSettings: false
   property bool composingNew: false
 
@@ -917,7 +925,11 @@ Item {
           // ---------------- the two columns ----------------
           Row {
             id: columns
-            width: parent.width
+            // Out into the panel's left padding by exactly the list's marker
+            // gutter, so what is written in the rows lands on the panel's left
+            // edge. Every other child of this Column keeps the full padding.
+            x: -root.listGutter
+            width: parent.width + root.listGutter
             height: parent.height - y
             spacing: Style.spacing.xxl
             // Drawn during the first fetch too, so the placeholder rows below
@@ -937,8 +949,12 @@ Item {
             readonly property bool roomForBoth: width >= Style.space(560)
             readonly property bool showSidebar: roomForBoth || !service.reading
             readonly property bool showReader: roomForBoth || service.reading
+            // The gutter is width the sidebar takes back, so the divider and
+            // the reader beside it stay exactly where they were and it is only
+            // the names that move.
             readonly property real sidebarWidth: !showSidebar ? 0
               : (roomForBoth ? Math.max(Style.space(200), Math.min(Style.space(320), width * 0.28))
+                               + root.listGutter
                              : width)
             readonly property real readerWidth: !showReader ? 0
               : (roomForBoth ? width - sidebarWidth - spacing * 2 - Style.space(1) : width)
@@ -946,11 +962,21 @@ Item {
             // Nothing fetched yet. Rows rather than a spinner: they hold the
             // sidebar at the size it is about to have, so the list does not
             // shove the layout around when it lands.
-            LoadingRows {
+            // Wrapped, so the placeholder bars stand where the real names are
+            // about to be rather than out in the marker gutter.
+            Item {
               width: columns.sidebarWidth
+              height: skeleton.implicitHeight
               visible: columns.showSidebar && service.conversations.length === 0 && service.loading
-              rows: 7
-              fg: Color.foreground
+
+              LoadingRows {
+                id: skeleton
+                anchors.left: parent.left
+                anchors.leftMargin: root.listGutter
+                width: parent.width - root.listGutter
+                rows: 7
+                fg: Color.foreground
+              }
             }
 
             ScrollView {
@@ -964,6 +990,7 @@ Item {
               ConversationList {
                 id: conversations
                 density: service.densityScale
+                markerGutter: root.listGutter
                 onCursorMoved: function(itemY, itemHeight) {
                   root.ensureVisible(sidebarScroll, itemY, itemHeight)
                 }
@@ -1012,6 +1039,10 @@ Item {
 
               Column {
                 anchors.fill: parent
+                // Narrow, this column stands where the sidebar would and has
+                // to give the marker gutter back itself; wide, the sidebar has
+                // already taken it.
+                anchors.leftMargin: columns.roomForBoth ? 0 : root.listGutter
                 spacing: root.padReading
                 visible: service.reading
 
@@ -1135,6 +1166,25 @@ Item {
                               color: Color.foreground
                               font.family: Style.font.family
                               font.pixelSize: Style.font.bodySmall
+                            }
+
+                            ReactionBar {
+                              width: parent.width
+                              reactions: modelData.reactions || []
+                              choices: service.reactionChoices
+                              busy: service.reacting
+                              fg: Color.foreground
+                              accent: Color.accent
+                              fontFamily: Style.font.family
+                              onToggled: function(emoji) {
+                                var mine = false
+                                var rows = modelData.reactions || []
+                                for (var i = 0; i < rows.length; i++)
+                                  if (String(rows[i].emoji) === emoji && rows[i].mine === true) mine = true
+                                // The chip is a toggle: clicking one you are
+                                // already part of takes yours off.
+                                service.react(modelData.id, emoji, mine)
+                              }
                             }
 
                             Repeater {

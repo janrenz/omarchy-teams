@@ -170,6 +170,14 @@ Column {
     onClicked: root.change("tintOnUnread", !(root.current("tintOnUnread", true) !== false))
   }
 
+  Toggle {
+    width: parent.width
+    label: "Notify when a new message arrives"
+    description: "A desktop notification per chat with something new in it. What was already waiting when the shell started is not announced, and neither is anything you sent yourself."
+    checked: root.current("notify", true) !== false
+    onClicked: root.change("notify", !(root.current("notify", true) !== false))
+  }
+
   PanelSeparator { width: parent.width }
 
   // ---------------- what it fetches ----------------

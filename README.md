@@ -10,7 +10,7 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **A picture opens in the window**, whole rather than cropped to the thumbnail, with **Save as…** to keep a copy — a real save dialog, starting in your Downloads folder and suggesting a name from what the message called the picture. `s` saves, `o` hands it to whatever else views images, `Escape` closes. It used to go straight to `xdg-open`, which took the one thing anybody opens a picture for somewhere this plugin could not follow.
 - **Emoji, inline images and clickable links** in the transcript. Both kinds of link: an address somebody typed out in full, and one behind its own words — the composer's link button writes `<a href="…">the release notes</a>`, and the words are all a reader would otherwise get. They open in your browser, tinted from the running theme rather than in Qt's blue.
 - **Presence.** Beside each one-to-one chat: a filled circle for available, a filled circle for busy, a ring for away, a dim circle for offline — in the running theme's own colours. Group chats have none, because a group is not away. Told apart from unread by shape and place, not by hue: presence sits immediately in front of the name because it is about the person, unread is a bar down the leading edge because it is about the conversation, and a chat can show both. Needs `Presence.Read.All` — ordinary user consent.
-- **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
+- **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. The pointer on a chip says who reacted, what Teams calls that reaction, and which of the two a click would do. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
 
 ![The conversation list, and a chat open beside it](showcase-conversation.png)
@@ -230,6 +230,10 @@ With `Files.ReadWrite` granted and **Send files** on, a chat gets an **Attach**
 button beside Send, and a file dropped anywhere on the window goes to the chat
 on screen. Whatever is in the message box goes with it as its comment.
 
+A drop that will not go through says so while the file is still in the air: the
+window outlines itself and names what is in the way — a channel rather than a
+chat, a sign-in without `Files.ReadWrite`, or a file already going up.
+
 Graph has no "post a file to a chat", and this does what Teams itself does: the
 file goes to your own OneDrive, into the same **Microsoft Teams Chat Files**
 folder, a sharing link is made for it, and the message carries a reference to
@@ -292,6 +296,27 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `SHOWCASE_WIDTH` and `SHOWCASE_HEIGHT` override the window size it photographs (1080×720 by default).
 
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
+
+## Changelog
+
+### 0.2.0 — 2026-09-01
+
+- **A file dropped on the window is answered, not ignored.** The drop area used
+  to switch itself off when the sign-in could not send files, when a channel
+  was open rather than a chat, or while another file was going up - so a drop
+  did nothing and said nothing about why. It now stays live and the overlay
+  names what is in the way while the file is still in the air; letting go
+  anyway says the same thing under the composer. A link dragged out of a
+  browser is turned away by name.
+- **A reaction chip says who reacted.** Under the pointer: the people, what
+  Teams calls that reaction, and which of add-or-remove a click would do. Graph
+  lists reactions one per person, so the names were already in hand and merely
+  being counted and thrown away.
+
+### 0.1.0
+
+- First release.
+
 
 ## License
 

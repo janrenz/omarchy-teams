@@ -680,7 +680,13 @@ Item {
 
   function uploadFile(path) {
     var file = String(path || "").trim()
-    if (uploading || !openConversation || file === "" || pluginDir === "") return
+    if (!openConversation || file === "" || pluginDir === "") return
+    // A silent return here is what a file dropped on the window looked like
+    // from the outside: nothing happened, and nothing said why.
+    if (uploading) {
+      uploadError = "One file at a time - the last one is still going up"
+      return
+    }
     if (!canUpload) {
       uploadError = "This sign-in cannot send files. Add Files.ReadWrite to your app "
                   + "registration, turn on Send files in settings, and sign in again."

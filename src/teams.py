@@ -974,12 +974,24 @@ def reaction_summary(message, me_id):
         emoji = str(reaction.get("reactionType") or "").strip()
         if not emoji:
             continue
-        who = (((reaction.get("user") or {}).get("user") or {}).get("id") or "")
+        identity = ((reaction.get("user") or {}).get("user") or {})
+        who = identity.get("id") or ""
         row = counts.setdefault(emoji, {"emoji": emoji, "count": 0, "mine": False,
-                                        "name": reaction.get("displayName") or ""})
+                                        "name": reaction.get("displayName") or "",
+                                        "who": []})
         row["count"] += 1
-        if me_id and str(who) == str(me_id):
+        mine = bool(me_id) and str(who) == str(me_id)
+        if mine:
             row["mine"] = True
+        # Named, not just counted: Graph lists reactions one per person, so the
+        # names are already here and a chip can say whose they are. Yourself as
+        # "You" and first, the way every chat client names you in your own.
+        name = "You" if mine else str(identity.get("displayName") or "").strip()
+        if name and name not in row["who"]:
+            if mine:
+                row["who"].insert(0, name)
+            else:
+                row["who"].append(name)
     # Most-reacted first, then by the character, so the order is stable between
     # fetches rather than shuffling as people react.
     return sorted(counts.values(), key=lambda row: (-row["count"], row["emoji"]))
@@ -1665,7 +1677,8 @@ def demo_messages(target):
             "images": [],
             # One of them carries a reaction so the chip can be laid out
             # without anybody having to react to anything.
-            "reactions": ([{"emoji": "\U0001F44D", "count": 2, "mine": index == 1, "name": "Like"}]
+            "reactions": ([{"emoji": "\U0001F44D", "count": 2, "mine": index == 1, "name": "Like",
+                            "who": ["You", "Ana Beltr\u00e1n"]}]
                           if index == 1 else []),
         })
     return {"ok": True, "messages": messages}

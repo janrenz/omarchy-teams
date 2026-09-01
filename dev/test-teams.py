@@ -578,6 +578,22 @@ class Reactions(unittest.TestCase):
         rows = teams.reaction_summary(self.message(("👍", "")), "")
         self.assertFalse(rows[0]["mine"])
 
+    def test_who_reacted_is_named_for_the_line_a_chip_shows(self):
+        # Graph lists them one per person, so the names are already here.
+        message = {"reactions": [
+            {"reactionType": "👍", "displayName": "Like",
+             "user": {"user": {"id": "a", "displayName": "Ana Beltr\u00e1n"}}},
+            {"reactionType": "👍", "displayName": "Like",
+             "user": {"user": {"id": "me", "displayName": "Jan Renz"}}},
+        ]}
+        rows = teams.reaction_summary(message, "me")
+        self.assertEqual(rows[0]["who"], ["You", "Ana Beltr\u00e1n"])
+
+    def test_a_reactor_with_no_name_is_left_out_but_still_counted(self):
+        rows = teams.reaction_summary(self.message(("👍", "a")), "me")
+        self.assertEqual(rows[0]["count"], 1)
+        self.assertEqual(rows[0]["who"], [])
+
 
 class Reacting(unittest.TestCase):
     def run_react(self, emoji="👍", remove=False, chat="19:abc", team="", channel="",

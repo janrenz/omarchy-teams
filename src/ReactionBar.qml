@@ -38,14 +38,49 @@ Flow {
 
   signal toggled(string emoji)
 
+  // Who reacted, as one line: "You and Ana", "Ana, Priya and 3 more". Graph
+  // lists reactions one per person, so the names are all here - the tail is
+  // still counted off the count, for the day one of them has no name on it.
+  function reactorLine(who, count) {
+    var names = []
+    for (var i = 0; i < (who || []).length; i++) {
+      var name = String(who[i] || "")
+      if (name !== "" && names.indexOf(name) === -1) names.push(name)
+    }
+    var total = Math.max(Number(count || 0), names.length)
+    if (names.length === 0) return total === 1 ? "One person" : (total + " people")
+    var shown = names.slice(0, 3)
+    var rest = total - shown.length
+    if (rest > 0) return shown.join(", ") + " and " + rest + " more"
+    if (shown.length === 1) return shown[0]
+    return shown.slice(0, shown.length - 1).join(", ") + " and " + shown[shown.length - 1]
+  }
+
+  // What Teams calls it - "Like", "Heart". The character itself when it came
+  // back without a name, which is better than saying nothing about it.
+  function emojiLabel(name, emoji) {
+    var text = String(name || "").trim()
+    return text !== "" ? text : (String(emoji || "") || "that")
+  }
+
   spacing: Style.spacing.xs
 
   Repeater {
     model: root.reactions
 
     delegate: Rectangle {
+      id: chipItem
       required property var modelData
       readonly property bool mine: modelData.mine === true
+
+      // A chip has room for a character and a number, which leaves out both
+      // who reacted and what the reaction is called. Under the pointer there
+      // is room for all of it, including what a click would do - the one thing
+      // a toggle that looks like a label has to say out loud.
+      readonly property string hoverLine:
+        root.reactorLine(modelData.who, modelData.count)
+        + " reacted with " + root.emojiLabel(modelData.name, modelData.emoji)
+        + (mine ? " · click to take yours off" : " · click to add yours")
 
       implicitWidth: chip.implicitWidth + Style.spacing.md
       implicitHeight: chip.implicitHeight + Style.spacing.xs * 2
@@ -79,11 +114,17 @@ Flow {
       }
 
       MouseArea {
+        id: chipHover
         anchors.fill: parent
         hoverEnabled: true
         enabled: !root.busy
         cursorShape: Qt.PointingHandCursor
         onClicked: root.toggled(String(modelData.emoji))
+
+        PanelToolTip {
+          visible: chipHover.containsMouse
+          text: chipItem.hoverLine
+        }
       }
     }
   }
@@ -136,6 +177,11 @@ Flow {
         // Only the choice is reported. Closing the picker belongs to whoever
         // opened it, which is the message row.
         onClicked: root.toggled(String(modelData.emoji))
+
+        PanelToolTip {
+          visible: pick.containsMouse
+          text: "React with " + root.emojiLabel(modelData.name, modelData.emoji)
+        }
       }
     }
   }

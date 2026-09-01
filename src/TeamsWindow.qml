@@ -194,7 +194,16 @@ Item {
   // A file:// URL from either route - the chooser or a drop - as the path the
   // helper wants. decodeURIComponent because a space arrives as %20.
   function sendFile(fileUrl) {
-    var path = decodeURIComponent(String(fileUrl || "").replace(/^file:\/\//, ""))
+    var url = String(fileUrl || "").trim()
+    if (url === "") return
+    // A drag carries whatever had a URL. A link dragged out of a browser is
+    // still text/uri-list, and a path that was never a path is a confusing way
+    // for the helper to fail - so it is turned away here, by name.
+    if (url.indexOf("file://") !== 0 && url.charAt(0) !== "/") {
+      service.uploadError = "Only a file on this machine can be sent, not a link"
+      return
+    }
+    var path = decodeURIComponent(url.replace(/^file:\/\//, ""))
     if (path === "") return
     service.uploadFile(path)
   }
@@ -516,11 +525,26 @@ Item {
       // Anywhere, rather than on the transcript alone: aiming at a scrolling
       // list is a worse target than a window, and there is only ever one
       // conversation open to mean. Channels are not offered - see uploadFile.
+      // Deliberately not switched off when the sign-in cannot send files, when
+      // nothing is open, or when what is open is a channel. A window that
+      // ignores a drop looks broken: this way the overlay says which of those
+      // it is while the file is still in the air, and uploadFile() says it
+      // again on the line under the composer.
       DropArea {
+        id: fileDrop
         anchors.fill: parent
         keys: ["text/uri-list"]
-        enabled: service.canUpload && !service.uploading && !!service.openConversation
-                 && String(service.openConversation.kind || "") === "chat"
+
+        // Empty when a drop would go through. Otherwise why it would not.
+        readonly property string refusal: {
+          if (!service.openConversation) return "Open a chat to send a file into"
+          if (String(service.openConversation.kind || "") !== "chat")
+            return "Files can go into a chat, not into a channel"
+          if (!service.canUpload) return "This sign-in cannot send files - see Settings"
+          if (service.uploading) return "Still sending the last file"
+          return ""
+        }
+
         onDropped: function(drop) {
           if (!drop.hasUrls || drop.urls.length === 0) return
           // One at a time: each is three requests, and a folder of forty
@@ -531,20 +555,26 @@ Item {
         }
 
         Rectangle {
+          readonly property color tint: fileDrop.refusal === "" ? Color.accent : Color.urgent
+
           anchors.fill: parent
           visible: parent.containsDrag
-          color: Util.alpha(Color.accent, 0.08)
-          border.color: Color.accent
+          color: Util.alpha(tint, 0.08)
+          border.color: tint
           border.width: Math.max(1, Style.space(2))
           radius: Style.cornerRadius
           z: 500
 
           Text {
             anchors.centerIn: parent
-            text: "Drop to send to " + (service.openConversation
-              ? String(service.openConversation.title || "") : "")
+            width: parent.width - Style.spacing.xl * 2
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            text: fileDrop.refusal !== "" ? fileDrop.refusal
+                  : ("Drop to send to " + (service.openConversation
+                     ? String(service.openConversation.title || "") : ""))
             textFormat: Text.PlainText
-            color: Color.accent
+            color: parent.tint
             font.family: Style.font.family
             font.pixelSize: Style.font.body
           }

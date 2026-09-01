@@ -1144,49 +1144,99 @@ Item {
                             width: parent ? parent.width : 0
                             spacing: root.padLines
 
-                            // Hover lives here rather than on the reaction row:
-                            // this item always has height, and the row does not
-                            // when it has nothing to show. An item with no
-                            // height receives no hover, which is what made the
-                            // add button unreachable on a message with no
-                            // reactions on it.
+                            // Hover for the whole line, read by the add
+                            // button below. It cannot live on the reaction row:
+                            // that row has no height on a message nobody has
+                            // reacted to, and an item with no height receives
+                            // no hover at all.
                             HoverHandler { id: lineHover }
 
-                            SelectableText {
+                            // The line, with the add-a-reaction button drawn
+                            // over its right-hand end rather than in a row of
+                            // its own. Nothing here changes size when the
+                            // pointer arrives, so pointing at a message cannot
+                            // move the messages under it.
+                            Item {
                               width: parent.width
-                              visible: text !== ""
-                              // Escaped first, then links added - so a message
-                              // can never choose its own markup. Lines without
-                              // a link stay plain text, which is cheaper and
-                              // cannot be got wrong at all.
-                              readonly property bool linked: Model.hasLink(modelData.text, modelData.links)
-                              // Tinted from the theme: a TextEdit has no
-                              // linkColor, so an untinted anchor comes out in
-                              // Qt's default blue, which belongs to no theme.
-                              text: linked ? Model.linkify(modelData.text,
-                                                           service.themeColors.blue
-                                                           || service.themeColors.accent || "",
-                                                           modelData.links)
-                                           : String(modelData.text || "")
-                              onLinkActivated: function(url) { service.openUrl(url) }
-                              HoverHandler {
-                                enabled: parent.hoveredLink !== ""
-                                cursorShape: Qt.PointingHandCursor
+                              implicitHeight: lineText.visible ? lineText.implicitHeight : 0
+
+                              SelectableText {
+                                id: lineText
+                                width: parent.width
+                                visible: text !== ""
+                                // Escaped first, then links added - so a message
+                                // can never choose its own markup. Lines without
+                                // a link stay plain text, which is cheaper and
+                                // cannot be got wrong at all.
+                                readonly property bool linked: Model.hasLink(modelData.text, modelData.links)
+                                // Tinted from the theme: a TextEdit has no
+                                // linkColor, so an untinted anchor comes out in
+                                // Qt's default blue, which belongs to no theme.
+                                text: linked ? Model.linkify(modelData.text,
+                                                             service.themeColors.blue
+                                                             || service.themeColors.accent || "",
+                                                             modelData.links)
+                                             : String(modelData.text || "")
+                                onLinkActivated: function(url) { service.openUrl(url) }
+                                HoverHandler {
+                                  enabled: parent.hoveredLink !== ""
+                                  cursorShape: Qt.PointingHandCursor
+                                }
+                                // Rendered as text, always. A Teams message is
+                                // HTML written by whoever sent it, and rich text
+                                // fetches what it is told to fetch. The emoji
+                                // survive because teams.py turns each <emoji>
+                                // tag into the character its alt already holds.
+                                textFormat: linked ? TextEdit.RichText : TextEdit.PlainText
+                                color: Color.foreground
+                                font.family: Style.font.family
+                                font.pixelSize: Style.font.bodySmall
                               }
-                              // Rendered as text, always. A Teams message is
-                              // HTML written by whoever sent it, and rich text
-                              // fetches what it is told to fetch. The emoji
-                              // survive because teams.py turns each <emoji>
-                              // tag into the character its alt already holds.
-                              textFormat: linked ? TextEdit.RichText : TextEdit.PlainText
-                              color: Color.foreground
-                              font.family: Style.font.family
-                              font.pixelSize: Style.font.bodySmall
+
+                              // A plus rather than a face, so it does not read
+                              // as one more reaction among the ones already
+                              // there. Quiet until the message is pointed at,
+                              // and never a column of plus signs down a
+                              // transcript nobody is touching.
+                              Rectangle {
+                                id: addReaction
+                                anchors.right: parent.right
+                                anchors.top: parent.top
+                                width: plusGlyph.implicitWidth + Style.spacing.md
+                                height: plusGlyph.implicitHeight + Style.spacing.xs * 2
+                                radius: height / 2
+                                visible: lineText.visible && !reactions.picking
+                                opacity: addPointer.containsMouse ? 1.0
+                                       : lineHover.hovered ? 0.55 : 0.0
+                                Behavior on opacity { NumberAnimation { duration: 120 } }
+                                color: addPointer.containsMouse
+                                  ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
+                                  : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
+
+                                Text {
+                                  id: plusGlyph
+                                  anchors.centerIn: parent
+                                  text: "+"
+                                  textFormat: Text.PlainText
+                                  color: Qt.darker(Color.foreground, 1.4)
+                                  font.family: Style.font.family
+                                  font.pixelSize: Style.font.caption
+                                }
+
+                                MouseArea {
+                                  id: addPointer
+                                  anchors.fill: parent
+                                  hoverEnabled: true
+                                  enabled: !service.reacting
+                                  cursorShape: Qt.PointingHandCursor
+                                  onClicked: reactions.picking = true
+                                }
+                              }
                             }
 
                             ReactionBar {
+                              id: reactions
                               width: parent.width
-                              hovered: lineHover.hovered
                               reactions: modelData.reactions || []
                               choices: service.reactionChoices
                               busy: service.reacting

@@ -2,12 +2,19 @@ import QtQuick
 import qs.Commons
 import qs.Ui
 
-// The reactions on one message, and the way to add your own.
+// The reactions on one message, and the picker for adding one.
 //
 // A chip is a toggle, not a label: it says how many people reacted and whether
 // you are one of them, and clicking it adds or removes yours. That is why the
 // helper counts them per emoji and marks `mine` rather than handing over the
 // raw per-person list Graph returns.
+//
+// What is deliberately NOT here is the button that opens the picker. This row
+// has no height at all on a message nobody has reacted to, and a row that
+// grows when the pointer arrives pushes every message below it down the
+// transcript. So the button lives on the message line, which always has
+// height, and only sets `picking` here. The one thing that moves the
+// transcript is opening the picker, and that is a click asking for it.
 Flow {
   id: root
 
@@ -24,24 +31,9 @@ Flow {
   // identical emoji rows.
   property bool picking: false
 
-  // Whether the message this belongs to is under the pointer. Tracked by the
-  // message row and handed down, because this item cannot track it: when there
-  // is nothing to show it has no height, and an item with no height receives
-  // no hover.
-  property bool hovered: false
-
   signal toggled(string emoji)
 
   spacing: Style.spacing.xs
-
-  // Always here, never hover-gated.
-  //
-  // It was: visible when there were reactions, when picking, or when the
-  // pointer was over a MouseArea inside this very item. That last one cannot
-  // work - an invisible item receives no hover events, so on a message with no
-  // reactions the row could never become visible, and the way to add the first
-  // reaction to anything was unreachable. The add button is quiet instead of
-  // hidden.
 
   Repeater {
     model: root.reactions
@@ -88,43 +80,6 @@ Flow {
         cursorShape: Qt.PointingHandCursor
         onClicked: root.toggled(String(modelData.emoji))
       }
-    }
-  }
-
-  // Add one. A plus rather than a face, so it does not read as a seventh
-  // reaction sitting among the six.
-  Rectangle {
-    implicitWidth: plus.implicitWidth + Style.spacing.md
-    implicitHeight: plus.implicitHeight + Style.spacing.xs * 2
-    radius: height / 2
-    // Only where it is wanted: on the message being pointed at, or on one that
-    // already has reactions to sit beside. A plus under every message in a
-    // transcript is a column of plus signs.
-    visible: !root.picking && (root.hovered || root.reactions.length > 0)
-    // Quiet until pointed at, so a transcript is not a column of plus signs
-    // shouting for attention.
-    opacity: addHover.containsMouse ? 1.0 : 0.45
-    Behavior on opacity { NumberAnimation { duration: 120 } }
-    color: addHover.containsMouse ? Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.12)
-                                  : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.05)
-
-    Text {
-      id: plus
-      anchors.centerIn: parent
-      text: "+"
-      textFormat: Text.PlainText
-      color: Qt.darker(root.fg, 1.4)
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
-    }
-
-    MouseArea {
-      id: addHover
-      anchors.fill: parent
-      hoverEnabled: true
-      enabled: !root.busy
-      cursorShape: Qt.PointingHandCursor
-      onClicked: root.picking = true
     }
   }
 

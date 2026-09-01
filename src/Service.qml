@@ -104,6 +104,14 @@ Item {
     teamChannels = ({})
     refresh()
     for (var id in expandedTeams) if (expandedTeams[id] === true) { loadChannels(id); break }
+    // And the conversation being read, which is the whole point of pressing
+    // Refresh while reading one. The list and the transcript come from
+    // different requests, so refreshing only the list left the new message
+    // showing in the sidebar and missing from the conversation it belonged to.
+    //
+    // The background poll still leaves the transcript alone: re-reading it
+    // every couple of minutes unasked is not the same as being asked for it.
+    reloadConversation()
   }
 
   // ---- teams open and shut ----------------------------------------------
@@ -261,14 +269,11 @@ Item {
 
   readonly property bool reading: openConversation !== null
 
-  function openChat(row) {
+  // Ask for one conversation's messages. Opening and re-reading both come
+  // through here, so there is one place that knows how a chat and a channel
+  // are addressed differently.
+  function fetchMessages(row) {
     if (!row) return
-    if (openConversation && String(openConversation.key) === String(row.key)) {
-      closeConversation()
-      return
-    }
-    openConversation = row
-    messages = []
     messagesError = ""
     messagesLoading = true
     if (messageProc.running) messageProc.running = false
@@ -278,6 +283,18 @@ Item {
     if (setting("demo", false) === true) command.push("--demo")
     messageProc.command = command
     messageProc.running = true
+  }
+
+  function openChat(row) {
+    if (!row) return
+    if (openConversation && String(openConversation.key) === String(row.key)) {
+      closeConversation()
+      return
+    }
+    openConversation = row
+    // A different conversation, so what is on screen belongs to the last one.
+    messages = []
+    fetchMessages(row)
 
     // Opening a chat is reading it. Only for chats - a channel has no read
     // state Graph will tell us about - and only when it was actually unread,
@@ -568,11 +585,13 @@ Item {
     draft = ""
   }
 
+  // Re-read the conversation already open. Deliberately not by closing and
+  // reopening it: that emptied the transcript before the new rows arrived, so
+  // it flashed blank, and it counted as opening the chat again - marking read
+  // a second time. The same conversation's rows stay on screen until better
+  // ones land.
   function reloadConversation() {
-    var row = openConversation
-    if (!row) return
-    openConversation = null
-    openChat(row)
+    fetchMessages(openConversation)
   }
 
   Process {

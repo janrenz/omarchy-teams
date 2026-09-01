@@ -358,6 +358,7 @@ Item {
                 id: drawerList
                 width: drawerPanel.width - Style.spacing.md * 2
                 density: service.densityScale
+                palette: service.themeColors
                 rows: service.conversations
                 selectedKey: service.openConversation ? String(service.openConversation.key) : ""
                 fg: Color.foreground
@@ -990,6 +991,7 @@ Item {
               ConversationList {
                 id: conversations
                 density: service.densityScale
+                palette: service.themeColors
                 markerGutter: root.listGutter
                 onCursorMoved: function(itemY, itemHeight) {
                   root.ensureVisible(sidebarScroll, itemY, itemHeight)
@@ -1142,6 +1144,14 @@ Item {
                             width: parent ? parent.width : 0
                             spacing: root.padLines
 
+                            // Hover lives here rather than on the reaction row:
+                            // this item always has height, and the row does not
+                            // when it has nothing to show. An item with no
+                            // height receives no hover, which is what made the
+                            // add button unreachable on a message with no
+                            // reactions on it.
+                            HoverHandler { id: lineHover }
+
                             SelectableText {
                               width: parent.width
                               visible: text !== ""
@@ -1150,7 +1160,12 @@ Item {
                               // a link stay plain text, which is cheaper and
                               // cannot be got wrong at all.
                               readonly property bool linked: Model.hasLink(modelData.text)
-                              text: linked ? Model.linkify(modelData.text)
+                              // Tinted from the theme: a TextEdit has no
+                              // linkColor, so an untinted anchor comes out in
+                              // Qt's default blue, which belongs to no theme.
+                              text: linked ? Model.linkify(modelData.text,
+                                                           service.themeColors.blue
+                                                           || service.themeColors.accent || "")
                                            : String(modelData.text || "")
                               onLinkActivated: function(url) { service.openUrl(url) }
                               HoverHandler {
@@ -1170,20 +1185,20 @@ Item {
 
                             ReactionBar {
                               width: parent.width
+                              hovered: lineHover.hovered
                               reactions: modelData.reactions || []
                               choices: service.reactionChoices
                               busy: service.reacting
                               fg: Color.foreground
                               accent: Color.accent
                               fontFamily: Style.font.family
+                              // A chip is a toggle: clicking one you are already
+                              // part of takes yours off, clicking one you are
+                              // not adds it. Same for a fresh pick, which is
+                              // never one of yours yet.
                               onToggled: function(emoji) {
-                                var mine = false
-                                var rows = modelData.reactions || []
-                                for (var i = 0; i < rows.length; i++)
-                                  if (String(rows[i].emoji) === emoji && rows[i].mine === true) mine = true
-                                // The chip is a toggle: clicking one you are
-                                // already part of takes yours off.
-                                service.react(modelData.id, emoji, mine)
+                                service.react(modelData.id, emoji,
+                                              Model.reactionIsMine(modelData.reactions, emoji))
                               }
                             }
 

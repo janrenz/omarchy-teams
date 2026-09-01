@@ -197,8 +197,8 @@ Item {
     onTriggered: root.refresh()
   }
 
-  onConfiguredChanged: if (configured) { loadReactionChoices(); refresh() }
-  onPluginDirChanged: if (configured) refresh()
+  onConfiguredChanged: if (configured) { loadPalette(); loadReactionChoices(); refresh() }
+  onPluginDirChanged: if (configured) { loadPalette(); refresh() }
   onSettingsChanged: if (configured) refresh()
 
   // ---- telling you something arrived --------------------------------------
@@ -443,6 +443,29 @@ Item {
         openChat(row)
         return
       }
+    }
+  }
+
+  // ---- the theme's colours ----------------------------------------------
+  //
+  // Read from the theme rather than hardcoded, so a presence dot and a link
+  // are tinted in hues that belong to whatever theme is running.
+  property var themeColors: ({})
+  readonly property bool canSeePresence: view.presence === true
+
+  function loadPalette() {
+    if (paletteProc.running || pluginDir === "") return
+    paletteProc.command = ["python3", helper(), "palette"]
+    paletteProc.running = true
+  }
+
+  Process {
+    id: paletteProc
+    running: false
+    stdout: StdioCollector { id: paletteOut; waitForEnd: true }
+    onExited: function(_exitCode) {
+      var parsed = Model.parseJson(paletteOut.text, null)
+      if (parsed && parsed.colors) root.themeColors = parsed.colors
     }
   }
 

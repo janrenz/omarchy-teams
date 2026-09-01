@@ -55,7 +55,7 @@ DEFAULT_AUTHORITY = "common"
 # cost one re-sign-in between them.
 SCOPES_CHATS = (
     "openid profile offline_access User.Read Chat.ReadWrite Chat.Create ChatMessage.Send "
-    "People.Read User.ReadBasic.All"
+    "People.Read User.ReadBasic.All Presence.Read.All"
 )
 SCOPES_CHANNELS = (
     SCOPES_CHATS
@@ -578,9 +578,14 @@ def chat_rows(token, me_id, top):
         preview = chat.get("lastMessagePreview") or {}
         last_when = str(preview.get("createdDateTime") or "")
         read_when = str(((chat.get("viewpoint") or {}).get("lastMessageReadDateTime")) or "")
+        # The other person in a one-to-one, which is who a presence dot is
+        # about. A group chat has no single "them", so it gets none.
+        others = [str(m.get("userId") or "") for m in (chat.get("members") or [])
+                  if str(m.get("userId") or "") and str(m.get("userId")) != str(me_id)]
         rows.append({
             "id": chat.get("id", ""),
             "kind": "chat",
+            "withUserId": others[0] if len(others) == 1 else "",
             "title": chat_title(chat, me_id),
             "chatType": chat.get("chatType", "oneOnOne"),
             "lastFrom": (((preview.get("from") or {}).get("user") or {}).get("displayName") or ""),
@@ -662,6 +667,7 @@ def fetch_account(alias, args):
         "channels": has_channels(account),
         "canMarkRead": can_mark_read(account),
         "canStartChat": can_create_chat(account) and can_find_people(account),
+        "presence": can_see_presence(account),
         "chats": [],
         "teams": [],
         "unreadCount": 0,
@@ -670,6 +676,19 @@ def fetch_account(alias, args):
 
     chats, chat_error = chat_rows(token, account.get("userId", ""), max(1, min(args.chats, CHAT_CAP)))
     result["chats"] = chats
+
+    # One batched request for everybody in the list, and only when the sign-in
+    # is allowed to ask.
+    if can_see_presence(account):
+        presences, presence_error = fetch_presences(
+            token, [row.get("withUserId") for row in chats])
+        for row in chats:
+            row["presence"] = presences.get(row.get("withUserId") or "", None)
+        if presence_error:
+            result["warnings"].append({"scope": "presence", "message": presence_error})
+    else:
+        for row in chats:
+            row["presence"] = None
     result["unreadCount"] = sum(1 for row in chats if row["unread"])
     if chat_error:
         result["warnings"].append({"scope": "chats", "message": chat_error})
@@ -857,6 +876,82 @@ def reaction_summary(message, me_id):
     # Most-reacted first, then by the character, so the order is stable between
     # fetches rather than shuffling as people react.
     return sorted(counts.values(), key=lambda row: (-row["count"], row["emoji"]))
+
+
+PALETTE_PATH = os.path.join(
+    os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
+    "omarchy", "current", "theme", "colors.toml",
+)
+PALETTE_NAMES = ("red", "orange", "yellow", "green", "cyan", "blue", "magenta",
+                 "accent", "foreground", "muted")
+
+
+def cmd_palette(_args):
+    """The active theme's named colours.
+
+    So a presence dot and a link are tinted in hues that belong to whatever
+    theme is running, rather than in hardcoded hex that fights it. The mail
+    plugin reads the same file for the same reason.
+    """
+    try:
+        import tomllib
+
+        with open(PALETTE_PATH, "rb") as handle:
+            parsed = tomllib.load(handle)
+    except (OSError, ValueError, ImportError) as error:
+        out({"ok": False, "colors": {}, "error": {"code": "no_palette", "message": str(error)}})
+
+    colors = {name: parsed[name] for name in PALETTE_NAMES
+              if isinstance(parsed.get(name), str) and parsed[name].startswith("#")}
+    out({"ok": True, "mode": parsed.get("mode", "dark"), "colors": colors})
+
+
+def can_see_presence(account):
+    """Whether this sign-in may read other people's presence."""
+    return "presence.read.all" in str((account or {}).get("scopes", "")).lower()
+
+
+# Graph's availability values, grouped down to the four states worth drawing.
+# The strings are Microsoft's; the grouping is ours, because "AvailableIdle"
+# and "Available" are the same dot to a reader.
+PRESENCE_STATES = {
+    "available": "available", "availableidle": "available",
+    "busy": "busy", "busyidle": "busy", "donotdisturb": "busy",
+    "away": "away", "berightback": "away",
+    "offline": "offline", "presenceunknown": "unknown", "": "unknown",
+}
+
+
+def presence_state(availability):
+    return PRESENCE_STATES.get(str(availability or "").lower(), "unknown")
+
+
+def fetch_presences(token, user_ids):
+    """Presence for a batch of people, as {user id: {state, availability, activity}}.
+
+    One request for the lot rather than one each: Graph takes up to 650 ids at
+    a time, and a sidebar of twenty-five chats should not cost twenty-five
+    round trips.
+    """
+    ids = [uid for uid in dict.fromkeys(user_ids) if uid]
+    if not ids:
+        return {}, ""
+    status, payload = http(
+        GRAPH + "/communications/getPresencesByUserId",
+        method="POST", json_body={"ids": ids[:650]},
+        headers={"Authorization": "Bearer " + token},
+    )
+    if status != 200:
+        return {}, graph_error(payload, "Could not read presence")
+
+    found = {}
+    for row in payload.get("value", []):
+        found[str(row.get("id") or "")] = {
+            "state": presence_state(row.get("availability")),
+            "availability": row.get("availability") or "",
+            "activity": row.get("activity") or "",
+        }
+    return found, ""
 
 
 def person_row(person, kind):
@@ -1346,6 +1441,8 @@ def main():
     send.add_argument("--text", required=True)
     send.add_argument("--demo", action="store_true")
     send.set_defaults(func=cmd_send)
+
+    sub.add_parser("palette", help="the active theme's named colours").set_defaults(func=cmd_palette)
 
     sub.add_parser("list", help="list configured accounts").set_defaults(func=cmd_list)
     with_account("remove", "forget an account").set_defaults(func=cmd_remove)

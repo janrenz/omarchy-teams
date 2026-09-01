@@ -8,6 +8,7 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
 - **Starting a chat** with anybody in the directory, and **marking a chat read** by opening it.
 - **Emoji, inline images and clickable links** in the transcript.
+- **Presence.** A dot beside each one-to-one chat: available, busy, away or offline, in the running theme's own colours. Needs `Presence.Read.All` — ordinary user consent.
 - **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours, or `+` to pick from the six Teams takes.
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
 

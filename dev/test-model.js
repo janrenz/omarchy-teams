@@ -18,7 +18,7 @@ const Model = new Function(
   source +
     "; return { accountView, conversationRows, selectableRows, groupMessages, whenLabel, " +
     "subtitleFor, oneLine, plainText, parseJson, linkify, hasLink, escapeHtml, " +
-    "densityScale, densityNames }"
+    "densityScale, densityNames, reactionIsMine, presenceColor, presenceLabel }"
 )()
 
 let passed = 0
@@ -435,6 +435,93 @@ test("every name the settings form offers actually maps", () => {
   // would silently do nothing.
   for (const name of Model.densityNames())
     ok(Model.densityScale(name) > 0, name + " should have a scale")
+})
+
+// ---------------------------------------------------------------- reactions
+
+test("clicking a reaction you already gave removes yours", () => {
+  const rx = [{ emoji: "\u{1F44D}", count: 2, mine: true }]
+  eq(Model.reactionIsMine(rx, "\u{1F44D}"), true)
+})
+
+test("clicking one other people gave adds yours", () => {
+  const rx = [{ emoji: "\u{1F44D}", count: 2, mine: false }]
+  eq(Model.reactionIsMine(rx, "\u{1F44D}"), false)
+})
+
+test("a different emoji on the same message is a different decision", () => {
+  // Getting this wrong would remove somebody's like when you meant to laugh.
+  const rx = [{ emoji: "\u{1F44D}", count: 1, mine: true },
+              { emoji: "\u{1F602}", count: 1, mine: false }]
+  eq(Model.reactionIsMine(rx, "\u{1F44D}"), true)
+  eq(Model.reactionIsMine(rx, "\u{1F602}"), false)
+})
+
+test("a fresh pick on a message with none is always an add", () => {
+  eq(Model.reactionIsMine([], "\u{1F44D}"), false)
+  eq(Model.reactionIsMine(null, "\u{1F44D}"), false)
+  eq(Model.reactionIsMine(undefined, "\u{1F44D}"), false)
+})
+
+test("an emoji not on the message yet is an add, not a remove", () => {
+  const rx = [{ emoji: "\u{1F44D}", count: 1, mine: true }]
+  eq(Model.reactionIsMine(rx, "\u{2764}\u{FE0F}"), false)
+})
+
+// ---------------------------------------------------------------- presence
+
+const PALETTE = { green: "#9ece6a", red: "#f7768e", yellow: "#e0af68", muted: "#414868" }
+
+test("each state wears a colour from the theme, not a hardcoded one", () => {
+  eq(Model.presenceColor("available", PALETTE), "#9ece6a")
+  eq(Model.presenceColor("busy", PALETTE), "#f7768e")
+  eq(Model.presenceColor("away", PALETTE), "#e0af68")
+  eq(Model.presenceColor("offline", PALETTE), "#414868")
+})
+
+test("an unknown state gets no dot rather than a wrong one", () => {
+  eq(Model.presenceColor("unknown", PALETTE), "")
+  eq(Model.presenceColor("", PALETTE), "")
+})
+
+test("a theme missing a colour gets no dot, never a broken one", () => {
+  // An empty string is how the row decides not to draw it at all.
+  eq(Model.presenceColor("available", {}), "")
+  eq(Model.presenceColor("available", null), "")
+})
+
+test("away falls back to orange where a theme has no yellow", () => {
+  eq(Model.presenceColor("away", { orange: "#eb927b" }), "#eb927b")
+})
+
+test("an activity is unpacked into words", () => {
+  // Graph sends one camel-case word, and a run of capitals needs breaking too.
+  eq(Model.presenceLabel("busy", "InAMeeting"), "In A Meeting")
+  eq(Model.presenceLabel("busy", "OnThePhone"), "On The Phone")
+  eq(Model.presenceLabel("away", "OutOfOffice"), "Out Of Office")
+})
+
+test("with no activity the state speaks for itself", () => {
+  eq(Model.presenceLabel("available", ""), "Available")
+  eq(Model.presenceLabel("offline", "Anything"), "Offline")
+  eq(Model.presenceLabel("unknown", ""), "")
+})
+
+// ----------------------------------------------------------- link colouring
+
+test("a link is tinted with the colour it is given", () => {
+  const html = Model.linkify("go https://x.y", "#7aa2f7")
+  ok(html.includes('style="color:#7aa2f7"'), "expected the style: " + html)
+  ok(html.includes('<font color="#7aa2f7">'), "expected the font tag too: " + html)
+})
+
+test("with no colour it is a plain anchor, as before", () => {
+  eq(Model.linkify("go https://x.y", ""), 'go <a href="https://x.y">https://x.y</a>')
+})
+
+test("tinting does not weaken the escaping", () => {
+  const html = Model.linkify('<script>bad()</script> https://x.y', "#7aa2f7")
+  ok(!html.includes("<script"), "a script tag survived: " + html)
 })
 
 // ---------------------------------------------------------------------------

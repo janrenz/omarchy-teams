@@ -48,6 +48,20 @@ function densityNames() {
   return ["compact", "cosy", "roomy", "spacious"]
 }
 
+// Whether you are already one of the people who reacted with this emoji.
+//
+// It decides which way a chip toggles: clicking one you are part of takes
+// yours off, clicking one you are not adds it. Kept here rather than inline in
+// the delegate so the decision can be tested - getting it backwards would look
+// like reactions that refuse to go away.
+function reactionIsMine(reactions, emoji) {
+  var rows = reactions || []
+  var want = String(emoji || "")
+  for (var i = 0; i < rows.length; i++)
+    if (String(rows[i].emoji) === want) return rows[i].mine === true
+  return false
+}
+
 // A message as markup with its links clickable.
 //
 // The text is escaped FIRST and links added afterwards, never the other way
@@ -73,7 +87,12 @@ function hasLink(text) {
   return LINKABLE.test(String(text || ""))
 }
 
-function linkify(text) {
+// `color` is a hex string from the theme's own palette. A TextEdit has no
+// linkColor - that is a Text property - so an anchor rendered in one comes out
+// in Qt's default blue, which belongs to no theme. Since this builds the
+// anchor, it can say what colour it should be.
+function linkify(text, color) {
+  var tint = String(color || "")
   var escaped = escapeHtml(text)
   LINKABLE.lastIndex = 0
   var html = escaped.replace(LINKABLE, function(match) {
@@ -86,10 +105,46 @@ function linkify(text) {
     var href = match
     if (match.indexOf("@") !== -1 && match.indexOf("//") === -1) href = "mailto:" + match
     else if (match.toLowerCase().indexOf("www.") === 0) href = "https://" + match
-    return '<a href="' + href + '">' + match + '</a>' + trail
+    if (tint === "") return '<a href="' + href + '">' + match + '</a>' + trail
+    // Both the style and the font tag: Qt honours one or the other depending
+    // on the rich-text path, and an uncoloured link is the thing being fixed.
+    return '<a href="' + href + '" style="color:' + tint + '">'
+      + '<font color="' + tint + '">' + match + '</font></a>' + trail
   })
   // Newlines carry no meaning in rich text, and a transcript is full of them.
   return html.replace(/\n/g, "<br>")
+}
+
+// Presence, in the theme's own colours rather than hardcoded traffic lights.
+//
+// The four states are Microsoft's nine availabilities grouped down to what is
+// worth drawing: "Available" and "AvailableIdle" are the same dot to a reader.
+// The grouping happens in teams.py; this only says what colour it wears.
+function presenceColor(state, palette) {
+  var colors = palette || {}
+  switch (String(state || "")) {
+    case "available": return colors.green || ""
+    case "busy":      return colors.red || ""
+    case "away":      return colors.yellow || colors.orange || ""
+    case "offline":   return colors.muted || ""
+    default:          return ""
+  }
+}
+
+function presenceLabel(state, activity) {
+  // Graph sends activities as one camel-case word: InAMeeting, OnThePhone,
+  // OutOfOffice. Two passes, because a run of capitals needs breaking too -
+  // one pass alone turns InAMeeting into "In AMeeting".
+  var said = String(activity || "")
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+  switch (String(state || "")) {
+    case "available": return said || "Available"
+    case "busy":      return said || "Busy"
+    case "away":      return said || "Away"
+    case "offline":   return "Offline"
+    default:          return ""
+  }
 }
 
 // The one account, as a view the UI can bind to without null checks.
@@ -112,6 +167,7 @@ function accountView(snapshot, alias) {
       channels: data.channels === true,
       canMarkRead: data.canMarkRead === true,
       canStartChat: data.canStartChat === true,
+      presence: data.presence === true,
       chats: data.chats || [],
       teams: data.teams || [],
       unreadCount: Number(data.unreadCount || 0),
@@ -122,7 +178,7 @@ function accountView(snapshot, alias) {
   }
   return {
     alias: String(alias || ""), ok: false, loaded: false, username: "", displayName: "",
-    userId: "", channels: false, canMarkRead: false, canStartChat: false,
+    userId: "", channels: false, canMarkRead: false, canStartChat: false, presence: false,
     chats: [], teams: [], unreadCount: 0,
     errorCode: "", errorMessage: "", warnings: []
   }
@@ -156,6 +212,8 @@ function conversationRows(view, expanded, channelsByTeam, loadingTeamId, unreadO
       subtitle: subtitleFor(chat),
       when: String(chat.when || ""),
       unread: chat.unread === true,
+      presence: (chat.presence && chat.presence.state) ? String(chat.presence.state) : "",
+      presenceActivity: (chat.presence && chat.presence.activity) ? String(chat.presence.activity) : "",
       depth: 0
     })
   }

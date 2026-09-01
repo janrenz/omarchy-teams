@@ -18,6 +18,8 @@ Column {
   property int cursorIndex: -1
   // How generously to space the rows. 1.0 is the theme's own spacing.
   property real density: 1.0
+  // The theme's named colours, for the presence dot.
+  property var palette: ({})
 
   // Properties, not a pad() call inside each binding. A binding that reaches
   // its dependency through a function call does not reliably re-run when that
@@ -103,6 +105,27 @@ Column {
         radius: width
         visible: line.modelData.unread === true
         color: root.accent
+      }
+
+      // Presence, where there is a single person to have any: a group chat is
+      // not available or away. Sits under the unread dot rather than beside
+      // it, since a chat is rarely both unread and being watched.
+      Rectangle {
+        anchors.left: parent.left
+        anchors.leftMargin: Style.spacing.sm
+        anchors.verticalCenter: parent.verticalCenter
+        width: Style.space(6)
+        height: width
+        radius: width
+        visible: line.modelData.unread !== true
+                 && Model.presenceColor(line.modelData.presence, root.palette) !== ""
+        color: Model.presenceColor(line.modelData.presence, root.palette)
+        opacity: String(line.modelData.presence) === "offline" ? 0.7 : 1.0
+
+        // An outline for away, so it reads as different from available even
+        // where the theme's yellow and green sit close together.
+        border.width: String(line.modelData.presence) === "away" ? Style.space(1) : 0
+        border.color: Qt.darker(color, 1.6)
       }
 
       // Which way a team is facing, so a closed one does not read as a team

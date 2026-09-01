@@ -35,7 +35,9 @@ Column {
   // much of its own left padding to stand in, so that the labels - not the
   // markers - line up with the window title. Carved out of the rows instead,
   // it read as an unexplained indent in front of every name.
-  property int markerGutter: rowIndent + Style.space(10)
+  // Room for the unread bar and the presence circle side by side, since a row
+  // can now show both.
+  property int markerGutter: rowIndent + Style.space(14)
 
   function pad(px) { return Math.max(1, Math.round(px * density)) }
 
@@ -92,40 +94,50 @@ Column {
       }
       Behavior on color { ColorAnimation { duration: 120 } }
 
-      // Unread is a dot rather than a count: Graph will say whether a chat has
-      // been read since its last message, but not how many are waiting, and a
-      // made-up number is worse than an honest mark.
+      // Unread and presence say different things, so they are told apart by
+      // shape and by place, not by hue:
+      //
+      //   unread    a bar down the leading edge - about the conversation
+      //   presence  a circle beside it          - about the person
+      //
+      // They were both a dot in the same spot, so the only difference was a
+      // colour - and an unread chat hid its presence entirely. A chat can
+      // perfectly well be unread and its person available; now it can say so.
+      //
+      // Unread stays a mark rather than a count: Graph will say whether a chat
+      // has been read since its last message, but not how many are waiting,
+      // and a made-up number is worse than an honest mark.
       Rectangle {
-        id: dot
+        id: unreadBar
         anchors.left: parent.left
-        anchors.leftMargin: Style.spacing.sm
-        anchors.verticalCenter: parent.verticalCenter
-        width: Style.space(6)
-        height: width
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        anchors.topMargin: Style.spacing.xxs
+        anchors.bottomMargin: Style.spacing.xxs
+        width: Style.space(3)
         radius: width
         visible: line.modelData.unread === true
         color: root.accent
       }
 
-      // Presence, where there is a single person to have any: a group chat is
-      // not available or away. Sits under the unread dot rather than beside
-      // it, since a chat is rarely both unread and being watched.
       Rectangle {
+        id: dot
         anchors.left: parent.left
-        anchors.leftMargin: Style.spacing.sm
+        anchors.leftMargin: Style.spacing.sm + Style.space(4)
         anchors.verticalCenter: parent.verticalCenter
-        width: Style.space(6)
+        width: Style.space(7)
         height: width
         radius: width
-        visible: line.modelData.unread !== true
-                 && Model.presenceColor(line.modelData.presence, root.palette) !== ""
-        color: Model.presenceColor(line.modelData.presence, root.palette)
-        opacity: String(line.modelData.presence) === "offline" ? 0.7 : 1.0
-
-        // An outline for away, so it reads as different from available even
-        // where the theme's yellow and green sit close together.
-        border.width: String(line.modelData.presence) === "away" ? Style.space(1) : 0
-        border.color: Qt.darker(color, 1.6)
+        visible: Model.presenceColor(line.modelData.presence, root.palette) !== ""
+        // Available and busy are filled; away is a ring. Shape again rather
+        // than hue, so the states stay apart on a theme whose yellow and green
+        // sit close together, and for anyone who cannot tell those apart.
+        color: String(line.modelData.presence) === "away"
+               ? "transparent"
+               : Model.presenceColor(line.modelData.presence, root.palette)
+        opacity: String(line.modelData.presence) === "offline" ? 0.75 : 1.0
+        border.width: String(line.modelData.presence) === "away" ? Style.space(2) : 0
+        border.color: Model.presenceColor(line.modelData.presence, root.palette)
       }
 
       // Which way a team is facing, so a closed one does not read as a team

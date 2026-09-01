@@ -28,8 +28,13 @@ Flow {
   property string fontFamily: Style.font.family
 
   // Open only while somebody is choosing, so a transcript is not a wall of
-  // identical emoji rows.
+  // identical emoji rows. Driven from the message row: at most one picker is
+  // open across the whole transcript, and both the keyboard and the mouse open
+  // it, so the row is the one place that can know which.
   property bool picking: false
+
+  // Number the choices, for picking them by number rather than by pointer.
+  property bool numbered: false
 
   signal toggled(string emoji)
 
@@ -90,19 +95,36 @@ Flow {
 
     delegate: Rectangle {
       required property var modelData
+      required property int index
       implicitWidth: face.implicitWidth + Style.spacing.md
       implicitHeight: face.implicitHeight + Style.spacing.xs * 2
       radius: height / 2
       color: pick.containsMouse ? Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.2)
                                 : Qt.rgba(root.fg.r, root.fg.g, root.fg.b, 0.08)
 
-      Text {
+      Row {
         id: face
         anchors.centerIn: parent
-        text: String(modelData.emoji || "")
-        textFormat: Text.PlainText
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
+        spacing: Style.spacing.xxs
+
+        // The key that picks this one. Shown rather than left to be
+        // discovered: a shortcut nobody can see is a shortcut nobody has.
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          visible: root.numbered && parent.parent.index < 9
+          text: String(parent.parent.index + 1)
+          textFormat: Text.PlainText
+          color: Qt.darker(root.fg, 1.5)
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
+        Text {
+          text: String(modelData.emoji || "")
+          textFormat: Text.PlainText
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
       }
 
       MouseArea {
@@ -111,10 +133,9 @@ Flow {
         hoverEnabled: true
         enabled: !root.busy
         cursorShape: Qt.PointingHandCursor
-        onClicked: {
-          root.picking = false
-          root.toggled(String(modelData.emoji))
-        }
+        // Only the choice is reported. Closing the picker belongs to whoever
+        // opened it, which is the message row.
+        onClicked: root.toggled(String(modelData.emoji))
       }
     }
   }

@@ -131,8 +131,91 @@ Item {
     keyCatcher.forceActiveFocus()
   }
 
-  // One line of the transcript, near enough, for j and k while reading.
+  // How much of the transcript's right edge its scrollbar covers. The bar is
+  // drawn over the content, not beside it, so anything anchored right has to
+  // step in by this much or it sits under a bar that takes the pointer first.
+  readonly property real scrollGutter: {
+    var bar = transcript.ScrollBar.vertical
+    return bar ? bar.width : 0
+  }
+
+  // One line of the transcript, near enough, for the scroll keys.
   readonly property int lineStep: Math.max(Style.space(18), Style.font.bodySmall * 2)
+
+  // ---- the message the keyboard is on -------------------------------------
+  //
+  // Reacting had no keyboard at all: the transcript was scrolled rather than
+  // walked, so there was never a message the keys were "on" and nothing for a
+  // reaction key to act upon. In a keyboard-first shell that is backwards -
+  // the mouse could react and the keyboard could not.
+  //
+  // Held by id, not by index. The transcript is re-read underneath this - a
+  // refresh, a message sent, somebody else's arriving - and an index would
+  // quietly come to mean a different message than the one it was put on.
+  property string cursorMessageId: ""
+  // Whose picker is open, at most one at a time. Owned here rather than by
+  // each row so that opening one closes the last, and so the keyboard and the
+  // mouse are opening the same thing.
+  property string pickingMessageId: ""
+
+  function messageById(id) {
+    var list = service.messages
+    for (var i = 0; i < list.length; i++)
+      if (String(list[i].id) === String(id)) return list[i]
+    return null
+  }
+
+  function messageIndex(id) {
+    var list = service.messages
+    for (var i = 0; i < list.length; i++)
+      if (String(list[i].id) === String(id)) return i
+    return -1
+  }
+
+  // j and k walk the transcript a message at a time. The first press starts at
+  // the newest, which is what is on screen and what a conversation opens on.
+  function moveMessageCursor(step) {
+    var list = service.messages
+    if (list.length === 0) { cursorMessageId = ""; return }
+    // Walking away from the bottom is taking over from the follow-the-newest
+    // behaviour, the same as scrolling by hand is.
+    transcript.followNewest = false
+    var at = messageIndex(cursorMessageId)
+    var next = at < 0 ? list.length - 1 : Math.max(0, Math.min(list.length - 1, at + step))
+    cursorMessageId = String(list[next].id || "")
+    // Moving the cursor is not the moment to keep a half-open picker from the
+    // message being left behind.
+    pickingMessageId = ""
+  }
+
+  // Open the picker on the message under the cursor, putting the cursor on the
+  // newest first if it is not anywhere yet - pressing e straight after opening
+  // a conversation should react to the message you are looking at.
+  function startPicking() {
+    if (!service.reading) return
+    if (cursorMessageId === "" || messageIndex(cursorMessageId) < 0) {
+      var list = service.messages
+      if (list.length === 0) return
+      cursorMessageId = String(list[list.length - 1].id || "")
+    }
+    focusPane = "conversation"
+    pickingMessageId = pickingMessageId === cursorMessageId ? "" : cursorMessageId
+  }
+
+  // The nth choice, by number, because six of them numbered is faster than six
+  // of them arrowed through.
+  function reactWith(index) {
+    var choices = service.reactionChoices
+    if (index < 0 || index >= choices.length) return
+    var row = messageById(pickingMessageId)
+    if (!row) return
+    var emoji = String(choices[index].emoji || "")
+    if (emoji === "") return
+    pickingMessageId = ""
+    // Pressing the one you already gave takes it back, the same as clicking
+    // the chip does.
+    service.react(row.id, emoji, Model.reactionIsMine(row.reactions, emoji))
+  }
 
   // Spacing, as properties rather than service.pad() calls inside each
   // binding: a binding that reaches its dependency through a function call
@@ -188,6 +271,7 @@ Item {
     if (showHelp) { showHelp = false; return }
     if (composingNew) { closeNewChat(); return }
     if (showSettings) { showSettings = false; return }
+    if (pickingMessageId !== "") { pickingMessageId = ""; return }
     if (composer.activeFocus) { leaveComposer(); return }
     if (listDrawerOpen) { listDrawerOpen = false; focusPane = "list"; return }
     // Back to the list with the conversation still open, which is the step
@@ -571,10 +655,11 @@ Item {
                  || peopleField.activeFocus || root.composingNew
         onMoveRequested: function(dx, dy) {
           if (dy !== 0) {
-            // Down and up in whatever has focus - the list's cursor, or the
-            // transcript itself.
+            // Down and up in whatever has focus: the list's cursor, or the
+            // transcript's. The transcript used to be scrolled rather than
+            // walked, which is why nothing there could be acted on.
             if (root.focusPane === "list" || root.listDrawerOpen) root.activeList().moveCursor(dy)
-            else root.scrollBy(transcript, dy * root.lineStep)
+            else root.moveMessageCursor(dy)
             return
           }
           // Left steps back towards the list, right steps in towards the
@@ -593,7 +678,15 @@ Item {
         onTabRequested: root.focusComposer()
         onTextKey: function(text) {
           var view = root.scrollTarget()
-          if (text === "r") service.reloadConversation()
+          // While the picker is open the digits are the choices, and nothing
+          // else should be acting on the conversation behind it.
+          if (root.pickingMessageId !== "") {
+            if (text >= "1" && text <= "9") root.reactWith(Number(text) - 1)
+            else if (text === "e" || text === "+") root.pickingMessageId = ""
+            return
+          }
+          if (text === "e" || text === "+") root.startPicking()
+          else if (text === "r") service.reloadConversation()
           else if (text === "u") service.unreadOnly = !service.unreadOnly
           // The comma is what most applications use for preferences.
           else if (text === ",") root.showSettings = !root.showSettings
@@ -1108,6 +1201,7 @@ Item {
                   }
 
                   Column {
+                    id: transcriptColumn
                     width: transcript.width
                     spacing: root.padMessages
                     onHeightChanged: if (transcript.followNewest) transcript.toNewest()
@@ -1157,8 +1251,32 @@ Item {
                             // pointer arrives, so pointing at a message cannot
                             // move the messages under it.
                             Item {
+                              id: lineBox
                               width: parent.width
                               implicitHeight: lineText.visible ? lineText.implicitHeight : 0
+
+                              readonly property bool cursored:
+                                root.focusPane === "conversation"
+                                && String(root.cursorMessageId) === String(modelData.id)
+
+                              // Walk the cursor off the edge and there is no
+                              // sign of where it went, so bring it back on.
+                              onCursoredChanged: if (cursored) Qt.callLater(function() {
+                                var pos = lineBox.mapToItem(transcriptColumn, 0, 0)
+                                root.ensureVisible(transcript, pos.y, lineBox.height)
+                              })
+
+                              // Which message the keys are on. Behind the text
+                              // rather than around it, so nothing shifts.
+                              Rectangle {
+                                anchors.fill: parent
+                                anchors.leftMargin: -Style.spacing.xs
+                                anchors.rightMargin: -Style.spacing.xs
+                                radius: Style.space(4)
+                                visible: lineBox.cursored
+                                color: Qt.rgba(Color.foreground.r, Color.foreground.g,
+                                               Color.foreground.b, 0.08)
+                              }
 
                               SelectableText {
                                 id: lineText
@@ -1201,13 +1319,29 @@ Item {
                               Rectangle {
                                 id: addReaction
                                 anchors.right: parent.right
+                                // Clear of the scrollbar. The transcript's bar
+                                // is drawn over the content rather than beside
+                                // it - availableWidth is the full width - so
+                                // anything on the right edge lands underneath
+                                // it and the bar takes the pointer first.
+                                anchors.rightMargin: root.scrollGutter
                                 anchors.top: parent.top
                                 width: plusGlyph.implicitWidth + Style.spacing.md
-                                height: plusGlyph.implicitHeight + Style.spacing.xs * 2
+                                // Never taller than the line it floats over.
+                                // It is anchored to the line and takes no part
+                                // in the layout, so anything taller than the
+                                // line would hang into the message below it.
+                                height: Math.min(plusGlyph.implicitHeight + Style.spacing.xs * 2,
+                                                 Math.max(plusGlyph.implicitHeight,
+                                                          lineText.implicitHeight))
                                 radius: height / 2
                                 visible: lineText.visible && !reactions.picking
+                                // Under the pointer, or on the message the
+                                // keyboard is on - otherwise nothing, so a
+                                // transcript at rest is not a column of plus
+                                // signs.
                                 opacity: addPointer.containsMouse ? 1.0
-                                       : lineHover.hovered ? 0.55 : 0.0
+                                       : (lineHover.hovered || lineBox.cursored) ? 0.55 : 0.0
                                 Behavior on opacity { NumberAnimation { duration: 120 } }
                                 color: addPointer.containsMouse
                                   ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
@@ -1229,7 +1363,10 @@ Item {
                                   hoverEnabled: true
                                   enabled: !service.reacting
                                   cursorShape: Qt.PointingHandCursor
-                                  onClicked: reactions.picking = true
+                                  onClicked: {
+                                    root.cursorMessageId = String(modelData.id)
+                                    root.pickingMessageId = String(modelData.id)
+                                  }
                                 }
                               }
                             }
@@ -1237,6 +1374,12 @@ Item {
                             ReactionBar {
                               id: reactions
                               width: parent.width
+                              // Opened from here rather than by the row itself,
+                              // so the keyboard and the mouse open the same one
+                              // and a second one closes the first.
+                              picking: String(root.pickingMessageId) === String(modelData.id)
+                              // Numbered, because the keyboard picks by number.
+                              numbered: true
                               reactions: modelData.reactions || []
                               choices: service.reactionChoices
                               busy: service.reacting
@@ -1248,6 +1391,7 @@ Item {
                               // not adds it. Same for a fresh pick, which is
                               // never one of yours yet.
                               onToggled: function(emoji) {
+                                root.pickingMessageId = ""
                                 service.react(modelData.id, emoji,
                                               Model.reactionIsMine(modelData.reactions, emoji))
                               }

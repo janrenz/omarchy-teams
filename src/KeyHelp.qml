@@ -15,7 +15,7 @@ Column {
 
   // [key, what it does, which section]
   readonly property var bindings: [
-    ["j / k", "Down and up, in whatever has focus", "Moving"],
+    ["j / k", "Down and up: the conversations, or the messages in one", "Moving"],
     ["Enter", "Open the conversation, and follow it in", "Moving"],
     ["h", "Back to the list, leaving the conversation open", "Moving"],
     ["l", "Into the conversation, then into the message box", "Moving"],
@@ -27,6 +27,8 @@ Column {
     ["Ctrl-f / Ctrl-b", "A screen", "Scrolling"],
     ["g / G", "To the top / to the newest", "Scrolling"],
 
+    ["e or +", "React to the message under the cursor", "Doing"],
+    ["1 - 6", "Pick that reaction, or take yours back", "Doing"],
     ["Shift+Enter", "Send what you have typed", "Doing"],
     ["u", "Show only unread conversations", "Doing"],
     ["n", "Start a new chat", "Doing"],

@@ -9,7 +9,7 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **Starting a chat** with anybody in the directory, and **marking a chat read** by opening it.
 - **Emoji, inline images and clickable links** in the transcript. Both kinds of link: an address somebody typed out in full, and one behind its own words — the composer's link button writes `<a href="…">the release notes</a>`, and the words are all a reader would otherwise get. They open in your browser, tinted from the running theme rather than in Qt's blue.
 - **Presence.** Beside each one-to-one chat: a filled circle for available, a filled circle for busy, a ring for away, a dim circle for offline — in the running theme's own colours. Group chats have none, because a group is not away. Told apart from unread by shape and place, not by hue: presence sits immediately in front of the name because it is about the person, unread is a bar down the leading edge because it is about the conversation, and a chat can show both. Needs `Presence.Read.All` — ordinary user consent.
-- **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours, or `+` to pick from the six Teams takes.
+- **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
 
 ![The conversation list, and a chat open beside it](showcase-conversation.png)
@@ -57,12 +57,12 @@ focus".
 
 | Key | What it does |
 |---|---|
-| `j` / `k`, `↓` / `↑` | Down and up in whatever has focus — the list's cursor, or the transcript |
+| `j` / `k`, `↓` / `↑` | Down and up in whatever has focus — the conversations, or the messages in the open one |
 | `Enter` | Open the conversation under the cursor, and move focus into it |
 | `h` / `←` | Back to the list, **leaving the conversation open**. Narrow windows slide the list out over it |
 | `l` / `→` | Into the conversation; again into the message box |
 | `Tab` or `i` | Straight to the message box |
-| `Escape` | Back one step: message box → conversation → list → close the conversation → close the window |
+| `Escape` | Back one step: reaction picker → message box → conversation → list → close the conversation → close the window |
 
 Escape never skips a rung. Going back to the list does not close what you were
 reading, which is the step that used to be missing.
@@ -81,6 +81,8 @@ reading, which is the step that used to be missing.
 
 | Key | What it does |
 |---|---|
+| `e` or `+` | React to the message under the cursor. Again, or `Escape`, closes the picker |
+| `1` – `6` | Pick that reaction. The one you already gave takes it back |
 | `Shift+Enter` or `Ctrl+Enter` | Send. Plain `Enter` is a newline |
 | `u` | Show only unread conversations |
 | `n` | Start a new chat |

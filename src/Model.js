@@ -82,20 +82,90 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;")
 }
 
-function hasLink(text) {
+function hasLink(text, links) {
+  if (links && links.length > 0) return true
   LINKABLE.lastIndex = 0
   return LINKABLE.test(String(text || ""))
 }
 
+// Only somewhere to go, never something to run - the same three schemes the
+// Python side allows, checked again here because this is what builds the tag.
+function safeHref(href) {
+  var url = String(href || "").trim()
+  var lowered = url.toLowerCase()
+  if (lowered.indexOf("http://") === 0 || lowered.indexOf("https://") === 0
+      || lowered.indexOf("mailto:") === 0) return url
+  return ""
+}
+
+// One anchor, out of text that has not been escaped yet.
+function anchor(href, label, tint) {
+  var url = escapeHtml(href)
+  var words = escapeHtml(label)
+  if (tint === "") return '<a href="' + url + '">' + words + '</a>'
+  // Both the style and the font tag: Qt honours one or the other depending
+  // on the rich-text path, and an uncoloured link is the thing being fixed.
+  return '<a href="' + url + '" style="color:' + tint + '">'
+    + '<font color="' + tint + '">' + words + '</font></a>'
+}
+
+// `links` are the spans teams.py found in the message's own markup - the ones
+// where the address is in the href and nowhere in the words, which is what the
+// composer's link button writes. Text outside those spans still gets the
+// addresses somebody typed out in full.
+//
 // `color` is a hex string from the theme's own palette. A TextEdit has no
 // linkColor - that is a Text property - so an anchor rendered in one comes out
 // in Qt's default blue, which belongs to no theme. Since this builds the
 // anchor, it can say what colour it should be.
-function linkify(text, color) {
+function linkify(text, color, links) {
   var tint = String(color || "")
-  var escaped = escapeHtml(text)
+  var plain = String(text === undefined || text === null ? "" : text)
+  var spans = usableSpans(plain, links)
+  var html = ""
+  var at = 0
+  for (var i = 0; i < spans.length; i++) {
+    html += autoLinked(plain.substring(at, spans[i].start), tint)
+    html += anchor(spans[i].href, plain.substring(spans[i].start, spans[i].end), tint)
+    at = spans[i].end
+  }
+  html += autoLinked(plain.substring(at), tint)
+  // Newlines carry no meaning in rich text, and a transcript is full of them.
+  return html.replace(/\n/g, "<br>")
+}
+
+// The spans worth drawing: in order, inside the text, not overlapping, and
+// pointing somewhere it is safe to go. Offsets come from a message somebody
+// else wrote, so none of that is assumed.
+function usableSpans(plain, links) {
+  var list = []
+  var all = links || []
+  for (var i = 0; i < all.length; i++) {
+    var href = safeHref(all[i] && all[i].href)
+    var start = Number(all[i] && all[i].start)
+    var end = Number(all[i] && all[i].end)
+    if (href === "" || !isFinite(start) || !isFinite(end)) continue
+    if (start < 0 || end > plain.length || end <= start) continue
+    list.push({ start: start, end: end, href: href })
+  }
+  list.sort(function(a, b) { return a.start - b.start })
+  var kept = []
+  var reached = 0
+  for (var j = 0; j < list.length; j++) {
+    if (list[j].start < reached) continue
+    kept.push(list[j])
+    reached = list[j].end
+  }
+  return kept
+}
+
+// The prose between the links: escaped, with the addresses somebody typed out
+// in full turned into links of their own. Teams marks up a pasted URL, but not
+// one that arrives in a message the API hands over as plain text.
+function autoLinked(plain, tint) {
+  var escaped = escapeHtml(plain)
   LINKABLE.lastIndex = 0
-  var html = escaped.replace(LINKABLE, function(match) {
+  return escaped.replace(LINKABLE, function(match) {
     // Trailing punctuation is nearly always the sentence, not the address.
     var trail = ""
     while (match.length > 0 && ".,;:!?".indexOf(match.charAt(match.length - 1)) !== -1) {
@@ -106,13 +176,9 @@ function linkify(text, color) {
     if (match.indexOf("@") !== -1 && match.indexOf("//") === -1) href = "mailto:" + match
     else if (match.toLowerCase().indexOf("www.") === 0) href = "https://" + match
     if (tint === "") return '<a href="' + href + '">' + match + '</a>' + trail
-    // Both the style and the font tag: Qt honours one or the other depending
-    // on the rich-text path, and an uncoloured link is the thing being fixed.
     return '<a href="' + href + '" style="color:' + tint + '">'
       + '<font color="' + tint + '">' + match + '</font></a>' + trail
   })
-  // Newlines carry no meaning in rich text, and a transcript is full of them.
-  return html.replace(/\n/g, "<br>")
 }
 
 // Presence, in the theme's own colours rather than hardcoded traffic lights.
@@ -337,6 +403,7 @@ function groupMessages(messages, meId) {
     if (last && !message.system && !last.system && String(last.fromId) === String(message.fromId || "")) {
       last.lines.push({ id: message.id, text: message.text, when: message.when,
                         edited: message.edited === true, images: message.images || [],
+                        links: message.links || [],
                         reactions: message.reactions || [] })
       last.when = message.when
       continue
@@ -350,6 +417,7 @@ function groupMessages(messages, meId) {
       when: message.when,
       lines: [{ id: message.id, text: message.text, when: message.when,
                 edited: message.edited === true, images: message.images || [],
+                links: message.links || [],
                 reactions: message.reactions || [] }]
     })
   }

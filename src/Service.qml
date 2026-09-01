@@ -754,8 +754,16 @@ Item {
     }
   }
 
+  // The last gate before xdg-open, which opens whatever it is handed - a
+  // file:// path, a handler registered for some scheme nobody remembers
+  // installing. Both sides that build a link already keep to these three, so
+  // this changes nothing that works; it is here so that a link arriving by
+  // some route added later cannot reach the opener without passing it.
   function openUrl(url) {
-    if (!url) return
-    Quickshell.execDetached(["xdg-open", String(url)])
+    var target = String(url || "").trim()
+    var lowered = target.toLowerCase()
+    if (lowered.indexOf("http://") !== 0 && lowered.indexOf("https://") !== 0
+        && lowered.indexOf("mailto:") !== 0) return
+    Quickshell.execDetached(["xdg-open", target])
   }
 }

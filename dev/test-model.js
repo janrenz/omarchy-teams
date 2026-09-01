@@ -408,6 +408,94 @@ test("hasLink is false for ordinary words, so plain lines stay plain", () => {
   eq(Model.hasLink("one https://x.y here"), true)
 })
 
+// ------------------------------------------------------- links from the span
+
+const SPAN = [{ start: 4, end: 15, href: "https://x.y/plan" }]
+
+test("words that were a link become the link, address and all", () => {
+  eq(
+    Model.linkify("see our roadmap today", "", SPAN),
+    'see <a href="https://x.y/plan">our roadmap</a> today'
+  )
+})
+
+test("a line with a span is a link even with no address in the words", () => {
+  eq(Model.hasLink("see our roadmap today"), false)
+  eq(Model.hasLink("see our roadmap today", SPAN), true)
+})
+
+test("the words in a span are escaped like any other words", () => {
+  const html = Model.linkify('a <b>c', "", [{ start: 2, end: 5, href: "https://x.y" }])
+  ok(!html.includes("<b>"), "markup survived: " + html)
+  ok(html.includes("&lt;b&gt;"), "expected it escaped: " + html)
+})
+
+test("a span cannot point somewhere that runs", () => {
+  const html = Model.linkify("click me", "", [{ start: 0, end: 8, href: "javascript:alert(1)" }])
+  ok(!html.includes("<a "), "a javascript: span linked: " + html)
+  eq(html, "click me")
+})
+
+test("a span pointing outside the line is dropped rather than cutting it", () => {
+  eq(Model.linkify("short", "", [{ start: 2, end: 99, href: "https://x.y" }]), "short")
+  eq(Model.linkify("short", "", [{ start: -1, end: 3, href: "https://x.y" }]), "short")
+  eq(Model.linkify("short", "", [{ start: 3, end: 3, href: "https://x.y" }]), "short")
+})
+
+test("overlapping spans keep the first and drop what runs into it", () => {
+  const html = Model.linkify("one two", "", [
+    { start: 4, end: 7, href: "https://b.b" },
+    { start: 0, end: 3, href: "https://a.a" },
+    { start: 1, end: 5, href: "https://c.c" },
+  ])
+  eq(html, '<a href="https://a.a">one</a> <a href="https://b.b">two</a>')
+})
+
+test("an address outside the spans is still found on its own", () => {
+  const html = Model.linkify("see our roadmap today, or https://z.z", "", SPAN)
+  ok(html.includes('href="https://x.y/plan"'), "expected the span: " + html)
+  ok(html.includes('href="https://z.z"'), "expected the bare address too: " + html)
+})
+
+test("words inside a span are not linked twice", () => {
+  const html = Model.linkify("go https://x.y/a now", "", [{ start: 3, end: 16, href: "https://x.y/a" }])
+  eq(html, 'go <a href="https://x.y/a">https://x.y/a</a> now')
+})
+
+test("a span takes the theme's colour like any other link", () => {
+  const html = Model.linkify("see our roadmap today", "#7aa2f7", SPAN)
+  ok(html.includes('style="color:#7aa2f7"'), "expected the tint: " + html)
+  ok(html.includes('<font color="#7aa2f7">'), "expected the font tag too: " + html)
+})
+
+test("a quote in the href cannot break out of the attribute", () => {
+  const html = Model.linkify("go", "", [{ start: 0, end: 2, href: 'https://x.y/"onx="1' }])
+  ok(!html.includes('"onx='), "the href broke out: " + html)
+  ok(html.includes("&quot;"), "expected it escaped: " + html)
+})
+
+test("no spans is the plain line it always was", () => {
+  eq(Model.linkify("just words", "", []), "just words")
+  eq(Model.linkify("just words", "", null), "just words")
+})
+
+test("a line keeps its spans through the grouping", () => {
+  const links = [{ start: 0, end: 2, href: "https://x.y" }]
+  const groups = Model.groupMessages([
+    { id: "1", fromId: "a", text: "go", links: links },
+    { id: "2", fromId: "a", text: "and", links: [] },
+    { id: "3", fromId: "b", text: "go", links: links },
+  ], "me")
+  eq(groups[0].lines[0].links, links)
+  eq(groups[0].lines[1].links, [])
+  eq(groups[1].lines[0].links, links)
+})
+
+test("a message from before links were read groups without throwing", () => {
+  const groups = Model.groupMessages([{ id: "1", fromId: "a", text: "go" }], "me")
+  eq(groups[0].lines[0].links, [])
+})
+
 // ------------------------------------------------------------------ density
 
 test("each named spacing is a distinct multiplier, in order", () => {

@@ -502,24 +502,107 @@ def message_images(html):
     return images
 
 
-def plain_text(html):
-    """A chat message as one line of text.
+# A link somebody put in a message. Teams writes one whenever a URL is pasted
+# and whenever the composer's link button is used, and in the second case the
+# address appears nowhere but the href - "our roadmap" with the URL behind it.
+# Stripping the tag threw that away and left words nobody could follow.
+ANCHOR_TAG = re.compile(
+    r'<\s*a\b([^>]*)>(.*?)<\s*/\s*a\s*>', re.I | re.S)
+
+# Only somewhere to go, never something to run. A javascript:, vbscript: or
+# data: href is dropped and its words are left as the words they were.
+LINK_SCHEMES = ("http://", "https://", "mailto:")
+
+# Where a link sat, carried through the tag stripping so the offsets that come
+# out are offsets into the finished text. These three are C0 controls: Teams
+# does not send them, and anything that arrives holding one gets it removed
+# before this starts, so a message cannot forge a span of its own.
+LINK_OPEN, LINK_SEP, LINK_CLOSE = "\x00", "\x01", "\x02"
+LINK_MARKS = re.compile(r"[\x00\x01\x02]")
+
+
+def link_href(attrs):
+    """The address an anchor goes to, or "" if it is not one to follow."""
+    href = attr(attrs, "href").strip()
+    if not href:
+        return ""
+    # Written before the entities are decoded, so the ampersands in a query
+    # string are still `&amp;` here; decode the few that matter, in the same
+    # order plain_text does.
+    href = (href.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
+                .replace("&quot;", '"').replace("&#39;", "'"))
+    lowered = href.lower()
+    return href if lowered.startswith(LINK_SCHEMES) else ""
+
+
+def take_marks(text):
+    """The marked-up text split back into plain text and the spans in it."""
+    parts = []
+    links = []
+    at = 0
+    seen = 0
+    while True:
+        start = text.find(LINK_OPEN, at)
+        if start == -1:
+            break
+        sep = text.find(LINK_SEP, start)
+        end = text.find(LINK_CLOSE, start)
+        if sep == -1 or end == -1 or sep > end:
+            # A mark without its partner - drop the mark, keep the words.
+            parts.append(text[at:start])
+            seen += start - at
+            at = start + 1
+            continue
+        href = text[start + 1:sep]
+        label = text[sep + 1:end]
+        parts.append(text[at:start])
+        seen += start - at
+        parts.append(label)
+        if label and href:
+            links.append({"href": href, "start": seen, "end": seen + len(label)})
+        seen += len(label)
+        at = end + 1
+    parts.append(text[at:])
+    return "".join(parts), links
+
+
+def text_and_links(html):
+    """A chat message as text, and where the links in it are.
 
     Teams messages are HTML even when someone typed one word. Nothing here
     renders markup, so it comes out as text: the emoji and images become their
-    alt text or nothing, and what is left is what was said.
+    alt text or nothing, and what is left is what was said. The links are the
+    exception - they are kept, as offsets into that text rather than as tags,
+    so the side that draws them builds the only markup there is.
     """
-    text = str(html or "")
+    text = LINK_MARKS.sub("", str(html or ""))
     text = EMOJI_TAG.sub(lambda m: m.group(1), text)
     text = EMOJI_CLOSE.sub("", text)
     text = re.sub(r"<\s*(script|style)\b[^>]*>.*?<\s*/\s*\1\s*>", "", text, flags=re.I | re.S)
+    # Marked before the tags come off, so the offsets survive the stripping.
+    # The label keeps going through the rest of this - the bold inside a link
+    # is stripped like any other tag, its entities decoded like any other text.
+    text = ANCHOR_TAG.sub(
+        lambda m: (LINK_OPEN + link_href(m.group(1)) + LINK_SEP + m.group(2) + LINK_CLOSE
+                   if link_href(m.group(1)) else m.group(2)),
+        text)
     text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.I)
     text = re.sub(r"<\s*/\s*(p|div|li)\s*>", "\n", text, flags=re.I)
     text = re.sub(r"<[^>]+>", "", text)
     text = (text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<")
                 .replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'"))
     text = re.sub(r"[ \t]+\n", "\n", text)
-    return re.sub(r"\n{3,}", "\n\n", text).strip()
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return take_marks(text)
+
+
+def plain_text(html):
+    """A chat message as one line of text, links flattened to their words.
+
+    What a preview, a notification and the bar widget want: no markup, no
+    addresses, just what was said.
+    """
+    return text_and_links(html)[0]
 
 
 def chat_title(chat, me_id):
@@ -549,12 +632,17 @@ def chat_title(chat, me_id):
 def message_row(message, me_id=""):
     sender = ((message.get("from") or {}).get("user") or {})
     body = (message.get("body") or {})
+    text, links = text_and_links(body.get("content"))
     return {
         "id": message.get("id", ""),
         "from": sender.get("displayName") or "",
         "fromId": sender.get("id") or "",
         "when": message.get("createdDateTime", ""),
-        "text": plain_text(body.get("content")),
+        "text": text,
+        # Where the links are, rather than the links themselves: the transcript
+        # builds the anchors out of escaped text, so nothing a sender wrote can
+        # arrive already being markup.
+        "links": links,
         "edited": bool(message.get("lastEditedDateTime")),
         "images": message_images(body.get("content")),
         "reactions": reaction_summary(message, me_id),
@@ -1318,8 +1406,9 @@ DEMO_TRANSCRIPTS = {
         ("You", "demo-me", 12, "Found it - the migration ran twice because the job was queued from "
                                "both the tag and the branch push.", True),
         ("Priya Raman", "p1", 8, "Ah, that would do it.", False),
-        ("Priya Raman", "p1", 3, "Can you put that in the release notes so the next person does not "
-                                 "spend an hour on it?", False),
+        ("Priya Raman", "p1", 3, 'Can you put that in '
+                                 '<a href="https://example.com/releases/14-02">the release notes</a> '
+                                 'so the next person does not spend an hour on it?', False),
     ],
     "demo-chat-1": [
         ("Tomás Lindqvist", "t1", 26, "Rolling back the 14:02 release.", False),
@@ -1339,13 +1428,17 @@ def demo_messages(target):
     now = datetime.now(timezone.utc).replace(microsecond=0)
     turns = DEMO_TRANSCRIPTS.get(str(target or ""), DEMO_FALLBACK_TRANSCRIPT)
     messages = []
-    for index, (who, who_id, ago, text, edited) in enumerate(turns):
+    for index, (who, who_id, ago, body, edited) in enumerate(turns):
+        # Through the same reader the real thing goes through, so a demo line
+        # with a link in it comes out the way a message with one does.
+        text, links = text_and_links(body)
         messages.append({
             "id": "d%d" % (index + 1),
             "from": who,
             "fromId": who_id,
             "when": iso_z(now - timedelta(minutes=ago)),
             "text": text,
+            "links": links,
             "edited": edited,
             "system": False,
             "images": [],

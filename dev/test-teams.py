@@ -83,6 +83,96 @@ class PlainText(unittest.TestCase):
         self.assertEqual(teams.plain_text(None), "")
         self.assertEqual(teams.plain_text(""), "")
 
+    def test_a_link_keeps_its_words_and_loses_its_tag(self):
+        body = '<p>see <a href="https://x.y/plan">our roadmap</a> today</p>'
+        self.assertEqual(teams.plain_text(body), "see our roadmap today")
+
+
+class MessageLinks(unittest.TestCase):
+    """Where the links in a message are, once it is text.
+
+    The composer's link button puts the address in the href and nowhere in the
+    words, so stripping the tag left "our roadmap" with nothing behind it.
+    """
+
+    def spans(self, body):
+        text, links = teams.text_and_links(body)
+        return text, [(text[l["start"]:l["end"]], l["href"]) for l in links]
+
+    def test_the_span_covers_the_words_that_were_the_link(self):
+        text, spans = self.spans('<p>see <a href="https://x.y/plan">our roadmap</a> today</p>')
+        self.assertEqual(text, "see our roadmap today")
+        self.assertEqual(spans, [("our roadmap", "https://x.y/plan")])
+
+    def test_offsets_survive_the_paragraphs_and_the_entities(self):
+        # Everything before the link changes length on the way through: the
+        # entity shrinks, the paragraph becomes a newline, the tag goes.
+        text, spans = self.spans(
+            '<p>a&nbsp;&amp;&nbsp;b</p><p><b>x</b> <a href="https://x.y">go</a></p>')
+        self.assertEqual(text, "a & b\nx go")
+        self.assertEqual(spans, [("go", "https://x.y")])
+
+    def test_a_pasted_url_is_its_own_words(self):
+        text, spans = self.spans('<p><a href="https://x.y/a">https://x.y/a</a></p>')
+        self.assertEqual(text, "https://x.y/a")
+        self.assertEqual(spans, [("https://x.y/a", "https://x.y/a")])
+
+    def test_a_mailto_is_kept(self):
+        text, spans = self.spans('<div>ask <a href="mailto:jan@x.de">Jan</a></div>')
+        self.assertEqual(spans, [("Jan", "mailto:jan@x.de")])
+
+    def test_something_that_runs_is_not_a_link_and_keeps_its_words(self):
+        for href in ("javascript:alert(1)", "data:text/html,x", "vbscript:x", "file:///etc/passwd"):
+            text, spans = self.spans('<p><a href="%s">click me</a></p>' % href)
+            self.assertEqual(text, "click me")
+            self.assertEqual(spans, [])
+
+    def test_an_ampersand_in_the_query_is_decoded_like_the_rest(self):
+        _, spans = self.spans('<a href="https://x.y?a=1&amp;b=2">q</a>')
+        self.assertEqual(spans, [("q", "https://x.y?a=1&b=2")])
+
+    def test_markup_inside_the_words_is_stripped_like_any_other(self):
+        text, spans = self.spans('<a href="https://x.y"><b>bold</b> link</a>')
+        self.assertEqual(text, "bold link")
+        self.assertEqual(spans, [("bold link", "https://x.y")])
+
+    def test_an_emoji_inside_a_link_survives_and_the_span_still_fits(self):
+        text, spans = self.spans(
+            '<a href="https://x.y">go <emoji id="s" alt="\U0001F642"></emoji></a>')
+        self.assertEqual(text, "go \U0001F642")
+        self.assertEqual(spans, [("go \U0001F642", "https://x.y")])
+
+    def test_several_links_come_back_in_order(self):
+        text, spans = self.spans(
+            '<p><a href="https://a.b">one</a> and <a href="https://c.d">two</a></p>')
+        self.assertEqual(text, "one and two")
+        self.assertEqual(spans, [("one", "https://a.b"), ("two", "https://c.d")])
+
+    def test_a_message_cannot_forge_a_span_of_its_own(self):
+        # The marks are C0 controls that Teams does not send; one that arrives
+        # anyway is removed before the anchors are marked, so it cannot make
+        # words into a link that was never one.
+        text, spans = self.spans("\x00https://evil.example\x01trusted\x02")
+        self.assertEqual(text, "https://evil.exampletrusted")
+        self.assertEqual(spans, [])
+
+    def test_a_link_with_no_href_is_only_words(self):
+        text, spans = self.spans("<p>a <a>b</a> c</p>")
+        self.assertEqual(text, "a b c")
+        self.assertEqual(spans, [])
+
+    def test_a_message_with_no_links_says_so(self):
+        self.assertEqual(teams.text_and_links("<p>nothing here</p>"), ("nothing here", []))
+
+    def test_a_message_row_carries_its_links(self):
+        row = teams.message_row({
+            "id": "1", "createdDateTime": "2026-09-01T08:00:00Z",
+            "from": {"user": {"id": "u", "displayName": "Jan"}},
+            "body": {"content": '<p>see <a href="https://x.y">this</a></p>'},
+        })
+        self.assertEqual(row["text"], "see this")
+        self.assertEqual(row["links"], [{"href": "https://x.y", "start": 4, "end": 8}])
+
 
 class MessageImages(unittest.TestCase):
     """Which pictures in a message are ours to fetch."""

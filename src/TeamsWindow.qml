@@ -1159,13 +1159,14 @@ Item {
                               // can never choose its own markup. Lines without
                               // a link stay plain text, which is cheaper and
                               // cannot be got wrong at all.
-                              readonly property bool linked: Model.hasLink(modelData.text)
+                              readonly property bool linked: Model.hasLink(modelData.text, modelData.links)
                               // Tinted from the theme: a TextEdit has no
                               // linkColor, so an untinted anchor comes out in
                               // Qt's default blue, which belongs to no theme.
                               text: linked ? Model.linkify(modelData.text,
                                                            service.themeColors.blue
-                                                           || service.themeColors.accent || "")
+                                                           || service.themeColors.accent || "",
+                                                           modelData.links)
                                            : String(modelData.text || "")
                               onLinkActivated: function(url) { service.openUrl(url) }
                               HoverHandler {

@@ -14,7 +14,7 @@ rm -rf "$STAGE"; mkdir -p "$STAGE"
 
 ln -sfn /usr/share/omarchy/shell/Commons "$STAGE/Commons"
 ln -sfn /usr/share/omarchy/shell/Ui "$STAGE/Ui"
-for f in "$repo"/src/*.qml "$repo"/src/Model.js "$repo"/src/*.py; do
+for f in "$repo"/src/*.qml "$repo"/src/Model.js "$repo"/src/*.py "$repo"/src/*.sh; do
   ln -sfn "$f" "$STAGE/$(basename "$f")"
 done
 ln -sfn "$(pwd)/shell.qml" "$STAGE/shell.qml"

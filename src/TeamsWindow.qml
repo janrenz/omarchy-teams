@@ -38,11 +38,37 @@ Item {
   // the shell in the way. Nothing in the plugin uses it.
   readonly property alias floatingWindow: window
 
-  function open(_payloadJson) {
+  function open(payloadJson) {
     closingFromHost = false
     loadSettings()
+    var payload = Model.parseJson(payloadJson, null)
+    if (payload) applyPayload(payload)
     window.visible = true
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+  }
+
+  // What the shell may deliver with a summon: a conversation to show - a
+  // clicked notification, `chat` for a chat or `team` plus `channel` for a
+  // channel - and a draft a coding agent wrote. Both have to survive being
+  // applied twice, because the payload queue is drained in a loop and a toast
+  // clicked while the window is already open arrives here too; and neither may
+  // throw away a draft being written into the conversation already on screen.
+  function applyPayload(payload) {
+    var chat = String(payload.chat || "")
+    var channel = String(payload.channel || "")
+    if (chat !== "" || channel !== "") {
+      service.openByIds(chat, String(payload.team || ""), channel,
+                        String(payload.title || ""))
+      var message = String(payload.message || "")
+      if (message !== "") {
+        cursorMessageId = message
+        focusPane = "conversation"
+      }
+    }
+    if (payload.draft) {
+      agentDraftPending = payload.draft
+      flushAgentDraft()
+    }
   }
 
   function close() {
@@ -60,6 +86,8 @@ Item {
   // The window is one per plugin and the widget owns the configuration, so the
   // window reads it out of shell.json rather than having any of its own.
   property var settings: ({})
+  // A draft that came in before the settings did has been waiting for them.
+  onSettingsChanged: flushAgentDraft()
   property bool settingsLoaded: false
   property string settingsError: ""
 
@@ -279,6 +307,81 @@ Item {
   property bool showSettings: false
   property bool composingNew: false
 
+  // ---- the coding agent ---------------------------------------------------
+  //
+  // Omarchy's own handover, pointed at a conversation: omarchy-agent starts
+  // whichever agent was chosen with `omarchy default agent`, and handover.sh
+  // writes the prompt. Nothing anybody said goes into that prompt - the agent
+  // is told which conversation to read and reads it through teams.py, the same
+  // helper this window uses. src/handover.sh says why.
+  //
+  // Split in two so the fixtures can be checked without an agent starting.
+  // Empty means there is nothing to hand over, or the setting says not to.
+  function agentArgv() {
+    if (!service.agentHandover || !service.reading) return []
+    var conversation = service.openConversation
+    if (!conversation) return []
+    var argv = [pluginDir + "/handover.sh",
+                "--account", service.alias,
+                "--title", String(conversation.title || "")]
+    if (String(conversation.kind) === "chat")
+      argv = argv.concat(["--chat", String(conversation.id)])
+    else
+      argv = argv.concat(["--team", String(conversation.teamId),
+                          "--channel", String(conversation.id)])
+    // The message under the cursor, or the newest when the cursor is not
+    // anywhere yet - the same fallback the reaction picker makes.
+    var id = String(cursorMessageId)
+    if (id === "" || messageIndex(id) < 0) {
+      var list = service.messages
+      id = list.length > 0 ? String(list[list.length - 1].id || "") : ""
+    }
+    if (id !== "") argv = argv.concat(["--message", id])
+    return argv
+  }
+
+  function askAgent() {
+    var argv = agentArgv()
+    if (argv.length === 0) return
+    Quickshell.execDetached(argv)
+  }
+
+  // A draft an agent wrote, arriving from outside:
+  //   omarchy-shell shell summon janrenz.omarchy.teams '{"draft":{...}}'
+  //   omarchy-shell shell call   janrenz.omarchy.teams agentDraft '{...}'
+  // It lands in the message box, focused and unsent. Sending stays a keypress
+  // a person makes, which is the whole reason this is a draft and not a send.
+  property var agentDraftPending: null
+
+  function agentDraft(argJson) {
+    var payload = Model.parseJson(argJson, null)
+    if (!payload) return "bad-json"
+    agentDraftPending = payload.draft ? payload.draft : payload
+    return flushAgentDraft()
+  }
+
+  // Held rather than applied when it arrives before the settings do: the
+  // setting is what says whether a draft may be taken at all, and on the first
+  // open it is still being read out of shell.json.
+  function flushAgentDraft() {
+    if (!agentDraftPending) return "ok"
+    if (!settingsLoaded) return "waiting"
+    if (!service.agentHandover) { agentDraftPending = null; return "off" }
+    var draft = agentDraftPending
+    agentDraftPending = null
+    var text = String(draft.text || "")
+    if (text === "") return "empty"
+    service.openByIds(String(draft.chat || ""), String(draft.team || ""),
+                      String(draft.channel || ""), String(draft.title || ""))
+    // Nowhere to put it. Better to say so to whoever called than to drop the
+    // text into a window that is not reading anything.
+    if (!service.reading) return "no-conversation"
+    service.draft = text
+    focusPane = "conversation"
+    Qt.callLater(function() { root.focusComposer() })
+    return "ok"
+  }
+
   function openNewChat() {
     if (!service.canStartChat) return
     service.clearPeople()
@@ -448,7 +551,6 @@ Item {
         }
       }
 
-
       // PanelKeyCatcher's vocabulary is Escape, Tab, the arrows, j/k/h/l and
       // Return; Page, Home and End are not in it and arrive here instead.
       // AfterItem so the catcher still gets first refusal on what it does know.
@@ -587,6 +689,7 @@ Item {
             anchors.centerIn: parent
             fg: Color.foreground
             fontFamily: Style.font.family
+            agentHandover: service.agentHandover
           }
         }
       }
@@ -804,6 +907,7 @@ Item {
             return
           }
           if (text === "e" || text === "+") root.startPicking()
+          else if (text === "a") root.askAgent()
           else if (text === "r") service.reloadConversation()
           else if (text === "u") service.unreadOnly = !service.unreadOnly
           // The comma is what most applications use for preferences.
@@ -971,13 +1075,19 @@ Item {
                 // side of it. A bare glyph between two boxes reads as a stray
                 // character rather than as the next control along.
                 bordered: true
-                size: refreshButton.height
+                size: unreadButton.height
                 onClicked: root.showSettings = !root.showSettings
               }
 
               Button {
+                // Named because the icon buttons measure themselves against
+                // it; height is computed even while this one is hidden.
+                id: unreadButton
                 visible: service.signedIn && !root.showSettings
-                text: "Unread"
+                // The count belongs on the button that filters by it: "Unread"
+                // alone made you turn the filter on to find out whether it was
+                // worth turning on.
+                text: service.unreadCount > 0 ? "Unread " + service.unreadCount : "Unread"
                 tooltipText: service.unreadOnly
                   ? "Showing only unread chats" : "Show only unread chats"
                 selected: service.unreadOnly
@@ -1022,17 +1132,17 @@ Item {
                 onClicked: service.startLogin(true)
               }
 
-              Button {
-                // Named because the settings button measures itself against
-                // it; height is computed even while this one is hidden.
-                id: refreshButton
+              // A glyph rather than the word: one idea with a picture
+              // everybody already knows, and a tiled window's header runs out
+              // of room long before it runs out of buttons.
+              PanelActionButton {
                 visible: service.configured && !root.showSettings
                 enabled: !service.loading
-                text: "Refresh"
-                bordered: true
+                iconText: "\u{F0450}"   // nf-md-refresh
+                tooltipText: "Read the account again"
                 foreground: Color.foreground
-                fontFamily: Style.font.family
-                fontSize: Style.font.caption
+                bordered: true
+                size: unreadButton.height
                 onClicked: service.refreshEverything()
               }
             }
@@ -1660,6 +1770,20 @@ Item {
                     fontFamily: Style.font.family
                     fontSize: Style.font.caption
                     onClicked: service.reloadConversation()
+                  }
+
+                  // The same handover the a key does. Gone entirely when the
+                  // setting is off, rather than disabled: a button that cannot
+                  // ever do anything is worse than no button.
+                  Button {
+                    visible: service.agentHandover
+                    text: "Ask agent"
+                    tooltipText: "Open your coding agent on this conversation"
+                    bordered: true
+                    foreground: Color.foreground
+                    fontFamily: Style.font.family
+                    fontSize: Style.font.caption
+                    onClicked: root.askAgent()
                   }
 
                   Text {

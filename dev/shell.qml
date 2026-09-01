@@ -159,6 +159,51 @@ ShellRoot {
       })
     }
 
+    // Send what is in the box. --demo makes teams.py answer as if it had posted
+    // and post nothing, so this exercises the real send path - including the
+    // message going over stdin rather than in argv - without a workspace.
+    function send(text: string): string {
+      panel.teamsService.draft = text
+      panel.teamsService.send()
+      return "sending"
+    }
+
+    // The coding-agent handover, without an agent starting: the argv the window
+    // would run, so a script can check what it points at and that the setting
+    // actually turns it off.
+    function handover(): string {
+      return JSON.stringify(panel.agentArgv())
+    }
+
+    // The other direction - a draft coming back from an agent, as the shell
+    // would deliver it. Returns what the window made of it.
+    function draft(json: string): string {
+      return String(panel.agentDraft(json))
+    }
+
+    function handovers(on: bool): void {
+      panel.settings = Object.assign({}, panel.settings, { agentHandover: on })
+    }
+
+    // Every piece of text on screen that mentions something, with whether it is
+    // actually visible - for checking that a row exists in a pane too long to
+    // photograph in one screenful.
+    function texts(needle: string): string {
+      var out = []
+      function walk(item, depth) {
+        if (!item || depth > 20) return
+        for (var i = 0; i < item.children.length; i++) {
+          var child = item.children[i]
+          if (child.text !== undefined && String(child.text).indexOf(needle) >= 0)
+            out.push((child.visible ? "visible: " : "hidden:  ") + String(child.text).substring(0, 80))
+          walk(child, depth + 1)
+        }
+      }
+      var content = panel.floatingWindow ? panel.floatingWindow.contentItem : null
+      walk(content && content.children.length ? content.children[0] : content, 0)
+      return out.join("\n")
+    }
+
     // The overlays, which have no other way of being reached from a script.
     // Not called show(): `qs ipc show` is a subcommand of its own, and the
     // argument parser takes the call for that one and refuses the argument.

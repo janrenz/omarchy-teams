@@ -82,6 +82,7 @@ reading, which is the step that used to be missing.
 
 | Key | What it does |
 |---|---|
+| `a` | Hand this conversation to your coding agent — see below |
 | `e` or `+` | React to the message under the cursor. Again, or `Escape`, closes the picker |
 | `1` – `6` | Pick that reaction. The one you already gave takes it back |
 | `s` / `o` | In a picture: save a copy / open it elsewhere |
@@ -119,10 +120,16 @@ An Azure app registration declares up front which delegated permissions it is al
    | `ChannelMessage.Send` | posting in a channel | user |
    | `Files.ReadWrite` | sending a file into a chat — optional, see below | user |
 
-
    `Chat.ReadWrite` rather than `Chat.Read` on purpose: marking a chat read is
    a write, and `markChatReadForUser` refuses anything less. Everything in that
    list except the channel row is ordinary user consent.
+
+   `Files.ReadWrite` is the one permission this plugin does not ask for unless
+   you say so, and the reason is not consent: a registration declares which
+   permissions it may *request*, so asking for one it does not list fails the
+   whole sign-in rather than that one scope. Add it here and turn on **Send
+   files** in the widget's settings; leave both alone and everything else works
+   exactly as before.
 
 5. Copy the **Application (client) ID**.
 6. In Omarchy, open the Teams widget's settings and fill in **Account name** (a short label such as `work`) and **Azure client id**.
@@ -164,6 +171,7 @@ own.
 | `icon` / `label` | `󰊻` | Bar glyph, or text instead of it. |
 | `tintOnUnread` | `true` | Highlight the bar icon while a chat is unread. |
 | `notify` | `true` | Desktop notification when a chat has something new in it. |
+| `agentHandover` | `true` | Whether `a` and the **Ask agent** button are there at all, and whether a draft from an agent is accepted. |
 
 ## Notifications
 
@@ -180,6 +188,41 @@ A poll is also a token refresh, and Graph counts every one of them, so it stops 
 Anything you ask for by hand still goes out, offline included: a failure you can see beats a silence you cannot. The bar's tooltip says why nothing is moving while it is paused. Set `pausePolling` to `false` to keep the old fixed cadence.
 
 They are raised from behind the bar icon, not from the window, so they arrive whether or not the window is open — and only once, though both have a service of their own polling the same account.
+
+## Your coding agent
+
+Omarchy already knows which coding agent you use — `omarchy default agent`
+picks one, `omarchy-agent` launches it. Press `a` in a chat or a channel, or the
+**Ask agent** button beside the message box, and that agent opens on the
+conversation you are reading.
+
+What crosses over is a pointer, not a transcript. The prompt names the account
+alias, the chat id — or the team and channel ids — and the message the cursor
+was on, and points at a skill in `skills/omarchy-teams/`; the agent then reads
+the conversation through `src/teams.py`, the same helper the window uses. Two
+reasons for that. Anyone on this machine can read another process's command
+line, and an agent window lives for hours — so other people's messages have no
+business being in it. And the agent reads what is in the conversation *now*, not
+what happened to be on screen when you pressed the key.
+
+The skill tells it to draft rather than to post. An answer it writes comes back
+into the message box, focused and unsent:
+
+```bash
+omarchy-shell shell summon janrenz.omarchy.teams \
+  '{"draft":{"chat":"19:…@thread.v2","text":"Ich schaue morgen früh drauf."}}'
+```
+
+The window opens if it was closed. Sending stays a keypress you make — nothing
+an agent does here reaches Teams.
+
+`src/handover.sh` is what the key runs, and it is usable on its own: `--print`
+shows the prompt instead of launching anything, which is also how you would
+point a Hyprland binding at a particular chat.
+
+Turn the whole thing off with `agentHandover` in the settings and the key, the
+button and the help entry are gone, and a draft arriving from an agent is
+refused rather than quietly applied.
 
 ## Sending a file
 

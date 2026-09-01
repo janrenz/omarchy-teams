@@ -1491,7 +1491,14 @@ def cmd_upload(args):
 
 
 def cmd_send(args):
-    text = str(args.text or "").strip()
+    # On stdin, not in argv: anyone on this machine can read another process's
+    # command line for as long as it runs, and a message is somebody's words.
+    # --text stays for running this by hand, where the shell history is already
+    # the bigger leak.
+    text = str(args.text or "")
+    if args.stdin:
+        text = str(read_stdin_json().get("text") or text)
+    text = text.strip()
     if not text:
         fail("empty", "Nothing to send")
 
@@ -1747,7 +1754,9 @@ def main():
     send.add_argument("--chat", default="")
     send.add_argument("--team", default="")
     send.add_argument("--channel", default="")
-    send.add_argument("--text", required=True)
+    send.add_argument("--text", help="the message; --stdin is what the window uses")
+    send.add_argument("--stdin", action="store_true",
+                      help='read {"text": "..."} from stdin, keeping it out of argv')
     send.add_argument("--demo", action="store_true")
     send.set_defaults(func=cmd_send)
 

@@ -26,6 +26,11 @@ src/TeamsWindow.qml     The window. Sidebar, transcript, message box. ~1.7k line
 src/Notifier.qml        omarchy-notification-send, the prime-then-announce rule,
                         and the click that opens the chat.
 src/PollGate.qml        Whether it is worth polling at all: idle, network, battery.
+src/handover.sh         Builds the prompt that hands a conversation to the
+                        user's coding agent and execs omarchy-agent. Runnable by
+                        hand; --print shows the prompt and launches nothing.
+skills/omarchy-teams/   What that agent is pointed at: the helper's commands, and
+                        how to hand a draft back instead of posting it.
 src/SettingsForm.qml    The settings UI shown inside the shell's settings panel.
 src/ImageViewer.qml     A picture from the transcript, with save-as.
 ```
@@ -39,7 +44,9 @@ Nothing goes back the other way except a command line and a stdin payload.
    mode 600, and reach `teams.py` on **stdin** — never in argv (anyone on the
    machine can read another process's command line) and never in `shell.json`
    (world-readable). `clientId` and `authority` are the only settings that
-   belong there.
+   belong there. **What somebody wrote goes the same way**: `send` and `upload`
+   read `{"text": …}` / `{"file": …}` on stdin, and the window uses those paths.
+   `--text` and `--comment` remain for running the helper by hand.
 2. **The window never fetches anything remote, and nothing but Graph is talked
    to in either direction.** Inline images live behind Graph and need the token;
    the helper fetches them, and the host is checked *before* the token is
@@ -198,9 +205,22 @@ fatal QML error makes it exit instead.
   anything else. It has no app id of its own, so its `title` is the only handle
   a Hyprland window rule has on it.
 - **`omarchy-shell shell summon janrenz.omarchy.teams '<json>'`** delivers that
-  JSON to `TeamsWindow.open(payloadJson)`, which currently ignores it. Same for
-  `omarchy-shell shell call <id> <method> <arg>`, which routes to any method on
-  the loaded window.
+  JSON to `TeamsWindow.open(payloadJson)`, which hands it to `applyPayload`:
+  `chat` - or `team` plus `channel` - and `message` reveal a message (what a
+  clicked notification passes), `draft` puts an agent's answer in the message
+  box unsent. The shell drains its payload queue in a loop and delivers to a
+  window that is already open, so anything added there has to survive arriving
+  twice and must not throw away a draft being typed. `omarchy-shell shell call
+  <id> <method> <arg>` routes to any method on the loaded window - `agentDraft`
+  is the same draft route, and returns what it made of the payload.
+- **The coding-agent handover is one setting away from not existing.**
+  `agentHandover` gates the `a` key, the button, the help entry and the inbound
+  draft. A feature that reaches other people's messages has to be refusable, so
+  check the gate rather than assuming it.
+- **There is no `cursoredMessage()` here.** The Slack plugin has one; this
+  window inlines "the cursor, or the newest if it is nowhere yet" in
+  `startPicking` and in `agentArgv`. Copying code across from that repo without
+  checking will produce a `ReferenceError` that only shows up in the log.
 
 ## House style
 

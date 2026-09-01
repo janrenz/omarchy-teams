@@ -30,6 +30,10 @@ Item {
   readonly property int chatCount: intSetting("chats", 25, 1, 40)
   readonly property int refreshIntervalSec: intSetting("refreshIntervalSec", 120, 30, 3600)
   readonly property bool notifyOnNew: setting("notify", true) !== false
+  // Whether the coding-agent handover is on offer at all. Off takes away the a
+  // key, the button, and the route an agent uses to hand a draft back - see the
+  // README's "Your coding agent" section.
+  readonly property bool agentHandover: setting("agentHandover", true) !== false
   // Whose job it is to announce new messages. There is a Service behind the
   // bar icon and another behind the window, both polling the same account, and
   // both announcing would say everything twice. The bar's is the one that is
@@ -797,7 +801,7 @@ Item {
     sending = true
     sendError = ""
     var row = openConversation
-    var command = ["python3", helper(), "send", "--account", alias, "--text", draft]
+    var command = ["python3", helper(), "send", "--account", alias, "--stdin"]
     if (row.kind === "chat") command = command.concat(["--chat", String(row.id)])
     else command = command.concat(["--team", String(row.teamId), "--channel", String(row.id)])
     if (setting("demo", false) === true) command.push("--demo")
@@ -808,6 +812,11 @@ Item {
   Process {
     id: sendProc
     running: false
+    // The message goes in over stdin rather than as an argument. Anyone on this
+    // machine can read /proc/<pid>/cmdline; nobody can read another process's
+    // stdin - and a message is somebody's words.
+    stdinEnabled: true
+    onStarted: sendProc.write(JSON.stringify({ text: root.draft }) + "\n")
     stdout: StdioCollector { id: sendOut; waitForEnd: true }
     stderr: StdioCollector { id: sendErrOut; waitForEnd: true }
     onExited: function(exitCode) {

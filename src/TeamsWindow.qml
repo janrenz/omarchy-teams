@@ -3,6 +3,7 @@ import QtCore
 import QtQuick.Controls
 import QtQuick.Dialogs
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Commons
 import qs.Ui
@@ -41,10 +42,51 @@ Item {
   function open(payloadJson) {
     closingFromHost = false
     loadSettings()
+    // Remembered before the payload is applied, because applying one opens a
+    // conversation and the conversation is in the window's title - a moment
+    // later Hyprland still knows this window by the name it had here.
+    var knownAs = window.visible ? String(window.title) : ""
     var payload = Model.parseJson(payloadJson, null)
     if (payload) applyPayload(payload)
     window.visible = true
+    focusToplevel(knownAs)
     Qt.callLater(function() { if (keyCatcher) keyCatcher.forceActiveFocus() })
+  }
+
+  // Bring an already-open window to the front, on the workspace somebody is
+  // actually looking at.
+  //
+  // `window.visible = true` on a window that is already visible does nothing
+  // at all - no raise, no workspace switch, no keyboard focus - so opening
+  // Teams while its window sat on another workspace looked exactly like the
+  // click had been swallowed. Qt's forceActiveFocus below only moves focus
+  // around *inside* the window; the compositor has to be asked separately.
+  //
+  // An empty name means the window was not mapped a moment ago, and a window
+  // Hyprland is about to see for the first time is focused by Hyprland itself.
+  function focusToplevel(knownAs) {
+    if (String(knownAs) === "") return
+    var all = Hyprland.toplevels ? Hyprland.toplevels.values : []
+    for (var i = 0; i < all.length; i++) {
+      // Matched on the title because a client cannot ask which toplevel is its
+      // own. It is this file's own string rather than a guess at the shape of
+      // somebody else's window, so the match is exact and stays exact.
+      if (all[i] && String(all[i].title) === String(knownAs)) {
+        dispatchFocus(all[i])
+        return
+      }
+    }
+  }
+
+  function dispatchFocus(toplevel) {
+    var matcher = "address:0x" + toplevel.address
+    // Two syntaxes, because this plugin is not installed on one machine only.
+    // Hyprland takes a Lua expression now and rejects the classic string form
+    // outright - `focuswindow address:0x...` comes back "')' expected near
+    // 'address'" - while the releases before it take only the string.
+    Hyprland.dispatch(Hyprland.usingLua === true
+                      ? "hl.dsp.focus({ window = '" + matcher + "' })"
+                      : "focuswindow " + matcher)
   }
 
   // What the shell may deliver with a summon: a conversation to show - a
@@ -511,6 +553,11 @@ Item {
     focusPane = "conversation"
     keyCatcher.forceActiveFocus()
   }
+
+  // The toplevel list is only as fresh as the last event Hyprland sent, and a
+  // shell that has just started has had none. Ask once, so the first summon at
+  // an already-open window has something to match against.
+  Component.onCompleted: Hyprland.refreshToplevels()
 
   FloatingWindow {
     id: window

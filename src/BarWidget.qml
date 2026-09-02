@@ -33,8 +33,16 @@ BarWidget {
   // kind. Nothing about the dropdown changes this route: a plugin that is both
   // a bar widget and a panel is routed to its panel by the shell, so
   // `omarchy-shell shell toggle janrenz.omarchy.teams` still means the window.
+  //
+  // Summon rather than toggle, which is what the bar icon means by opening the
+  // window: the shell's toggle knows only "open", and a window on another
+  // workspace is open - so a click meant to reach it hid it instead, and the
+  // second click brought it back to the workspace you were on all along. The
+  // window itself is still what closes it, and the toggle above is still what
+  // a keybinding gets.
   function openWindow() {
-    Quickshell.execDetached(["omarchy-shell", "shell", "toggle", "janrenz.omarchy.teams"])
+    Quickshell.execDetached(["omarchy-shell", "shell", "summon",
+                             "janrenz.omarchy.teams", "{}"])
   }
 
   // Everything the panel needs that it cannot reach from inside a Loader. The

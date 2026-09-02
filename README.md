@@ -374,6 +374,21 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.4.1 — 2026-09-02
+
+- **Opening the window finds the one you already have.** Asking for the window
+  while it was open somewhere else did nothing you could see: showing a window
+  that is already shown is not an instruction to raise it, switch to its
+  workspace, or hand it the keyboard, so a click aimed at a Teams window one
+  workspace over looked like a click that had been swallowed. It now asks the
+  compositor to focus the window it just found, which is the part Qt cannot do
+  from inside it.
+- **The bar icon no longer hides the window it was asked to open.** Right-click
+  summoned rather than opened, and to the shell a window on another workspace
+  is simply open — so the first click hid the thing you were reaching for and
+  the second brought it back, in front of you this time. Closing the window is
+  the window's job, and a keybinding still toggles it.
+
 ### 0.4.0 — 2026-09-02
 
 - **A dropdown behind the bar icon**, holding your presence and what is

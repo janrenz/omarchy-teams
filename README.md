@@ -374,6 +374,25 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.4.5 — 2026-09-02
+
+- **A clicked notification shows the conversation again.** Opening a chat from
+  a toast said "An account needs a name" where the messages should have been.
+  `open()` asks `config.py` for the settings and then applies the payload
+  without waiting for the answer, so a summon that mounts the window reached
+  `fetchMessages` while the account name was still a subprocess away — and the
+  helper refuses a nameless account. `fetchMessages` was the one read in this
+  file with no `configured` guard, and because the recovery path re-reads the
+  chat list rather than the open conversation, the error then stayed on screen
+  until the chat was clicked again. The open is remembered now and run once
+  there is an account to run it for, left loading in the meantime.
+- **A conversation opened from a toast knows its own name.** The payload
+  carries ids and no title, so the window came up called "Teams — " with a
+  blank header: the row was one this file made up, and nothing re-pointed it at
+  the real one when the chat list arrived. It adopts the real row now — the
+  title, and the subtitle and presence that travel with it — and only while the
+  title is still missing, so a row that came from the sidebar is left alone.
+
 ### 0.4.4 — 2026-09-02
 
 - **Inline pictures are drawn again.** A message's pictures had stopped

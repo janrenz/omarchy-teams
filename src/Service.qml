@@ -262,11 +262,18 @@ Item {
     onTriggered: root.refresh()
   }
 
+  // Each of these is a way the account can have just become known, and a
+  // conversation opened before it was is waiting on exactly that.
+  function flushQueuedMessages() {
+    if (messagesQueued && openConversation) fetchMessages(openConversation)
+  }
+
   onConfiguredChanged: if (configured) {
     loadPalette(); loadReactionChoices(); loadPresenceChoices(); refresh()
+    flushQueuedMessages()
   }
-  onPluginDirChanged: if (configured) { loadPalette(); refresh() }
-  onSettingsChanged: if (configured) refresh()
+  onPluginDirChanged: if (configured) { loadPalette(); refresh(); flushQueuedMessages() }
+  onSettingsChanged: if (configured) { refresh(); flushQueuedMessages() }
 
   // ---- telling you something arrived --------------------------------------
 
@@ -363,6 +370,8 @@ Item {
   property var messages: []
   property bool messagesLoading: false
   property string messagesError: ""
+  // An open waiting on an account - see fetchMessages.
+  property bool messagesQueued: false
 
   readonly property bool reading: openConversation !== null
 
@@ -373,6 +382,15 @@ Item {
     if (!row) return
     messagesError = ""
     messagesLoading = true
+    // A conversation asked for before the settings arrived. The window summons
+    // on a clicked toast and applies the payload straight away, while the
+    // account name is still a subprocess away - and the helper answers a
+    // nameless account with "An account needs a name", which then sat in the
+    // transcript for good because nothing re-asked. So the open is remembered
+    // and run once there is an account to run it for. Left loading rather than
+    // erroring: the rows are on their way, only not yet.
+    if (!configured || pluginDir === "") { messagesQueued = true; return }
+    messagesQueued = false
     if (messageProc.running) messageProc.running = false
     var command = ["python3", helper(), "messages", "--account", alias, "--top", "30"]
     if (row.kind === "chat") command = command.concat(["--chat", String(row.id)])
@@ -397,6 +415,22 @@ Item {
     // state Graph will tell us about - and only when it was actually unread,
     // so this is not a write on every click.
     if (row.kind === "chat" && row.unread === true) markRead(row.id)
+  }
+
+  // A conversation opened by ids alone - a clicked toast - is a row this file
+  // made up, because the fetch that knows the chat's name may not have landed
+  // yet. The name is the one thing the ids cannot supply, so the window came up
+  // called "Teams - " with a blank header and stayed that way until the chat
+  // was clicked again in the sidebar. When the real row turns up, adopt it: the
+  // title, and the subtitle and presence that travel with it.
+  //
+  // Only while the title is still missing. A row the payload named, and one
+  // that came from the sidebar to begin with, is already the right answer -
+  // re-pointing those at every fetch would fight whatever they are doing.
+  function adoptRealRow() {
+    if (!openConversation || String(openConversation.title || "") !== "") return
+    var row = rowFor(String(openConversation.key))
+    if (row && String(row.title || "") !== "") openConversation = row
   }
 
   // The sidebar row for a key, when there is one. A team that has never been
@@ -574,6 +608,9 @@ Item {
 
   // Once the refreshed list contains the new chat, open it.
   onConversationsChanged: {
+    // First, and before anything below can return: a list that has just
+    // arrived is the list an id-only open has been waiting to be named by.
+    adoptRealRow()
     if (demoOpen !== "" && !demoOpened) {
       var demoRows = conversations
       for (var d = 0; d < demoRows.length; d++) {
@@ -911,6 +948,7 @@ Item {
     openConversation = null
     messages = []
     messagesError = ""
+    messagesQueued = false
     draft = ""
   }
 

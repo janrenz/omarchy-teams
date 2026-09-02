@@ -30,6 +30,9 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 
 GRAPH = "https://graph.microsoft.com/v1.0"
+# The bare host, needed by the redirect guard above the first request and by
+# the image host check further down, which is where it is explained.
+GRAPH_HOST_NAME = "graph.microsoft.com"
 USER_AGENT = "omarchy-teams-plugin/1.0"
 
 # "common" accepts work/school and personal accounts alike. Teams chats only
@@ -184,6 +187,72 @@ def read_capped(response, limit=MAX_RESPONSE_BYTES):
     return body
 
 
+# --------------------------------------------------------------------------
+# redirects
+#
+# The host checks in this file all look at the URL they were handed, and a
+# redirect is the one way that URL stops being the address the request arrives
+# at. urllib follows one by copying the request's headers onto the new
+# request - everything but Content-Length and Content-Type, so `Authorization`
+# among them - and compares no hosts on the way. An allowed host answering
+# `302 Location: https://evil/` would hand over a token that can read this
+# mailbox, having passed every check above.
+#
+# So the check runs again as the redirect is followed: the token comes off the
+# moment the host changes, a redirect off https is refused rather than
+# downgraded, and the request that sends a file follows nothing at all. The
+# hosts this plugin addresses do not redirect, so the strict list costs
+# nothing today and says so out loud on the day one of them starts.
+# --------------------------------------------------------------------------
+
+LOGIN_HOST = "login.microsoftonline.com"
+
+
+class GuardedRedirects(urllib.request.HTTPRedirectHandler):
+    """Follow a redirect only as far as it can be followed safely."""
+
+    def __init__(self, allowed=(), refuse=False):
+        self.allowed = tuple(allowed)
+        self.refuse = refuse
+
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        if self.refuse:
+            raise AccountError(
+                "redirect_refused",
+                "That request was redirected to %s, which this plugin will not follow"
+                % (urllib.parse.urlsplit(newurl).hostname or "nowhere"))
+
+        new = super().redirect_request(request, fp, code, msg, headers, newurl)
+        if new is None:
+            return None
+        # super() may rewrite the URL, so the decision is made about the
+        # address that will actually be fetched.
+        target = urllib.parse.urlsplit(new.full_url)
+        where = target.hostname or "nowhere"
+        if target.scheme != "https":
+            raise AccountError("bad_redirect",
+                               "Refusing to follow a redirect to %s://%s" % (target.scheme, where))
+        if self.allowed and where not in self.allowed:
+            raise AccountError("bad_redirect", "Refusing to follow a redirect to %s" % where)
+        if where != (urllib.parse.urlsplit(request.full_url).hostname or ""):
+            new.remove_header("Authorization")
+        return new
+
+
+def guarded_opener(allowed=(), refuse_redirects=False):
+    """An opener that re-checks the host every time a redirect moves it."""
+    return urllib.request.build_opener(GuardedRedirects(allowed, refuse_redirects))
+
+
+# Graph and the sign-in endpoint are the only two hosts this plugin addresses.
+# Shared between calls, like the global opener `urlopen` uses: the handlers
+# hold no per-request state and each open makes its own connection.
+API_OPENER = guarded_opener((GRAPH_HOST_NAME, LOGIN_HOST))
+# The one request that *sends* the user's file. Bytes addressed to Graph are
+# not posted somewhere else because the answer said to.
+UPLOAD_OPENER = guarded_opener((GRAPH_HOST_NAME,), refuse_redirects=True)
+
+
 def http(url, *, method="GET", data=None, json_body=None, raw=None, headers=None, timeout=20):
     """Return (status, parsed_json). Non-2xx comes back with its body parsed.
 
@@ -205,8 +274,11 @@ def http(url, *, method="GET", data=None, json_body=None, raw=None, headers=None
     request_headers.update(headers or {})
 
     request = urllib.request.Request(url, data=body, method=method, headers=request_headers)
+    # A file being sent is the one payload that must not be replayed to an
+    # address the answer chose, so it follows no redirect at all.
+    opener = UPLOAD_OPENER if raw is not None else API_OPENER
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             raw = read_capped(response)
             return response.status, (json.loads(raw) if raw else {})
     except urllib.error.HTTPError as error:
@@ -496,7 +568,10 @@ CSS_HEIGHT = re.compile(r'height\s*:\s*([0-9.]+)\s*px', re.I)
 # out of a message somebody else wrote - so the host is checked rather than
 # trusted. A crafted <img src="https://evil/"> would otherwise hand the
 # attacker a token with read access to this mailbox.
-GRAPH_HOST = "graph.microsoft.com"
+GRAPH_HOST = GRAPH_HOST_NAME
+# A redirect may not leave that host either, and the token comes off if it
+# somehow does.
+IMAGE_OPENER = guarded_opener((GRAPH_HOST,))
 IMAGE_CAP = 12 * 1024 * 1024
 IMAGE_CACHE = os.path.join(
     os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
@@ -972,7 +1047,7 @@ def fetch_bytes(url, token, limit=IMAGE_CAP):
         "Authorization": "Bearer " + token,
     })
     try:
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with IMAGE_OPENER.open(request, timeout=30) as response:
             body = response.read(limit + 1)
             if len(body) > limit:
                 raise AccountError("image_too_large", "That image is larger than this plugin will read")
@@ -1636,28 +1711,61 @@ def read_stdin_json():
     return parsed if isinstance(parsed, dict) else {}
 
 
+def too_large(size):
+    """Why this file is not going, in the terms the cap is set in."""
+    fail("too_large",
+         "That file is %.1f MB. Graph takes up to %d MB in one request; more than that "
+         "needs an upload session on a SharePoint host, and this plugin only ever talks "
+         "to graph.microsoft.com." % (size / 1048576.0, UPLOAD_CAP // 1048576))
+
+
 def read_upload(path):
-    """The bytes to send, or a refusal a person can act on."""
+    """The bytes to send, or a refusal a person can act on.
+
+    The path is resolved once, at `os.open`, and everything after that is
+    asked of the descriptor. Asking the name three times - `isfile`, then
+    `getsize`, then `open` - is three chances for it to mean a different file
+    each time, and the size that was checked is then not the size that is
+    read. A symlink is still followed, because somebody dragging a link to
+    their own file means the file, but it is followed once and what is on the
+    other side still has to be a regular file.
+    """
     if not path:
         fail("no_file", "No file to send")
-    if not os.path.isfile(path):
+    try:
+        # O_NONBLOCK because the open now happens first rather than last: a
+        # FIFO with nobody writing to it, or a device waiting on a carrier,
+        # would otherwise hang a helper the window is waiting on. It costs
+        # nothing on a regular file, which is all that gets past the fstat.
+        handle = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK)
+    except IsADirectoryError:
+        fail("no_file", "%s is a folder, not a file" % path)
+    except FileNotFoundError:
         fail("no_file", "There is no file at %s" % path)
-    try:
-        size = os.path.getsize(path)
     except OSError as error:
         fail("unreadable", "Could not read %s: %s" % (path, error))
-    if size == 0:
+    try:
+        info = os.fstat(handle)
+        if not stat.S_ISREG(info.st_mode):
+            fail("no_file", "%s is not a file this can send" % path)
+        if info.st_size == 0:
+            fail("empty_file", "That file is empty")
+        if info.st_size > UPLOAD_CAP:
+            too_large(info.st_size)
+        with os.fdopen(handle, "rb", closefd=False) as stream:
+            body = stream.read(UPLOAD_CAP + 1)
+    except OSError as error:
+        fail("unreadable", "Could not read %s: %s" % (path, error))
+    finally:
+        os.close(handle)
+    # It is one descriptor, but a writer elsewhere is not waiting for us: a
+    # file that grew past the cap between the fstat and the read is still
+    # refused, so the cap holds on what was actually read.
+    if len(body) > UPLOAD_CAP:
+        too_large(len(body))
+    if not body:
         fail("empty_file", "That file is empty")
-    if size > UPLOAD_CAP:
-        fail("too_large",
-             "That file is %.1f MB. Graph takes up to %d MB in one request; more than that "
-             "needs an upload session on a SharePoint host, and this plugin only ever talks "
-             "to graph.microsoft.com." % (size / 1048576.0, UPLOAD_CAP // 1048576))
-    try:
-        with open(path, "rb") as handle:
-            return handle.read(UPLOAD_CAP + 1)
-    except OSError as error:
-        fail("unreadable", "Could not read %s: %s" % (path, error))
+    return body
 
 
 def attachment_guid(item):

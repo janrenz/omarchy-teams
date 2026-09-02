@@ -15,6 +15,7 @@ import base64
 import json
 import os
 import sys
+import tempfile
 import unittest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src"))
@@ -294,19 +295,195 @@ class ImageHostGuard(unittest.TestCase):
 
     def test_a_foreign_host_is_refused_before_any_request(self):
         reached = []
-        original = teams.urllib.request.urlopen
-        teams.urllib.request.urlopen = lambda *a, **k: reached.append(a) or None
+
+        class Reached:
+            def open(self, *a, **k):
+                reached.append(a)
+
+        original = teams.IMAGE_OPENER
+        teams.IMAGE_OPENER = Reached()
         try:
             with self.assertRaises(teams.AccountError) as caught:
                 teams.fetch_bytes("https://evil.example/steal", "TOKEN")
         finally:
-            teams.urllib.request.urlopen = original
+            teams.IMAGE_OPENER = original
         self.assertEqual(caught.exception.code, "bad_image_host")
         self.assertEqual(reached, [], "a request was made to a host that should have been refused")
 
     def test_plain_http_is_refused_even_on_the_right_host(self):
         with self.assertRaises(teams.AccountError):
             teams.fetch_bytes("http://graph.microsoft.com/v1.0/a/$value", "TOKEN")
+
+
+class Redirects(unittest.TestCase):
+    """The address that was checked, and the address that is fetched.
+
+    Every host check above looks at the URL it was handed. A redirect is the
+    one way that URL stops being where the request lands, and urllib follows
+    one by copying the headers - Authorization included - onto the new request
+    without comparing hosts.
+    """
+
+    def guard_of(self, opener):
+        """The GuardedRedirects in one opener. build_opener orders its own."""
+        for handler in opener.handlers:
+            if isinstance(handler, teams.GuardedRedirects):
+                return handler
+        raise AssertionError("that opener follows redirects unguarded")
+
+    def redirect(self, opener, from_url, to_url, method="GET"):
+        request = teams.urllib.request.Request(from_url, method=method, headers={
+            "User-Agent": teams.USER_AGENT,
+            "Authorization": "Bearer TOKEN",
+        })
+        return self.guard_of(opener).redirect_request(
+            request, None, 302, "Found", {}, to_url)
+
+    def test_a_redirect_that_stays_on_graph_keeps_the_token(self):
+        new = self.redirect(teams.API_OPENER,
+                            "https://graph.microsoft.com/v1.0/me",
+                            "https://graph.microsoft.com/v1.0/me/profile")
+        self.assertEqual(new.get_header("Authorization"), "Bearer TOKEN")
+
+    def test_a_redirect_between_the_two_known_hosts_drops_the_token(self):
+        # Both are hosts this plugin addresses; only one of them is the host
+        # this token was issued for. Moving between them is still moving.
+        new = self.redirect(teams.API_OPENER,
+                            "https://graph.microsoft.com/v1.0/me",
+                            "https://login.microsoftonline.com/common")
+        self.assertIsNone(new.get_header("Authorization"))
+
+    def test_a_redirect_off_graph_is_refused(self):
+        # The whole point: Graph answering "302 -> https://evil/" would
+        # otherwise hand over a token that can read this mailbox.
+        with self.assertRaises(teams.AccountError) as caught:
+            self.redirect(teams.API_OPENER,
+                          "https://graph.microsoft.com/v1.0/me",
+                          "https://evil.example/steal")
+        self.assertEqual(caught.exception.code, "bad_redirect")
+
+    def test_a_redirect_down_to_http_is_refused(self):
+        with self.assertRaises(teams.AccountError) as caught:
+            self.redirect(teams.API_OPENER,
+                          "https://graph.microsoft.com/v1.0/me",
+                          "http://graph.microsoft.com/v1.0/me")
+        self.assertEqual(caught.exception.code, "bad_redirect")
+
+    def test_an_image_may_not_be_redirected_off_graph_either(self):
+        with self.assertRaises(teams.AccountError) as caught:
+            self.redirect(teams.IMAGE_OPENER,
+                          "https://graph.microsoft.com/v1.0/a/$value",
+                          "https://evil.example/pixel.png")
+        self.assertEqual(caught.exception.code, "bad_redirect")
+
+    def test_the_upload_follows_no_redirect_at_all(self):
+        # This is the request that sends the user's own file.
+        with self.assertRaises(teams.AccountError) as caught:
+            self.redirect(teams.UPLOAD_OPENER,
+                          "https://graph.microsoft.com/v1.0/me/drive/root:/x:/content",
+                          "https://graph.microsoft.com/v1.0/elsewhere",
+                          method="POST")
+        self.assertEqual(caught.exception.code, "redirect_refused")
+
+    def test_an_upload_goes_through_the_opener_that_refuses_them(self):
+        # http() picks the opener by whether there are raw bytes to send, so
+        # this is the line that decides it, tested rather than assumed.
+        sent = {}
+
+        class Fake:
+            def __init__(self, name):
+                self.name = name
+
+            def open(self, request, timeout=None):
+                sent["opener"] = self.name
+                raise teams.urllib.error.URLError("stop here")
+
+        api, upload = teams.API_OPENER, teams.UPLOAD_OPENER
+        teams.API_OPENER, teams.UPLOAD_OPENER = Fake("api"), Fake("upload")
+        try:
+            teams.http(teams.GRAPH + "/me/drive/root:/x:/content", method="PUT", raw=b"x")
+            self.assertEqual(sent["opener"], "upload")
+            teams.http(teams.GRAPH + "/me")
+            self.assertEqual(sent["opener"], "api")
+        finally:
+            teams.API_OPENER, teams.UPLOAD_OPENER = api, upload
+
+    def test_the_helper_never_calls_urlopen_behind_the_openers_back(self):
+        # urlopen uses the default redirect handler, which compares no hosts.
+        # One call site that slips back to it undoes all of the above.
+        source = open(os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "..", "src", "teams.py"),
+            encoding="utf-8").read()
+        self.assertNotIn("urllib.request.urlopen(", source)
+
+
+class LocalFiles(unittest.TestCase):
+    """Reading the file that is about to be sent, exactly once."""
+
+    def setUp(self):
+        self.dir = tempfile.mkdtemp()
+        self.cap = teams.UPLOAD_CAP
+        teams.UPLOAD_CAP = 64
+
+    def tearDown(self):
+        teams.UPLOAD_CAP = self.cap
+
+    def write(self, name, body):
+        path = os.path.join(self.dir, name)
+        with open(path, "wb") as handle:
+            handle.write(body)
+        return path
+
+    def test_an_ordinary_file_is_read(self):
+        self.assertEqual(teams.read_upload(self.write("a.txt", b"hello")), b"hello")
+
+    def test_a_symlink_to_a_real_file_is_still_followed(self):
+        target = self.write("real.txt", b"hello")
+        link = os.path.join(self.dir, "link.txt")
+        os.symlink(target, link)
+        self.assertEqual(teams.read_upload(link), b"hello")
+
+    def test_a_folder_is_not_a_file_to_send(self):
+        payload = capture(lambda: teams.read_upload(self.dir))
+        self.assertEqual(payload["error"]["code"], "no_file")
+
+    def test_a_fifo_is_not_a_file_to_send(self):
+        # It has a path and it is not a directory, so opening it first and
+        # asking afterwards is only safe because the open cannot block.
+        path = os.path.join(self.dir, "pipe")
+        os.mkfifo(path)
+        payload = capture(lambda: teams.read_upload(path))
+        self.assertEqual(payload["error"]["code"], "no_file")
+
+    def test_a_missing_file_says_so(self):
+        payload = capture(lambda: teams.read_upload(os.path.join(self.dir, "nope")))
+        self.assertEqual(payload["error"]["code"], "no_file")
+
+    def test_an_empty_file_is_refused(self):
+        payload = capture(lambda: teams.read_upload(self.write("empty", b"")))
+        self.assertEqual(payload["error"]["code"], "empty_file")
+
+    def test_a_file_over_the_cap_is_refused(self):
+        payload = capture(lambda: teams.read_upload(self.write("big", b"x" * 65)))
+        self.assertEqual(payload["error"]["code"], "too_large")
+
+    def test_the_cap_is_enforced_on_what_was_read_not_on_what_was_measured(self):
+        # One descriptor, but a writer elsewhere is not waiting for us.
+        path = self.write("grows", b"x" * 8)
+        real_fstat = os.fstat
+
+        def small(fd):
+            info = real_fstat(fd)
+            with open(path, "ab") as handle:
+                handle.write(b"y" * 100)
+            return info
+
+        os.fstat = small
+        try:
+            payload = capture(lambda: teams.read_upload(path))
+        finally:
+            os.fstat = real_fstat
+        self.assertEqual(payload["error"]["code"], "too_large")
 
 
 class Scopes(unittest.TestCase):

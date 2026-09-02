@@ -57,6 +57,13 @@ Nothing goes back the other way except a command line and a stdin payload.
    belong there. **What somebody wrote goes the same way**: `send` and `upload`
    read `{"text": …}` / `{"file": …}` on stdin, and the window uses those paths.
    `--text` and `--comment` remain for running the helper by hand.
+
+   **A path is resolved once.** `read_upload` opens the file and asks the
+   descriptor everything after that. Asking the name three times — `isfile`,
+   `getsize`, `open` — is three chances for it to mean a different file, and
+   the size that was checked is then not the size that is read. The open is
+   `O_NONBLOCK` because it now happens first: a FIFO nobody is writing to
+   would otherwise hang a helper the window is waiting on.
 2. **The window never fetches anything remote, and nothing but Graph is talked
    to in either direction.** Inline images live behind Graph and need the token;
    the helper fetches them, and the host is checked *before* the token is
@@ -65,6 +72,16 @@ Nothing goes back the other way except a command line and a stdin payload.
    the limit of a single content PUT to Graph, and the documented route past it
    is an upload session on a `*.sharepoint.com` host. Keeping the one-host rule
    is worth more than the megabytes.
+
+   **A redirect is part of that check, not an exception to it.** urllib follows
+   one by copying the request's headers onto the new request — `Authorization`
+   among them — and compares no hosts while doing it, so a host check that only
+   looks at the URL it was handed is a check a `302` walks straight through.
+   Every request goes through a `GuardedRedirects` opener that asks again:
+   the token comes off the moment the host changes, a redirect off `https` is
+   refused, and the content PUT that sends a file follows nothing at all.
+   `urllib.request.urlopen` is not called anywhere in `teams.py` — a test
+   asserts that, because one call site slipping back to it undoes the rest.
 3. **A message never chooses its own markup.** A Teams message is HTML written by
    whoever sent it, and Qt's rich text fetches what it is told to fetch — so
    `teams.py` flattens it, and the only tag the window ever builds is an `<a>`

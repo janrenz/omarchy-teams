@@ -374,6 +374,29 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.4.3 — 2026-09-02
+
+- **A redirect can no longer walk a token off Graph.** The host check ran on
+  the URL the helper was handed, which is precisely the address a redirect
+  stops being: urllib follows one by copying the request's headers onto the new
+  request, `Authorization` among them, and compares no hosts while doing it. A
+  `302` pointing anywhere else would have handed over a token that can read
+  this account, having passed the check first. Every request now goes through
+  an opener that asks again — the token comes off the moment the host changes,
+  a redirect off `https` or away from `graph.microsoft.com` is refused, and the
+  content PUT that sends a file follows nothing at all.
+- **The file being sent is resolved once, not three times.** Reading it asked
+  the path what it was, then how big it was, then opened it, so the file that
+  was measured was not necessarily the file that was read. It is opened once
+  now and everything after that is asked of the descriptor. A symlink is still
+  followed — dragging a link to your own file means the file — but it is
+  followed once, and the 4 MB cap is enforced on what was actually read as well
+  as on what was measured, since a file can grow while it is being sent.
+- **A folder, a pipe or a device says so instead of hanging.** Opening first
+  and asking afterwards is only safe if the open cannot block, so it is
+  non-blocking: a FIFO with nobody writing to it would otherwise have held the
+  helper open with the window waiting on it.
+
 ### 0.4.2 — 2026-09-02
 
 - **A file in a conversation is now something you can see.** Teams puts nothing

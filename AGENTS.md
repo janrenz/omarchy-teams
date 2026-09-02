@@ -18,7 +18,17 @@ src/Model.js            Pure JS: shaping, grouping, labels, link building. No Qt
                         types, so `node dev/test-model.js` can run it.
 src/Service.qml         Owns the Processes that run teams.py, the poll timer,
                         and the state the UI binds to.
-src/BarWidget.qml       The bar icon. Opens the window; there is no dropdown.
+src/BarWidget.qml       The bar icon, and the Loader that mounts BarPanel
+                        beside it. Left click is the dropdown, right click is
+                        the window.
+src/BarPanel.qml        The dropdown: your presence, and what is unread. Two
+                        things on purpose - see its header for why the rest is
+                        not here.
+src/PresenceDot.qml     The circle. Four states, one place they are drawn.
+src/PresenceChip.qml    The circle plus the word, and the click that opens the
+                        picker. In the window's header and the dropdown's.
+src/PresenceMenu.qml    The picker itself, numbered. Both surfaces show this
+                        one; it is also what knows row 0 is Automatic.
 src/TeamsWindow.qml     The window. Sidebar, transcript, message box. ~1.7k lines.
                         Also the file chooser and the window-wide DropArea, which
                         both end at sendFile() - the one place a file:// URL
@@ -161,6 +171,22 @@ fatal QML error makes it exit instead.
   Every default in `PollGate.qml` therefore means "go ahead": a gate that failed
   closed would swallow the first fetch after every shell start, which is the one
   that fills an empty panel.
+- **Two surfaces, and only one of them can be summoned by name.** The shell
+  decides where `summon`/`toggle`/`hide` go from the manifest's `kinds`, and
+  `isBarWidgetPanelPlugin()` returns false for anything that is *also* a panel
+  kind. This plugin is both, so `omarchy-shell shell toggle
+  janrenz.omarchy.teams` always means the window and can never reach the
+  dropdown - the widget's `opened`/`open`/`close` shape is there for the bar's
+  own click-away and popout coordination, not for that route. A keybinding onto
+  the dropdown therefore needs the panel's own `IpcHandler`, which is what the
+  `ipcTarget` setting names. The mail plugin has the same split for the same
+  reason.
+- **The dropdown fetches nothing.** It binds to the Service the bar icon
+  already owns, with `unreadOnly` fixed on that one, so opening it costs no
+  Graph request and the filtering is `Model.conversationRows`' existing
+  argument rather than a second copy of it. Which is also why the widget's
+  Service keeps `includeTeams: false`: a channel has no read state to filter
+  on, so the tree would cost a request per team and answer nothing.
 - **`Service.qml` is instantiated more than once.** `BarWidget.qml` has one and
   `TeamsWindow.qml` has another, and the bar is one surface *per monitor* — so a
   two-monitor desktop with the window open polls the account three times an

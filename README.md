@@ -3,6 +3,7 @@
 Teams chats and channels in the Omarchy bar, and in a window of their own.
 
 - **A bar icon** that tints when a chat is unread, with a tooltip naming the account and the count.
+- **A dropdown behind it**, and deliberately only two things: your presence, and what is unread. Those are the two questions a bar is asked — *how do I look to people* and *does anything need me* — and both are answered by picking from a short list, which is what a popup that closes on click-away can do. Reading a conversation and writing a reply is not, so a row here opens the window at that chat rather than being a smaller copy of it. Right-click the icon to skip the dropdown and go straight to the window.
 - **A window** — a real Hyprland toplevel, tiled like anything else — with conversations on the left, the transcript on the right, and a box to answer in. Bound to `SUPER+G`, also on the Omarchy menu under *Teams*.
 - **Chats and channels.** One-to-one chats, group chats, and the channels of every team you have joined.
 - **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
@@ -54,6 +55,11 @@ window is a focus ladder rather than a bag of shortcuts: **list → conversation
 → message box**. `h` and `l` step between the rungs, `Escape` walks back out
 one rung at a time, and `j`/`k` always mean "down and up in whatever has
 focus".
+
+The dropdown behind the bar icon has its own handful, because it holds its own
+two things: `p` opens the presence picker (`0`–`6` pick, `Escape` goes back),
+`o` opens the window, `r` refreshes, `j`/`k` and `Enter` walk what is unread,
+and `Escape` closes it.
 
 ### Moving
 
@@ -182,6 +188,7 @@ own.
 | `refreshIntervalSec` | `120` | How often to poll (30–3600). |
 | `pausePolling` | `true` | Stop polling while the screen has been idle five minutes or there is no network. Doubles the interval on battery. |
 | `icon` / `label` | `󰊻` | Bar glyph, or text instead of it. |
+| `ipcTarget` | — | A name of your own for the dropdown, so a key can summon it: set `teams` and bind `omarchy-shell teams toggle`. Empty means the dropdown opens by clicking the icon. The window is separate and always answers to `omarchy-shell shell toggle janrenz.omarchy.teams`. |
 | `tintOnUnread` | `true` | Highlight the bar icon while a chat is unread. |
 | `notify` | `true` | Desktop notification when a chat has something new in it. |
 | `agentHandover` | `true` | Whether `a` and the **Ask agent** button are there at all, and whether a draft from an agent is accepted. |
@@ -272,8 +279,9 @@ replacing what was there.
 
 ## Your presence
 
-With `Presence.ReadWrite` granted and **Set your presence** on, the header grows
-a dot with a word beside it, `p` opens the menu, and a number picks a row:
+With `Presence.ReadWrite` granted and **Set your presence** on, a dot with a
+word beside it appears in two places — the window's header, and the dropdown
+behind the bar icon — `p` opens the menu from either, and a number picks a row:
 
 | | |
 |---|---|
@@ -287,6 +295,11 @@ which is the one whose two halves differ and the one that would otherwise fail
 as a `400`. What you set holds until you clear it, exactly as it does in Teams:
 a preferred presence overrides whatever your clients are reporting, which is
 what makes *Do not disturb* stay on while you keep typing.
+
+It is the same menu in both places, so the numbers mean the same thing
+whichever one is open. In the dropdown it takes the panel over rather than
+dropping across it — there is no room to overlay a popup on itself — and
+`Escape` there backs out to what is unread rather than closing the panel.
 
 The dot says what Graph reports **now**, not what you chose. Graph will hand
 back your effective presence and will not say whether a preference is behind it,
@@ -360,6 +373,29 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.4.0 — 2026-09-02
+
+- **A dropdown behind the bar icon**, holding your presence and what is
+  unread. Until now the icon only opened the window, on the grounds that a
+  conversation wants somewhere that does not close on click-away half way
+  through a reply — which is still true of replying, and not true at all of
+  the two things people actually ask a bar. Setting your presence is picking
+  one row from six. Seeing what is waiting is reading a short list. Both fit a
+  popup; neither was worth a window. A row opens the window at that chat, so
+  the dropdown is a way in rather than a second, worse client.
+- **Right-click the icon** for the window directly, which is where somebody
+  who already knows they are about to write a reply wants to be.
+- **`ipcTarget`**, so a key can summon the dropdown the way `SUPER+G` summons
+  the window. The shell routes `shell toggle` on this plugin id to the window
+  and can never reach the dropdown, so the dropdown needs a name of its own.
+- The presence circle, the header chip and the picker are now one component
+  each rather than three copies of the first two and two of the third. Nothing
+  about them changed; there is simply one place left to change them, which is
+  what made putting the picker in the dropdown a small job instead of a
+  duplicate of it.
+- Nothing new is fetched for any of this: the dropdown binds to the Service
+  the bar icon was already polling with, so opening it costs no Graph request.
 
 ### 0.3.0 — 2026-09-02
 

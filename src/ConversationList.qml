@@ -168,23 +168,14 @@ Column {
           width: parent.width
           spacing: Style.spacing.xs
 
-          Rectangle {
+          // Smaller here than in the header or the picker: it stands in
+          // front of a name in a list, not on its own.
+          PresenceDot {
             id: dot
             anchors.verticalCenter: title.verticalCenter
-            width: Style.space(7)
-            height: width
-            radius: width
-            visible: Model.presenceColor(line.modelData.presence, root.palette) !== ""
-            // Available and busy are filled; away is a ring. Shape again
-            // rather than hue, so the states stay apart on a theme whose
-            // yellow and green sit close together, and for anyone who cannot
-            // tell those apart.
-            color: String(line.modelData.presence) === "away"
-                   ? "transparent"
-                   : Model.presenceColor(line.modelData.presence, root.palette)
-            opacity: String(line.modelData.presence) === "offline" ? 0.75 : 1.0
-            border.width: String(line.modelData.presence) === "away" ? Style.space(2) : 0
-            border.color: Model.presenceColor(line.modelData.presence, root.palette)
+            size: Style.space(7)
+            state: String(line.modelData.presence || "")
+            palette: root.palette
           }
 
           Text {

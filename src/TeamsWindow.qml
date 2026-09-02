@@ -156,15 +156,11 @@ Item {
     pickingPresence = !pickingPresence
   }
 
-  // The nth row, by number, for the same reason the reactions are numbered:
-  // six states arrowed through is slower than six states typed. Row 0 is
-  // Automatic, which is Teams' own "Reset status".
+  // The digits, routed to the picker itself - which is where the row order
+  // lives, and knows that row 0 is Automatic. The bar's dropdown routes its
+  // digits to its own copy the same way.
   function presenceAt(index) {
-    if (index === 0) { pickingPresence = false; service.setPresence("auto"); return }
-    var choices = service.presenceChoices
-    if (index < 1 || index > choices.length) return
-    pickingPresence = false
-    service.setPresence(String(choices[index - 1].state || ""))
+    menu.pickAt(index)
   }
 
   readonly property bool typing: composer.activeFocus
@@ -761,14 +757,6 @@ Item {
         visible: root.pickingPresence
         z: 95
 
-        // Automatic leads, because handing presence back to Teams is the state
-        // everything else is a departure from - and it is the row somebody who
-        // set Do not disturb this morning is looking for.
-        readonly property var rows: [{
-          state: "auto", label: "Automatic", dot: "", availability: "",
-          hint: "however Teams sees you"
-        }].concat(service.presenceChoices)
-
         Rectangle {
           anchors.fill: parent
           color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.6)
@@ -782,7 +770,7 @@ Item {
           anchors.topMargin: root.padPanel
           anchors.rightMargin: root.padPanel
           width: Math.min(Style.space(300), presenceMenu.width - root.padPanel * 2)
-          height: menuColumn.implicitHeight + Style.spacing.md * 2
+          height: menu.implicitHeight + Style.spacing.md * 2
           radius: Style.cornerRadius
           color: Color.background
           border.width: Style.space(1)
@@ -792,128 +780,16 @@ Item {
           // the menu on the way to a row.
           MouseArea { anchors.fill: parent }
 
-          Column {
-            id: menuColumn
+          PresenceMenu {
+            id: menu
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.top: parent.top
             anchors.margins: Style.spacing.md
-            spacing: Style.spacing.xs
-
-            Text {
-              width: parent.width
-              text: "Your presence"
-              textFormat: Text.PlainText
-              color: Color.foreground
-              font.family: Style.font.family
-              font.pixelSize: Style.font.body
-              font.bold: true
-            }
-
-            Text {
-              width: parent.width
-              visible: service.presenceError !== ""
-              text: service.presenceError
-              textFormat: Text.PlainText
-              wrapMode: Text.WordWrap
-              color: Color.urgent
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
-
-            Repeater {
-              model: presenceMenu.rows
-
-              delegate: Rectangle {
-                required property var modelData
-                required property int index
-
-                // Whichever row is what Graph reports right now. Compared on
-                // the availability rather than the dot, so Busy and Do not
-                // disturb - one colour, two states - are not both ticked. It
-                // says what is true now, not what was chosen: Graph will read
-                // back a preferred presence but not tell anyone it is one.
-                readonly property bool current: service.myPresence
-                  && String(modelData.availability || "") !== ""
-                  && String(service.myPresence.availability || "") === String(modelData.availability)
-
-                width: parent ? parent.width : 0
-                implicitHeight: rowText.implicitHeight + Style.spacing.sm * 2
-                radius: Style.space(5)
-                color: hover.containsMouse
-                  ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.1)
-                  : "transparent"
-
-                Text {
-                  id: numberText
-                  anchors.left: parent.left
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(14)
-                  text: String(parent.index)
-                  textFormat: Text.PlainText
-                  horizontalAlignment: Text.AlignRight
-                  color: Color.accent
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-
-                // The same four circles the sidebar draws, and the same way
-                // round: filled for available and busy, a ring for away, dim
-                // for offline. A reader should not have to learn them twice.
-                Rectangle {
-                  id: dot
-                  anchors.left: numberText.right
-                  anchors.leftMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  width: Style.space(9)
-                  height: width
-                  radius: width / 2
-                  visible: Model.presenceColor(modelData.dot, service.themeColors) !== ""
-                  color: String(modelData.dot) === "away"
-                         ? "transparent"
-                         : Model.presenceColor(modelData.dot, service.themeColors)
-                  opacity: String(modelData.dot) === "offline" ? 0.75 : 1.0
-                  border.width: String(modelData.dot) === "away" ? Style.space(2) : 0
-                  border.color: Model.presenceColor(modelData.dot, service.themeColors)
-                }
-
-                Text {
-                  id: rowText
-                  anchors.left: numberText.right
-                  anchors.leftMargin: Style.spacing.sm + Style.space(9) + Style.spacing.sm
-                  anchors.right: parent.right
-                  anchors.rightMargin: Style.spacing.sm
-                  anchors.verticalCenter: parent.verticalCenter
-                  text: String(modelData.label || "")
-                        + (modelData.hint ? "  ·  " + modelData.hint : "")
-                        + (parent.current ? "  ·  now" : "")
-                  textFormat: Text.PlainText
-                  elide: Text.ElideRight
-                  color: parent.current ? Color.accent : Color.foreground
-                  font.family: Style.font.family
-                  font.pixelSize: Style.font.caption
-                }
-
-                MouseArea {
-                  id: hover
-                  anchors.fill: parent
-                  hoverEnabled: true
-                  cursorShape: Qt.PointingHandCursor
-                  enabled: !service.settingPresence
-                  onClicked: root.presenceAt(parent.index)
-                }
-              }
-            }
-
-            Text {
-              width: parent.width
-              text: service.settingPresence ? "Setting…" : "A number picks one.  Esc closes this"
-              textFormat: Text.PlainText
-              color: Qt.darker(Color.foreground, 1.8)
-              font.family: Style.font.family
-              font.pixelSize: Style.font.caption
-            }
+            service: service
+            fg: Color.foreground
+            fontFamily: Style.font.family
+            onChose: root.pickingPresence = false
           }
         }
       }
@@ -1261,59 +1137,15 @@ Item {
                 // from. Only where it can be acted on: a dot that says how
                 // you look to other people, on a sign-in that cannot change
                 // it, is a fact with nothing to do about it.
-                // A backing item rather than a bare Row: the click target is
-                // the dot and the word together, and a MouseArea cannot be
-                // anchored inside a Row without Qt refusing the anchors.
-                Item {
-                  id: presenceChip
+                PresenceChip {
                   anchors.verticalCenter: parent.verticalCenter
                   visible: service.signedIn && service.canSetPresence && !root.showSettings
-                  implicitWidth: chipRow.implicitWidth
-                  implicitHeight: chipRow.implicitHeight
-
-                  Row {
-                  id: chipRow
-                  spacing: Style.spacing.xs
-
-                  Rectangle {
-                    anchors.verticalCenter: parent.verticalCenter
-                    width: Style.space(9)
-                    height: width
-                    radius: width / 2
-                    readonly property string state: service.myPresence
-                      ? String(service.myPresence.state || "") : ""
-                    // Nothing at all until a fetch has answered. An empty dot
-                    // would read as offline, which is a different thing from
-                    // not having asked yet.
-                    visible: Model.presenceColor(state, service.themeColors) !== ""
-                    color: state === "away"
-                           ? "transparent" : Model.presenceColor(state, service.themeColors)
-                    opacity: state === "offline" ? 0.75 : 1.0
-                    border.width: state === "away" ? Style.space(2) : 0
-                    border.color: Model.presenceColor(state, service.themeColors)
-                  }
-
-                  Text {
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: service.settingPresence
-                      ? "setting…"
-                      : (service.myPresence
-                         ? Model.presenceLabel(service.myPresence.state,
-                                               service.myPresence.activity).toLowerCase()
-                         : "presence")
-                    textFormat: Text.PlainText
-                    color: Qt.darker(Color.foreground, 1.5)
-                    font.family: Style.font.family
-                    font.pixelSize: Style.font.caption
-                  }
-                  }
-
-                  MouseArea {
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: root.togglePresencePicker()
-                  }
+                  presence: service.myPresence
+                  palette: service.themeColors
+                  busy: service.settingPresence
+                  fg: Color.foreground
+                  fontFamily: Style.font.family
+                  onClicked: root.togglePresencePicker()
                 }
               }
             }

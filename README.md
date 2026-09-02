@@ -244,6 +244,26 @@ Turn the whole thing off with `agentHandover` in the settings and the key, the
 button and the help entry are gone, and a draft arriving from an agent is
 refused rather than quietly applied.
 
+## Quotes and forwards
+
+A message that answers another one shows what it is answering, in a block above
+the reply with a bar down its side and the name of whoever wrote it. A forwarded
+message shows the same way, labelled with who it came from.
+
+Neither arrives in the message. Teams puts the quoted message in the message's
+attachments and leaves an `<attachment id="...">` placeholder in the body where
+it belongs — and that placeholder is stripped along with every other tag, so
+before this a reply arrived on its own, with the thing being replied to nowhere
+on screen. The two are shaped differently: a quote-reply carries a preview Teams
+has already flattened, a forward carries the original's own HTML, and that one
+goes through the same reader a message body does. Nothing is fetched to draw
+either of them — the quote is already in the message that was fetched.
+
+The text is cut to 400 characters. A quote is context for the reply, and past a
+few lines it stops being context and becomes something to scroll past to reach
+what was actually said. Graph returns a null display name often enough to matter,
+and an unnamed quote still shows its text rather than an empty line.
+
 ## Sending a file
 
 With `Files.ReadWrite` granted and **Send files** on, a chat gets an **Attach**
@@ -373,6 +393,18 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.4.6 — 2026-09-02
+
+- **A quoted message is drawn again.** Replying to a message in Teams shows
+  what is being replied to; here the reply arrived on its own, and a "Yes" with
+  no visible question above it reads as a remark about nothing. The quote was
+  never in the body to strip: Teams puts it in the message's attachments and
+  leaves an `<attachment id="...">` placeholder in the body, which was stripped
+  with every other tag, and the attachment reader was looking for a file to open
+  and skipped anything without a URL — which a quote has none of. Quotes and
+  forwarded messages are read out of those attachments now and drawn above the
+  reply. See [Quotes and forwards](#quotes-and-forwards).
 
 ### 0.4.5 — 2026-09-02
 

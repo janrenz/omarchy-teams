@@ -281,6 +281,34 @@ test("a file on a message survives being grouped", () => {
   eq(groups[0].lines[1].attachments.length, 0)
 })
 
+test("a quote on a message survives being grouped", () => {
+  // Both the first line of a block and a line pushed onto one: a quote-reply
+  // sent in the middle of somebody talking is the ordinary case, not the odd
+  // one, and only the second path was ever going to be forgotten.
+  const quote = { id: "q", from: "Priya", text: "the thing being answered",
+                  when: "", forwarded: false }
+  const groups = Model.groupMessages(
+    [
+      { id: "1", from: "Jan", fromId: "me", text: "first", quotes: [quote] },
+      { id: "2", from: "Jan", fromId: "me", text: "second", quotes: [quote] },
+      { id: "3", from: "Jan", fromId: "me", text: "no quote here" },
+    ],
+    "me"
+  )
+  eq(groups[0].lines[0].quotes.length, 1)
+  eq(groups[0].lines[0].quotes[0].text, "the thing being answered")
+  eq(groups[0].lines[1].quotes.length, 1)
+  eq(groups[0].lines[2].quotes.length, 0)
+})
+
+test("a message with no quotes has an empty list rather than nothing", () => {
+  // The transcript's Repeater reads this directly, and a model of undefined
+  // is a binding error per message rather than an empty block.
+  const groups = Model.groupMessages([{ id: "1", from: "P", fromId: "p", text: "x" }], "me")
+  eq(Array.isArray(groups[0].lines[0].quotes), true)
+  eq(groups[0].lines[0].quotes.length, 0)
+})
+
 test("a block knows which of them is yours", () => {
   const groups = Model.groupMessages([{ id: "1", from: "Jan", fromId: "me", text: "x" }], "me")
   eq(groups[0].mine, true)

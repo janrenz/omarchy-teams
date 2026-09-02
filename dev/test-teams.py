@@ -242,6 +242,95 @@ class MessageAttachments(unittest.TestCase):
         self.assertEqual(teams.preview_text({}), "")
 
 
+class MessageQuotes(unittest.TestCase):
+    """What a message is answering or forwarding, which Teams keeps out of the body.
+
+    Both shapes here are the ones Graph actually sends, keys and all: the
+    quoted message never appears in `body`, only an <attachment> placeholder
+    that strips to nothing - so before this the reply arrived on its own.
+    """
+
+    def reply(self, preview="the thing being answered", name="Jan Renz"):
+        return {"contentType": "messageReference", "contentUrl": None,
+                "content": json.dumps({
+                    "messageId": "1788346025582",
+                    "messagePreview": preview,
+                    "messageSender": {"application": None, "device": None,
+                                      "user": {"userIdentityType": "aadUser",
+                                               "id": "8d6ba48e", "displayName": name}}})}
+
+    def forward(self, content="<p>the original</p>", name="Mike"):
+        return {"contentType": "forwardedMessageReference", "contentUrl": None,
+                "content": json.dumps({
+                    "originalMessageId": "1788350393420",
+                    "originalMessageContent": content,
+                    "originalSentDateTime": "2026-09-02T11:59:53.42+00:00",
+                    "originalMessageSender": {"user": {"id": "0de1edf6", "displayName": name}}})}
+
+    def test_a_quote_reply_carries_who_said_it_and_what(self):
+        row = teams.message_row({
+            "id": "1",
+            "body": {"content": '<attachment id="1788346025582"></attachment>\n<p>Already on it&nbsp;</p>'},
+            "attachments": [self.reply()],
+        })
+        # The reply is still just the reply: the placeholder strips as before.
+        self.assertEqual(row["text"], "Already on it")
+        self.assertEqual(row["quotes"], [{"id": "1788346025582", "from": "Jan Renz",
+                                          "text": "the thing being answered",
+                                          "when": "", "forwarded": False}])
+
+    def test_a_forward_is_flattened_the_way_a_body_is(self):
+        quotes = teams.message_quotes({"attachments": [
+            self.forward("<p>one</p><table><tbody><tr><td>two</td></tr></tbody></table>")]})
+        self.assertEqual(len(quotes), 1)
+        self.assertTrue(quotes[0]["forwarded"])
+        self.assertEqual(quotes[0]["from"], "Mike")
+        self.assertEqual(quotes[0]["when"], "2026-09-02T11:59:53.42+00:00")
+        # Tags off, and no markup left for anything downstream to render.
+        self.assertNotIn("<", quotes[0]["text"])
+        self.assertIn("one", quotes[0]["text"])
+        self.assertIn("two", quotes[0]["text"])
+
+    def test_a_null_display_name_keeps_the_quote(self):
+        # Graph returns displayName: null often enough to matter - on the
+        # message and on the reference both. The text is the part that carries
+        # the meaning, so an unnamed quote is still worth drawing.
+        quotes = teams.message_quotes({"attachments": [self.reply(name=None)]})
+        self.assertEqual(quotes[0]["from"], "")
+        self.assertEqual(quotes[0]["text"], "the thing being answered")
+
+    def test_a_reference_saying_nothing_at_all_is_dropped(self):
+        # Neither text nor sender: a reference to something this account cannot
+        # see. A row saying nothing is worse than no row.
+        self.assertEqual(teams.message_quotes({"attachments": [
+            {"contentType": "messageReference",
+             "content": json.dumps({"messageId": "x", "messagePreview": ""})}]}), [])
+
+    def test_content_that_is_not_json_is_skipped_rather_than_raised(self):
+        for bad in ("not json at all", "", "[1, 2, 3]", None):
+            self.assertEqual(teams.message_quotes({"attachments": [
+                {"contentType": "messageReference", "content": bad}]}), [])
+
+    def test_a_file_is_not_a_quote_and_a_quote_is_not_a_file(self):
+        both = {"attachments": [MessageAttachments.FILE, self.reply()]}
+        self.assertEqual(len(teams.message_quotes(both)), 1)
+        self.assertEqual(len(teams.message_attachments(both)), 1)
+        self.assertEqual(teams.message_attachments(both)[0]["name"], "memo.pdf")
+
+    def test_a_card_is_neither(self):
+        cards = {"attachments": [{"contentType": "application/vnd.microsoft.card.adaptive",
+                                  "content": "{}"}]}
+        self.assertEqual(teams.message_quotes(cards), [])
+
+    def test_a_very_long_quote_is_cut_to_context(self):
+        quotes = teams.message_quotes({"attachments": [self.reply("x" * 5000)]})
+        self.assertEqual(len(quotes[0]["text"]), teams.QUOTE_CHARS)
+
+    def test_no_more_than_the_cap(self):
+        many = [self.reply("q%d" % i) for i in range(teams.QUOTE_CAP + 3)]
+        self.assertEqual(len(teams.message_quotes({"attachments": many})), teams.QUOTE_CAP)
+
+
 class MessageImages(unittest.TestCase):
     """Which pictures in a message are ours to fetch."""
 

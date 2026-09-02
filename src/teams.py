@@ -778,6 +778,78 @@ def message_attachments(message):
     return rows
 
 
+# A quote-reply and a forward are not in the body. Teams puts the quoted
+# message in `attachments` and leaves an `<attachment id="...">` placeholder in
+# the body where it belongs - and that placeholder is stripped along with every
+# other tag, so a message that quoted something arrived here as the reply on
+# its own, with the thing being replied to silently gone.
+#
+# Two shapes, because Teams has two, and they carry the quoted text
+# differently:
+#
+#   messageReference           a quote-reply. `messagePreview` is text Teams
+#                              has already flattened, and there is no date.
+#   forwardedMessageReference  a forwarded message. `originalMessageContent`
+#                              is the original's HTML and has to go through the
+#                              same reader a body does.
+#
+# Neither has a contentUrl, which is why message_attachments skips them: that
+# function is looking for a file to open, and there is none here.
+QUOTE_TYPES = ("messageReference", "forwardedMessageReference")
+QUOTE_CAP = 4
+# A quote is context for the reply, not the reply. Past a few lines it stops
+# being context and starts being the message somebody scrolls past to reach
+# what was actually said.
+QUOTE_CHARS = 400
+
+
+def message_quotes(message):
+    """What a message is quoting or forwarding: who said it, and what.
+
+    Text only, and flattened the same way a body is - a quote is somebody
+    else's markup twice over, and nothing here is going to render it.
+    """
+    rows = []
+    for attachment in (message.get("attachments") or []):
+        kind = str(attachment.get("contentType") or "")
+        if kind not in QUOTE_TYPES:
+            continue
+        content = attachment.get("content")
+        if isinstance(content, (str, bytes)):
+            try:
+                content = json.loads(content)
+            except ValueError:
+                content = None
+        if not isinstance(content, dict):
+            continue
+        forwarded = kind == "forwardedMessageReference"
+        if forwarded:
+            text = plain_text(content.get("originalMessageContent"))
+            sender = content.get("originalMessageSender") or {}
+            when = str(content.get("originalSentDateTime") or "")
+        else:
+            # Through plain_text even though Teams calls it a preview: it is a
+            # preview of somebody's HTML, and the entities are still in it.
+            text = plain_text(content.get("messagePreview"))
+            sender = content.get("messageSender") or {}
+            when = ""
+        who = str(((sender.get("user") or {}).get("displayName") or "")).strip()
+        # A reference with neither is a reference to something this account
+        # cannot see - a row saying nothing is worse than no row.
+        if not text and not who:
+            continue
+        rows.append({
+            "id": str(content.get("originalMessageId") or content.get("messageId") or ""),
+            "from": who,
+            "text": text[:QUOTE_CHARS],
+            "when": when,
+            "forwarded": forwarded,
+        })
+        if len(rows) >= QUOTE_CAP:
+            break
+    return rows
+
+
 def preview_text(preview):
     """One line of a conversation for the sidebar, after the sender's name.
 
@@ -822,6 +894,7 @@ def message_row(message, me_id=""):
         "edited": bool(message.get("lastEditedDateTime")),
         "images": message_images(body.get("content")),
         "attachments": message_attachments(message),
+        "quotes": message_quotes(message),
         "reactions": reaction_summary(message, me_id),
         # A system message ("X added Y to the chat") has no sender and reads
         # oddly in a list of things people said.
@@ -2062,6 +2135,12 @@ def demo_messages(target):
             "edited": edited,
             "system": False,
             "images": [],
+            # And one quotes the line before it, so the quote block has
+            # something to draw without anybody having to reply to anything.
+            "quotes": ([{"id": "d%d" % index, "from": turns[index - 1][0],
+                         "text": plain_text(turns[index - 1][3]),
+                         "when": "", "forwarded": False}]
+                       if index == len(turns) - 1 and index > 0 else []),
             # One of them carries a reaction so the chip can be laid out
             # without anybody having to react to anything.
             "reactions": ([{"emoji": "\U0001F44D", "count": 2, "mine": index == 1, "name": "Like",

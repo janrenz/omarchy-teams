@@ -1676,6 +1676,82 @@ Item {
                             // no hover at all.
                             HoverHandler { id: lineHover }
 
+                            // What this message is answering, or forwarding.
+                            // Teams keeps that out of the body - it goes in
+                            // `attachments` and leaves a placeholder tag
+                            // behind, which is stripped with every other tag -
+                            // so it is drawn here as its own block above the
+                            // reply. Above, because that is where Teams puts
+                            // it and where it has to be for the reply to read
+                            // as an answer rather than a remark about nothing.
+                            Repeater {
+                              model: modelData.quotes || []
+
+                              delegate: Item {
+                                required property var modelData
+                                width: parent ? parent.width : 0
+                                implicitHeight: quoteColumn.implicitHeight
+
+                                // A bar down the side rather than a box round
+                                // the whole thing: it says "somebody else said
+                                // this" at a glance and costs no height.
+                                Rectangle {
+                                  id: quoteBar
+                                  anchors.left: parent.left
+                                  anchors.top: parent.top
+                                  anchors.bottom: parent.bottom
+                                  width: Style.space(2)
+                                  radius: width / 2
+                                  color: Qt.rgba(Color.foreground.r, Color.foreground.g,
+                                                 Color.foreground.b, 0.28)
+                                }
+
+                                Column {
+                                  id: quoteColumn
+                                  anchors.left: quoteBar.right
+                                  anchors.leftMargin: Style.spacing.sm
+                                  anchors.right: parent.right
+                                  anchors.rightMargin: root.scrollGutter
+
+                                  Text {
+                                    width: parent.width
+                                    // Graph hands back a null display name
+                                    // often enough that this has to survive
+                                    // one: nothing drawn rather than an empty
+                                    // bold line, since the text underneath is
+                                    // the part carrying the meaning.
+                                    visible: text !== ""
+                                    text: String(modelData.from || "") !== ""
+                                          ? (modelData.forwarded
+                                             ? "Forwarded from " + String(modelData.from)
+                                             : String(modelData.from))
+                                          : (modelData.forwarded ? "Forwarded" : "")
+                                    textFormat: Text.PlainText
+                                    elide: Text.ElideRight
+                                    color: Qt.darker(Color.foreground, 1.4)
+                                    font.family: Style.font.family
+                                    font.pixelSize: Style.font.caption
+                                    font.bold: true
+                                  }
+
+                                  // Selectable for the same reason the reply
+                                  // is: the quote is often the half worth
+                                  // copying. Plain text and not linkified -
+                                  // this is somebody's markup at second hand,
+                                  // and the message being quoted is in the
+                                  // transcript with its own links already.
+                                  SelectableText {
+                                    width: parent.width
+                                    visible: text !== ""
+                                    text: String(modelData.text || "")
+                                    color: Qt.darker(Color.foreground, 1.25)
+                                    font.family: Style.font.family
+                                    font.pixelSize: Style.font.bodySmall
+                                  }
+                                }
+                              }
+                            }
+
                             // The line, with the add-a-reaction button drawn
                             // over its right-hand end rather than in a row of
                             // its own. Nothing here changes size when the

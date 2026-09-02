@@ -73,6 +73,7 @@ Item {
   }
 
   Rectangle {
+    id: frame
     anchors.fill: parent
     radius: Style.space(5)
     color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
@@ -90,11 +91,16 @@ Item {
     // The software scene graph cannot draw that render pass at all, and would
     // drop the picture rather than square it, so there the plain Image stands
     // in.
+    //
+    // Reached through the frame's id and not by name: a binding sees its own
+    // object, this file's root and the ids in it - not the properties of an
+    // unnamed parent in between. Unqualified, this threw on every picture and
+    // left the Loader with nothing to load, which drew no picture at all.
     readonly property bool canRoundPictures: GraphicsInfo.api !== GraphicsInfo.Software
 
     Loader {
       anchors.fill: parent
-      sourceComponent: canRoundPictures ? roundedPicture : picture
+      sourceComponent: frame.canRoundPictures ? roundedPicture : picture
     }
 
     Component {

@@ -130,6 +130,20 @@ that reads as every file being broken - which is a confusing way to learn that
 nothing is wrong. It catches what a running shell does not: a file that parses
 but is never imported by the harness.
 
+What it does not catch is a name that resolves to nothing, because that is not
+a parse error - it throws when the binding runs. **A binding sees its own
+object, the root of its own file and the ids in that file, and nothing else:**
+a property declared on an unnamed object in between is not in scope, however
+directly it encloses the binding. Declare it on the root, or give the object an
+id and read it through that. Unqualified, it throws once per binding into the
+shell's log and leaves whatever depended on it undrawn - which is how inline
+pictures disappeared in 0.4.3 while the fetch behind them worked perfectly.
+Reading the log is the only way that class of bug announces itself:
+
+```bash
+journalctl --user -t omarchy-shell -n 200 --no-pager | grep -i "$PWD"
+```
+
 `dev/link.sh` assembles a Quickshell config folder in
 `$XDG_RUNTIME_DIR/omarchy-teams-dev` (`dev/stage.sh` decides where, and refuses
 to fall back to shared temp) and symlinks the sources plus `dev/shell.qml` into

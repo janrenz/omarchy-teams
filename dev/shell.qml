@@ -109,10 +109,16 @@ ShellRoot {
 
     // Which conversation the demo opens by itself, and how much room to give
     // things: the two knobs worth turning while looking at a layout. demoOpen
-    // is honoured only while demo is on.
+    // is honoured only while demo is on, so on a real account - after `dev
+    // account` - the same id goes in the way a clicked notification does.
+    // Without that second route, `account` then `open` left the fixtures'
+    // conversation on screen beside the real sidebar, which reads as the open
+    // having been ignored.
     function open(id: string): void {
       dev.openConversation = id
       panel.settings = Object.assign({}, panel.settings, { demoOpen: id })
+      if (panel.settings.demo === false)
+        panel.open(JSON.stringify({ chat: id }))
     }
 
     function spacing(name: string): void {

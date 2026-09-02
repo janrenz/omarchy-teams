@@ -374,6 +374,25 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.4.4 — 2026-09-02
+
+- **Inline pictures are drawn again.** A message's pictures had stopped
+  appearing entirely: the rounded-corner change put `canRoundPictures` on the
+  frame the picture sits in, and read it unqualified from the `Loader` inside
+  that frame. A QML binding sees its own object, the root of its own file and
+  the ids in it — not the properties of an unnamed parent in between — so the
+  lookup threw on every picture, `sourceComponent` never resolved, and the
+  Loader loaded nothing. The frame has an id now and the property is read
+  through it. Nothing was wrong with the fetch: the helper had been downloading
+  and caching each picture all along, and the window then drew an empty box
+  over it.
+- **`dev open` works on a real account.** It only ever set `demoOpen`, which
+  the window honours while the fixtures are on, so `dev account` followed by
+  `dev open` left the demo conversation on screen beside the real sidebar and
+  read as the open having been ignored. On a real account the id now goes in
+  the way a clicked notification does. This is how the picture above was
+  confirmed drawn.
+
 ### 0.4.3 — 2026-09-02
 
 - **A redirect can no longer walk a token off Graph.** The host check ran on

@@ -144,6 +144,24 @@ Reading the log is the only way that class of bug announces itself:
 journalctl --user -t omarchy-shell -n 200 --no-pager | grep -i "$PWD"
 ```
 
+The other member of that family - parses fine, fails at load - is that **QML
+takes one handler per signal per file.** Adding `onSomethingChanged:` beside an
+existing one does not chain the two; it is the same property assigned twice,
+and the file will not load at all:
+
+```
+Type TeamsWindow unavailable
+  caused by Service.qml[612:3]: Property value set multiple times
+```
+
+Which is the confusing shape: the first line names whatever tried to *use* the
+broken file, so the error arrives pointing at the window and not at the two
+lines that disagree. Fold the second call into the handler that is already
+there. Neither `qmlformat` nor `qmllint` says a word about it - checked, both
+are silent on a two-handler file that the engine then refuses - so a full
+`dev/run.sh` after touching a signal handler is what catches it. A harness that
+comes up is the proof; `run.sh` reporting that it never came up is the failure.
+
 `dev/link.sh` assembles a Quickshell config folder in
 `$XDG_RUNTIME_DIR/omarchy-teams-dev` (`dev/stage.sh` decides where, and refuses
 to fall back to shared temp) and symlinks the sources plus `dev/shell.qml` into

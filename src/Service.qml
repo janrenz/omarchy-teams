@@ -23,6 +23,14 @@ Item {
   // an app registration that does not declare a permission fails the whole
   // sign-in when it is requested, so this is the user saying theirs does.
   readonly property bool wantFiles: setting("sendFiles", false) === true
+  // Whether to ask for Presence.ReadWrite at the next sign-in. Off by default
+  // for the same reason as files, and one more: this scope needs an
+  // administrator to consent for the tenant, so asking for it uninvited turns
+  // a working chats-only sign-in into a refused one.
+  readonly property bool wantPresence: setting("setPresence", false) === true
+  // Whether to hold a presence session open while this desktop is up. Only
+  // means anything with the above on - see holdTimer.
+  readonly property bool holdPresence: wantPresence && setting("holdPresence", false) === true
   // The bar only ever draws an unread count, and the team tree costs one Graph
   // request per team - 29 of them on this tenant. So the widget turns it off
   // and the window turns it on; nothing draws a channel list nobody asked for.
@@ -68,6 +76,11 @@ Item {
   // before that was asked for keeps working; it just cannot clear the dot.
   readonly property bool canMarkRead: view.canMarkRead === true
   readonly property bool canUpload: view.canUpload === true
+  readonly property bool canSetPresence: view.canSetPresence === true
+  // The user's own presence as Graph currently reports it. Null before the
+  // first fetch answers; the header says nothing at all until then, because a
+  // dot that means "we have not asked yet" reads as "offline".
+  readonly property var myPresence: view.me || null
   readonly property int unreadCount: view.unreadCount || 0
   // Show only what is waiting. A view of the list rather than a setting, so it
   // is not remembered between sessions: it answers "what needs me now", and
@@ -230,6 +243,9 @@ Item {
     pauseWhenAway: root.pausePolling
     pauseWhenOffline: root.pausePolling
     slowOnBattery: root.pausePolling
+    // The presence session follows the desktop, so it needs to know about
+    // idleness even when polling is not being paused for it.
+    needIdle: root.holdPresence
   }
 
   // For a host that wants to explain a sidebar that is not moving.
@@ -246,7 +262,9 @@ Item {
     onTriggered: root.refresh()
   }
 
-  onConfiguredChanged: if (configured) { loadPalette(); loadReactionChoices(); refresh() }
+  onConfiguredChanged: if (configured) {
+    loadPalette(); loadReactionChoices(); loadPresenceChoices(); refresh()
+  }
   onPluginDirChanged: if (configured) { loadPalette(); refresh() }
   onSettingsChanged: if (configured) refresh()
 
@@ -626,6 +644,134 @@ Item {
     }
   }
 
+  // ---- your own presence --------------------------------------------------
+
+  // What may be set, from the helper for the same reason the reactions are:
+  // Graph refuses an availability paired with the wrong activity, so the
+  // picker offers its table rather than a second copy of it.
+  property var presenceChoices: []
+  property bool settingPresence: false
+  property string presenceError: ""
+
+  function loadPresenceChoices() {
+    if (presenceChoicesProc.running || pluginDir === "" || presenceChoices.length > 0) return
+    presenceChoicesProc.command = ["python3", helper(), "presence-states"]
+    presenceChoicesProc.running = true
+  }
+
+  Process {
+    id: presenceChoicesProc
+    running: false
+    stdout: StdioCollector { id: presenceChoicesOut; waitForEnd: true }
+    onExited: function(_exitCode) {
+      var parsed = Model.parseJson(presenceChoicesOut.text, null)
+      if (parsed && parsed.ok !== false) root.presenceChoices = parsed.states || []
+    }
+  }
+
+  // `auto` hands presence back to Teams, which is the "Reset status" of the
+  // client's own menu rather than a state of its own.
+  function setPresence(state) {
+    var wanted = String(state || "")
+    if (wanted === "" || !canSetPresence || settingPresence || pluginDir === "") return
+    settingPresence = true
+    presenceError = ""
+    var command = ["python3", helper(), "presence", "--account", alias, "--state", wanted]
+    if (setting("demo", false) === true) command.push("--demo")
+    presenceProc.command = command
+    presenceProc.running = true
+  }
+
+  Process {
+    id: presenceProc
+    running: false
+    stdout: StdioCollector { id: presenceOut; waitForEnd: true }
+    stderr: StdioCollector { id: presenceErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.settingPresence = false
+      var parsed = Model.parseJson(presenceOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.presenceError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(presenceErrOut.text || "Could not set your presence", 160)
+        return
+      }
+      root.presenceError = ""
+      // Read it back rather than draw what was asked for. Graph aggregates a
+      // preferred presence with whatever sessions exist, and if none do the
+      // answer is Offline however cheerful the request was - which the user
+      // should see, not be told the opposite of.
+      root.refresh()
+    }
+  }
+
+  // ---- holding a session open --------------------------------------------
+  //
+  // A preferred presence only shows while the user has at least one presence
+  // session; with no Teams client signed in anywhere they are Offline whatever
+  // they picked. So the plugin can be that client - one setPresence renewed
+  // before it expires, following the desktop rather than claiming anything:
+  // available while somebody is at the machine, away once nobody is.
+  //
+  // Behind the announcer flag, because there is a Service behind the bar on
+  // every monitor and another behind the window, and one of them is enough.
+  // Duplicates would be harmless - Graph names the session after the
+  // application, so they all renew the same one - but they would be requests
+  // nobody asked for.
+  property string heldPresence: ""
+
+  readonly property string wantedSessionPresence: poll.idleNow ? "away" : "available"
+
+  function holdSession(state) {
+    if (!holdPresence || !canSetPresence || !notifies) return
+    if (holdProc.running || pluginDir === "") return
+    if (setting("demo", false) === true) return
+    holdProc.command = ["python3", helper(), "hold-presence", "--account", alias,
+                        "--state", String(state)]
+    holdProc.running = true
+  }
+
+  Process {
+    id: holdProc
+    running: false
+    stdout: StdioCollector { id: holdOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = Model.parseJson(holdOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        // Not surfaced in the window. This is a background heartbeat nobody
+        // asked for by hand, and a line of red over the conversation list is
+        // not the way to report that a status dot is stale. The picker's own
+        // errors are the ones worth showing.
+        root.heldPresence = ""
+        return
+      }
+      root.heldPresence = String(parsed.state || "")
+    }
+  }
+
+  // Renewed at a third of the hour the session is asked for, so a poll that
+  // fails or a laptop that slept through one still leaves two more tries
+  // before Graph drops the session and the dot goes grey.
+  Timer {
+    id: holdTimer
+    interval: 20 * 60 * 1000
+    repeat: true
+    running: root.holdPresence && root.canSetPresence && root.notifies && root.signedIn
+    triggeredOnStart: true
+    onTriggered: root.holdSession(root.wantedSessionPresence)
+  }
+
+  // Coming back to the machine should move the dot now rather than at the next
+  // renewal, and the same for walking away from it.
+  onWantedSessionPresenceChanged: if (holdTimer.running) holdSession(wantedSessionPresence)
+
+  // Letting go on the way out, so a shell that is shut down does not leave the
+  // user looking available for the rest of the hour.
+  Component.onDestruction: if (holdPresence && canSetPresence && notifies && heldPresence !== "") {
+    Quickshell.execDetached(["python3", helper(), "hold-presence", "--account", alias,
+                             "--state", "none"])
+  }
+
   function react(messageId, emoji, remove) {
     var id = String(messageId || "")
     if (id === "" || !openConversation || reacting || pluginDir === "") return
@@ -902,6 +1048,7 @@ Item {
     // registration does not declare fails the whole sign-in rather than just
     // itself - see the comment on SCOPES_FILES in teams.py.
     if (wantFiles) command.push("--files")
+    if (wantPresence) command.push("--presence")
     loginStartProc.command = command
     loginStartProc.running = true
   }

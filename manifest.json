@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "author": "Jan Renz",
   "license": "MIT",
   "description": "Teams chats and channels in the Omarchy bar and in a window of their own. Needs python3 (standard library only) and an Azure app registration of yours - see the README. Talks to Microsoft Graph and nothing else.",
@@ -33,6 +33,8 @@
       "chats": 25,
       "channels": true,
       "sendFiles": false,
+      "setPresence": false,
+      "holdPresence": false,
       "refreshIntervalSec": 120,
       "pausePolling": true,
       "tintOnUnread": true,
@@ -71,6 +73,20 @@
         "type": "boolean",
         "label": "Send files",
         "description": "Adds an Attach button and lets a file dropped on the window go into the chat you are reading. It needs Files.ReadWrite on your app registration - the file goes to your own OneDrive first, into the same folder Teams itself uses, and the message points at it. Turn this on only once the registration has that permission: a scope it does not declare fails the whole sign-in, not just itself. Changing this means signing in again.",
+        "defaultValue": false
+      },
+      {
+        "key": "setPresence",
+        "type": "boolean",
+        "label": "Set your presence",
+        "description": "The p key and the status chip: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and Automatic to hand it back to Teams. Needs Presence.ReadWrite on your app registration - reading everybody's presence does not need an administrator, but writing your own does. Turn this on only once the registration declares it, because a scope it does not declare fails the whole sign-in. Changing this means signing in again.",
+        "defaultValue": false
+      },
+      {
+        "key": "holdPresence",
+        "type": "boolean",
+        "label": "Let Teams see you at this machine",
+        "description": "A presence you set only shows while Teams believes you are signed in somewhere; with no Teams client running anywhere you are Offline whatever you pick. This makes the plugin one of those clients - available while somebody is at the machine, away once nobody is - renewed every twenty minutes and let go when the shell stops. Needs the setting above.",
         "defaultValue": false
       },
       {

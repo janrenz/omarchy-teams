@@ -129,6 +129,25 @@ ShellRoot {
                          channels: true, chats: 25, density: dev.density }
     }
 
+    // The status menu, opened without a keyboard - offscreen means p never
+    // reaches the window. Returns the rows it is offering, so a script can
+    // check the picker agrees with what the helper says Graph will take.
+    function presence(): string {
+      panel.togglePresencePicker()
+      return JSON.stringify({
+        open: panel.pickingPresence,
+        canSet: panel.teamsService.canSetPresence,
+        mine: panel.teamsService.myPresence,
+        rows: panel.teamsService.presenceChoices.map(function(row) { return row.state })
+      })
+    }
+
+    // Picking one, the way a number key or a click does.
+    function pick(index: int): string {
+      panel.presenceAt(index)
+      return JSON.stringify({ error: panel.teamsService.presenceError })
+    }
+
     // The two routes into uploadFile() without a mouse: the file chooser and a
     // drop both end at sendFile(), so this is what a drag onto the window does.
     function attach(path: string): string {

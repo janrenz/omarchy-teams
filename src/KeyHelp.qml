@@ -15,6 +15,8 @@ Column {
   // The a key is only there when the handover setting is on, so the list must
   // not promise it either.
   property bool agentHandover: true
+  // And the p key is only there on a sign-in that may set your presence.
+  property bool canSetPresence: false
 
   // [key, what it does, which section]
   readonly property var bindings: [
@@ -37,6 +39,7 @@ Column {
     ["Shift+Enter", "Send what you have typed", "Doing"],
     ["u", "Show only unread conversations", "Doing"],
     ["n", "Start a new chat", "Doing"],
+    ["p", "Set your presence, or hand it back to Teams", "Doing"],
     ["r", "Reload this conversation", "Doing"],
     [",", "Settings", "Doing"],
     ["?", "This list", "Doing"]
@@ -64,7 +67,9 @@ Column {
 
       Repeater {
         model: root.bindings.filter(function(row) {
-          return row[2] === modelData && (root.agentHandover || row[0] !== "a")
+          return row[2] === modelData
+                 && (root.agentHandover || row[0] !== "a")
+                 && (root.canSetPresence || row[0] !== "p")
         })
 
         delegate: Row {

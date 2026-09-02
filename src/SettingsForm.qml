@@ -241,6 +241,45 @@ Column {
 
   PanelSeparator { width: parent.width }
 
+  // ---------------- your own presence ----------------
+
+  PanelSectionHeader { width: parent.width; text: "Your presence" }
+
+  Toggle {
+    width: parent.width
+    label: "Set your presence from this window"
+    description: "The p key and the status chip in the header: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and Automatic to hand it back to Teams. Needs Presence.ReadWrite on your app registration, which an administrator has to consent to for the tenant - reading everybody's presence does not, but writing your own does. Turn this on only once the registration has it and the consent is given, because a scope the registration does not declare fails the whole sign-in rather than just itself. Takes effect at the next sign-in."
+    checked: root.current("setPresence", false) === true
+    onClicked: root.change("setPresence", !(root.current("setPresence", false) === true))
+  }
+
+  Toggle {
+    width: parent.width
+    // Meaningless on its own - the session it holds open is what a presence
+    // you set needs in order to show - so it is dimmed until the one above it
+    // is on rather than sitting there taking clicks that do nothing.
+    enabled: root.current("setPresence", false) === true
+    opacity: enabled ? 1.0 : 0.5
+    label: "Let Teams see you at this machine"
+    description: "A presence you set only shows while Teams believes you are signed in somewhere - with no Teams client running anywhere you are Offline whatever you pick. This makes the plugin one of those clients: available while somebody is at the machine, away once nobody is, renewed every twenty minutes and let go when the shell stops. It says nothing else - not in a call, not presenting - because it does not know that and will not invent it."
+    checked: root.current("holdPresence", false) === true
+    onClicked: root.change("holdPresence", !(root.current("holdPresence", false) === true))
+  }
+
+  Text {
+    width: parent.width
+    visible: !!root.service && root.service.signedIn && root.service.wantPresence
+             && !root.service.canSetPresence
+    text: "This sign-in cannot set your presence yet. Sign in again to ask for Presence.ReadWrite - if the sign-in then fails, the tenant has not consented to it."
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Color.urgent
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
+  PanelSeparator { width: parent.width }
+
   // ---------------- saving ----------------
 
   Text {

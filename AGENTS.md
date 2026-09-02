@@ -182,6 +182,30 @@ fatal QML error makes it exit instead.
   is the user saying their registration has it, `SCOPES_FILES` is only appended
   when it is on, and `can_upload()` reads the answer back off the granted
   scopes.
+- **A presence nobody can see is the normal case.** `setUserPreferredPresence`
+  stores what the picker asks for, and Graph then shows `Offline` unless the
+  user has a *presence session* - a Teams client signed in somewhere. On a
+  desktop with no Teams running, that is every time, so the picker looked
+  broken until the plugin could hold a session of its own (`hold-presence`,
+  behind the `holdPresence` setting). The session's vocabulary is narrower than
+  the picker's on purpose: `setPresence` takes `Busy` only as *InACall* or
+  *InAConferenceCall*, and the plugin knows about neither, so it offers
+  available and away and nothing else. Graph names the session after the
+  application, not the machine, so two machines renew one session - which is
+  also why the heartbeat sits behind `notifies`, the same "one of the three
+  Services does this" flag the notifications use.
+- **`Presence.ReadWrite` is the only opt-in scope whose cost is consent.**
+  `Files.ReadWrite` is opt-in because a registration must declare what it
+  requests; presence is opt-in for that *and* because an administrator has to
+  grant it, where `Presence.Read.All` - reading the whole organisation - needs
+  nobody. Do not fold it into `SCOPES_CHATS`: that turns every working
+  chats-only sign-in into a refused one.
+- **A refresh asks for `scopes_held_by(account)`, not the base set.** The
+  refresh response's `scope` is what `store_tokens` records as this sign-in's
+  capabilities, and asking for less than was granted gets less back - so an
+  account signed in with `Files.ReadWrite` lost the Attach button at its first
+  refresh. Anything added as a scope tier has to be read back in that function
+  too, or it will fall off an hour after sign-in.
 - **Graph refuses reactions outside 👍 ❤️ 😂 😮 😢 😡** with "Unicode ... is not
   supported". The picker offers exactly what will work rather than letting
   someone pick something that silently fails.

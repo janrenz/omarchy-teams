@@ -71,6 +71,15 @@ SCOPES_CHANNELS = (
 # files people send in a chat.
 SCOPES_FILES = " Files.ReadWrite"
 
+# Setting your own presence is a fourth tier, and opt-in for both reasons at
+# once. Presence.ReadWrite is admin-consent - unlike Presence.Read.All, which
+# reads the whole organisation's presence on ordinary user consent - so a
+# tenant that will not consent to it fails the sign-in, and a registration that
+# does not declare it fails the sign-in too. Off by default, and
+# can_set_presence() reads the answer back off the granted scopes: nothing is
+# offered until it is really there.
+SCOPES_PRESENCE = " Presence.ReadWrite"
+
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
     "omarchy",
@@ -85,9 +94,23 @@ MESSAGE_CAP = 50
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
-def scopes_for(channels, files=False):
+def scopes_for(channels, files=False, presence=False):
     scopes = SCOPES_CHANNELS if channels else SCOPES_CHATS
-    return scopes + (SCOPES_FILES if files else "")
+    return scopes + (SCOPES_FILES if files else "") + (SCOPES_PRESENCE if presence else "")
+
+
+def scopes_held_by(account):
+    """What a refresh should ask this account for.
+
+    Its own granted scopes, not what the settings currently want. Two reasons,
+    and they pull the same way: a tier the settings have just gained is not
+    consented yet, and asking for a scope the registration does not declare
+    fails the refresh rather than that one scope - while asking for *less* than
+    was granted has the token come back with less, and store_tokens records
+    that as what this sign-in can do. Either way the opt-in tiers would fall
+    off an account at its first refresh, an hour after signing in.
+    """
+    return scopes_for(has_channels(account), can_upload(account), can_set_presence(account))
 
 
 # --------------------------------------------------------------------------
@@ -292,7 +315,7 @@ def access_token(alias, account):
             "client_id": account.get("client_id", ""),
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
-            "scope": scopes_for(has_channels(account)),
+            "scope": scopes_held_by(account),
         },
     )
     if status != 200 or "access_token" not in payload:
@@ -328,7 +351,8 @@ def cmd_login_start(args):
     status, payload = http(
         authority_base(authority) + "/oauth2/v2.0/devicecode",
         method="POST",
-        data={"client_id": client_id, "scope": scopes_for(args.channels, args.files)},
+        data={"client_id": client_id,
+              "scope": scopes_for(args.channels, args.files, args.presence)},
     )
     if status != 200 or "device_code" not in payload:
         fail("devicecode_failed",
@@ -775,6 +799,8 @@ def fetch_account(alias, args):
         "canUpload": can_upload(account),
         "canStartChat": can_create_chat(account) and can_find_people(account),
         "presence": can_see_presence(account),
+        "canSetPresence": can_set_presence(account),
+        "me": None,
         "chats": [],
         "teams": [],
         "unreadCount": 0,
@@ -786,11 +812,16 @@ def fetch_account(alias, args):
 
     # One batched request for everybody in the list, and only when the sign-in
     # is allowed to ask.
+    me_id = str(account.get("userId") or "")
     if can_see_presence(account):
+        # The user's own id rides along in the same batch. The picker has to
+        # say what it is about to change, and this request takes 650 ids, so
+        # asking about one more person costs nothing at all.
         presences, presence_error = fetch_presences(
-            token, [row.get("withUserId") for row in chats])
+            token, [row.get("withUserId") for row in chats] + [me_id])
         for row in chats:
             row["presence"] = presences.get(row.get("withUserId") or "", None)
+        result["me"] = presences.get(me_id, None)
         if presence_error:
             result["warnings"].append({"scope": "presence", "message": presence_error})
     else:
@@ -1040,6 +1071,16 @@ def can_see_presence(account):
     return "presence.read.all" in str((account or {}).get("scopes", "")).lower()
 
 
+def can_set_presence(account):
+    """Whether this sign-in may set the user's own presence.
+
+    A different question from reading everybody else's, and a dearer one:
+    Presence.ReadWrite needs an administrator's consent where Presence.Read.All
+    does not.
+    """
+    return "presence.readwrite" in str((account or {}).get("scopes", "")).lower()
+
+
 # Graph's availability values, grouped down to the four states worth drawing.
 # The strings are Microsoft's; the grouping is ours, because "AvailableIdle"
 # and "Available" are the same dot to a reader.
@@ -1053,6 +1094,53 @@ PRESENCE_STATES = {
 
 def presence_state(availability):
     return PRESENCE_STATES.get(str(availability or "").lower(), "unknown")
+
+
+# What the picker offers. The pairs are not free choices: Graph refuses an
+# activity that does not belong to its availability, so every row here is one
+# row of Microsoft's own table rather than a combination that read sensibly.
+# Offline is "appear offline" - the user choosing to look away, which is not
+# the same as being away, and the two are named so nobody has to guess which.
+# [key, availability, activity, what to call it]
+PREFERRED_PRESENCE = [
+    ("available", "Available", "Available", "Available"),
+    ("busy", "Busy", "Busy", "Busy"),
+    ("dnd", "DoNotDisturb", "DoNotDisturb", "Do not disturb"),
+    ("brb", "BeRightBack", "BeRightBack", "Be right back"),
+    ("away", "Away", "Away", "Appear away"),
+    ("offline", "Offline", "OffWork", "Appear offline"),
+]
+
+# The session this plugin can hold open is a table of its own, and a shorter
+# one: setPresence takes five pairs and none of the others. Only the two that
+# are true of a desktop are here - the plugin is not in a call, so it will not
+# say "Busy, InACall" to get a red dot out of Graph.
+SESSION_PRESENCE = {
+    "available": ("Available", "Available"),
+    "away": ("Away", "Away"),
+}
+
+# What `--state auto` and the picker's first row mean: hand presence back to
+# Teams. Several spellings, because this is also a command people type.
+CLEAR_WORDS = ("auto", "automatic", "clear", "reset")
+
+
+def preferred_pair(state):
+    """(availability, activity) for one of our short state names."""
+    for key, availability, activity, _label in PREFERRED_PRESENCE:
+        if key == state:
+            return availability, activity
+    return "", ""
+
+
+def own_user_id(token, account):
+    """The id Graph wants in the path when we are talking about ourselves.
+
+    The token's own claim first, the way markChatReadForUser gets it: it is the
+    id of whoever this token is really for, which beats a `userId` written into
+    the account file at some earlier sign-in.
+    """
+    return token_claims(token).get("oid") or account.get("userId") or ""
 
 
 def fetch_presences(token, user_ids):
@@ -1081,6 +1169,135 @@ def fetch_presences(token, user_ids):
             "activity": row.get("activity") or "",
         }
     return found, ""
+
+
+def cmd_presence_states(_args):
+    """The presences that can be set, for the picker.
+
+    From here rather than from the QML, for the same reason the reactions are:
+    what Graph will take is the helper's business, and a picker that offers
+    anything else is a picker with rows that fail.
+    """
+    out({"ok": True, "states": [
+        # `dot` is which of the four drawable states this one belongs to, so
+        # the picker's circles and the sidebar's are the same four colours.
+        # Grouped here because the grouping is already here.
+        {"state": key, "availability": availability, "activity": activity, "label": label,
+         "dot": presence_state(availability)}
+        for key, availability, activity, label in PREFERRED_PRESENCE
+    ]})
+
+
+def presence_call(args, verb, body):
+    """One POST to /users/{me}/presence/<verb>, with the permission checked first."""
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_set_presence(account):
+        fail("presence_permission_required",
+             "This sign-in cannot set your presence. It needs Presence.ReadWrite, which an "
+             "administrator has to consent to for the tenant - see the plugin's README.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    user_id = own_user_id(token, account)
+    if not user_id:
+        fail("no_user_id", "Could not tell Graph whose presence this is")
+
+    session_id = str(account.get("client_id") or "")
+    if "sessionId" in body:
+        # Graph names a presence session after the application, not after the
+        # machine: "Provide the ID of the application as sessionId". So there is
+        # one session per registration, and a second machine running this plugin
+        # renews that same session rather than opening one of its own.
+        if not session_id:
+            fail("no_client_id", "This account has no client id to name a session with")
+        body = dict(body, sessionId=session_id)
+
+    status, payload = http(
+        "%s/users/%s/presence/%s" % (GRAPH, urllib.parse.quote(user_id, safe=""), verb),
+        method="POST", json_body=body,
+        headers={"Authorization": "Bearer " + token},
+    )
+    if status == 403:
+        fail("presence_permission_required",
+             friendly(graph_error(payload, "This sign-in may not set your presence")))
+    return status, payload
+
+
+def cmd_presence(args):
+    """Set the presence Teams shows for you, or hand it back to Teams.
+
+    This is the client's own status menu, written through Graph: a preferred
+    presence overrides whatever the sessions aggregate to until it is cleared,
+    which is what makes "Do not disturb" stick while you keep typing.
+    """
+    state = str(args.state or "").strip().lower()
+    clearing = state in CLEAR_WORDS
+    availability, activity = preferred_pair(state)
+    if not clearing and not availability:
+        fail("bad_presence", "Teams does not take %s as a presence" % (state or "that"))
+
+    if args.demo:
+        out({"ok": True, "state": "auto" if clearing else state})
+
+    body = {} if clearing else {"availability": availability, "activity": activity}
+    # Graph applies an expiry either way - a day for Busy and Do not disturb, a
+    # week for the rest - so passing one on is the difference between "until I
+    # say otherwise" and "until this evening", not between expiring and not.
+    if not clearing and args.duration:
+        body["expirationDuration"] = str(args.duration)
+
+    verb = "clearUserPreferredPresence" if clearing else "setUserPreferredPresence"
+    status, payload = presence_call(args, verb, body)
+    if status not in (200, 201, 204):
+        fail("presence_failed", friendly(graph_error(payload, "Could not set your presence")))
+    out({"ok": True, "state": "auto" if clearing else state,
+         "availability": availability, "activity": activity})
+
+
+def cmd_hold_presence(args):
+    """Keep a presence session open for this machine, or let it go.
+
+    A preferred presence only shows while at least one presence session exists;
+    with no Teams client signed in anywhere the user is Offline whatever they
+    set, and the picker would look broken. This is that session - the plugin
+    saying it is a Teams client at a desktop - which is why it expires and has
+    to be renewed rather than being set once and forgotten.
+    """
+    state = str(args.state or "available").strip().lower()
+    clearing = state == "none"
+    pair = SESSION_PRESENCE.get(state)
+    if not clearing and not pair:
+        fail("bad_presence",
+             "A presence session can be available or away, not %s" % (state or "that"))
+
+    if args.demo:
+        out({"ok": True, "state": state})
+
+    if clearing:
+        verb, body = "clearPresence", {"sessionId": ""}
+    else:
+        verb, body = "setPresence", {
+            "sessionId": "",
+            "availability": pair[0],
+            "activity": pair[1],
+            # Graph takes PT5M to PT4H and defaults to five minutes, which
+            # would need renewing oftener than this plugin polls.
+            "expirationDuration": str(args.duration or "PT1H"),
+        }
+
+    status, payload = presence_call(args, verb, body)
+    # Letting go of a session that has already expired is a 404, and that is
+    # the state being asked for rather than a failure.
+    if clearing and status == 404:
+        out({"ok": True, "state": state, "alreadyGone": True})
+    if status not in (200, 201, 204):
+        fail("presence_failed",
+             friendly(graph_error(payload, "Could not hold the presence session")))
+    out({"ok": True, "state": state})
 
 
 def person_row(person, kind):
@@ -1621,6 +1838,8 @@ def demo_account(alias):
         # button. A real account gets this from its granted scopes.
         "canUpload": True,
         "canStartChat": True,
+        "canSetPresence": True,
+        "me": {"state": "available", "availability": "Available", "activity": "Available"},
         "chats": chats, "teams": teams,
         "unreadCount": sum(1 for row in chats if row["unread"]), "warnings": [],
     }
@@ -1703,6 +1922,9 @@ def main():
                        help="also ask for team and channel access (needs admin consent)")
     start.add_argument("--files", action="store_true",
                        help="also ask for Files.ReadWrite, for sending a file into a chat")
+    start.add_argument("--presence", action="store_true",
+                       help="also ask for Presence.ReadWrite, for setting your own presence "
+                            "(admin consent)")
     start.set_defaults(func=cmd_login_start)
 
     with_account("login-poll", "poll a pending sign-in").set_defaults(func=cmd_login_poll)
@@ -1753,6 +1975,27 @@ def main():
     react.set_defaults(func=cmd_react)
 
     sub.add_parser("reactions", help="the reactions that can be sent").set_defaults(func=cmd_reactions)
+
+    presence = with_account("presence", "set the presence Teams shows for you")
+    presence.add_argument("--state", required=True,
+                          help="available, busy, dnd, brb, away, offline - or auto to hand it "
+                               "back to Teams")
+    presence.add_argument("--for", dest="duration", default="",
+                          help="how long, as an ISO 8601 duration: PT8H, P1D. Graph applies its "
+                               "own expiry when this is left out")
+    presence.add_argument("--demo", action="store_true")
+    presence.set_defaults(func=cmd_presence)
+
+    sub.add_parser("presence-states", help="the presences that can be set") \
+        .set_defaults(func=cmd_presence_states)
+
+    hold = with_account("hold-presence", "keep a presence session open, so a presence can show")
+    hold.add_argument("--state", default="available",
+                      help="available, away, or none to let the session go")
+    hold.add_argument("--for", dest="duration", default="PT1H",
+                      help="how long the session lasts before it needs renewing (PT5M to PT4H)")
+    hold.add_argument("--demo", action="store_true")
+    hold.set_defaults(func=cmd_hold_presence)
 
     mark = with_account("mark-read", "mark one chat read")
     mark.add_argument("--chat", required=True, help="chat id from a fetch")

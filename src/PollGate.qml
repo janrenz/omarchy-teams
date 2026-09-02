@@ -34,12 +34,20 @@ QtObject {
   property bool pauseWhenAway: true
   property bool pauseWhenOffline: true
   property bool slowOnBattery: true
+  // For a caller that wants to know about idleness without asking for polling
+  // to stop over it - the presence session follows the desktop whether or not
+  // the poll timer does.
+  property bool needIdle: false
 
   readonly property bool away: pauseWhenAway && idleSeconds > 0 && idle.isIdle
   readonly property bool offline: pauseWhenOffline
                                  && Networking.canCheckConnectivity
                                  && Networking.connectivity === NetworkConnectivity.None
   readonly property bool paused: away || offline
+
+  // Idle, as a fact rather than as a reason to pause. False while nothing has
+  // armed the monitor, which is the same "go ahead" every default here means.
+  readonly property bool idleNow: idle.enabled && idle.isIdle
 
   // What to multiply a poll interval by. Whole numbers, so a mailbox asked for
   // every three minutes lands on six or nine rather than something unreadable
@@ -60,7 +68,7 @@ QtObject {
   // that turns the idle gate off does not hold an idle-notification object for
   // no reason.
   property IdleMonitor idle: IdleMonitor {
-    enabled: root.pauseWhenAway && root.idleSeconds > 0
+    enabled: (root.pauseWhenAway || root.needIdle) && root.idleSeconds > 0
     timeout: Math.max(60, root.idleSeconds)
     respectInhibitors: true
   }

@@ -81,6 +81,22 @@ It needs the opt-in file scope and the `sendFiles` setting; the helper says so
 plainly when either is missing. Read the path back to the user before sending -
 a wrong file in a chat cannot be taken back.
 
+Your presence is visible to the whole organisation, so it is asked-for work
+too:
+
+    python3 $HELPER presence        --account work --state dnd --for PT2H
+    python3 $HELPER presence        --account work --state auto
+    python3 $HELPER presence-states
+
+`available`, `busy`, `dnd`, `brb`, `away`, `offline`, or `auto` to hand it back
+to Teams. `presence-states` prints the pairs Graph will take, which is the list
+to trust rather than a guess. It needs `Presence.ReadWrite` - admin consent -
+and the `setPresence` setting; the helper says which is missing. A presence only
+shows while a Teams client is signed in somewhere: with none, Graph stores what
+you set and reports `Offline`, so say that rather than setting it twice.
+`hold-presence` is the plugin's own session and is driven by its timer - leave
+it alone.
+
 `send` takes the text on **stdin**: anyone on this machine can read another
 process's command line for as long as it runs. `--text` still works for running
 it by hand. Reactions are limited to 👍 ❤️ 😂 😮 😢 😡; Graph refuses anything

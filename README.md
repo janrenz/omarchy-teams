@@ -10,6 +10,7 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **A picture opens in the window**, whole rather than cropped to the thumbnail, with **Save as…** to keep a copy — a real save dialog, starting in your Downloads folder and suggesting a name from what the message called the picture. `s` saves, `o` hands it to whatever else views images, `Escape` closes. It used to go straight to `xdg-open`, which took the one thing anybody opens a picture for somewhere this plugin could not follow.
 - **Emoji, inline images and clickable links** in the transcript. Both kinds of link: an address somebody typed out in full, and one behind its own words — the composer's link button writes `<a href="…">the release notes</a>`, and the words are all a reader would otherwise get. They open in your browser, tinted from the running theme rather than in Qt's blue.
 - **Presence.** Beside each one-to-one chat: a filled circle for available, a filled circle for busy, a ring for away, a dim circle for offline — in the running theme's own colours. Group chats have none, because a group is not away. Told apart from unread by shape and place, not by hue: presence sits immediately in front of the name because it is about the person, unread is a bar down the leading edge because it is about the conversation, and a chat can show both. Needs `Presence.Read.All` — ordinary user consent.
+- **Your own presence, set from here.** `p`, or the dot in the header: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and *Automatic* to hand it back to Teams. It is the client's own status menu, written through Graph, and it sticks until you hand it back. This one needs `Presence.ReadWrite`, which an administrator has to consent to — writing your own presence is the dearer permission, not reading everybody's — so it is off until you turn it on. There is a second setting for the part nobody expects: a presence you set only shows while Teams believes you are signed in *somewhere*, so the plugin can be that somewhere. See [Your presence](#your-presence).
 - **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. The pointer on a chip says who reacted, what Teams calls that reaction, and which of the two a click would do. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
 
@@ -89,6 +90,7 @@ reading, which is the step that used to be missing.
 | `Shift+Enter` or `Ctrl+Enter` | Send. Plain `Enter` is a newline |
 | `u` | Show only unread conversations |
 | `n` | Start a new chat |
+| `p` | Set your presence, or hand it back to Teams |
 | `r` | Reload the open conversation |
 | `,` | Settings |
 | `?` | This list |
@@ -118,18 +120,27 @@ An Azure app registration declares up front which delegated permissions it is al
    | `Channel.ReadBasic.All` | listing their channels | user |
    | `ChannelMessage.Read.All` | reading channel messages | **admin** |
    | `ChannelMessage.Send` | posting in a channel | user |
+   | `Presence.Read.All` | the presence dot beside a one-to-one chat | user |
    | `Files.ReadWrite` | sending a file into a chat — optional, see below | user |
+   | `Presence.ReadWrite` | setting your own presence — optional, see below | **admin** |
 
    `Chat.ReadWrite` rather than `Chat.Read` on purpose: marking a chat read is
    a write, and `markChatReadForUser` refuses anything less. Everything in that
    list except the channel row is ordinary user consent.
 
-   `Files.ReadWrite` is the one permission this plugin does not ask for unless
-   you say so, and the reason is not consent: a registration declares which
-   permissions it may *request*, so asking for one it does not list fails the
-   whole sign-in rather than that one scope. Add it here and turn on **Send
-   files** in the widget's settings; leave both alone and everything else works
-   exactly as before.
+   The last two are the permissions this plugin does not ask for unless you say
+   so, and for `Files.ReadWrite` the reason is not consent: a registration
+   declares which permissions it may *request*, so asking for one it does not
+   list fails the whole sign-in rather than that one scope. Add it here and turn
+   on **Send files** in the widget's settings; leave both alone and everything
+   else works exactly as before.
+
+   `Presence.ReadWrite` is opt-in for that reason *and* because of consent. It
+   is the only permission besides the channel ones that needs an administrator:
+   reading the whole organisation's presence is ordinary user consent, and
+   writing your own is not. So a sign-in that asks for it without the grant
+   fails outright, which is why it waits for **Set your presence** to be turned
+   on. Everything else is unaffected either way.
 
 5. Copy the **Application (client) ID**.
 6. In Omarchy, open the Teams widget's settings and fill in **Account name** (a short label such as `work`) and **Azure client id**.
@@ -164,6 +175,8 @@ own.
 | `authority` | `common` | `common`, `organizations`, or your tenant id. |
 | `channels` | `true` | Whether to ask for team and channel access at sign-in. |
 | `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. Your app registration has to declare it first. |
+| `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p` and the status chip need. Your registration has to declare it and an administrator has to consent to it. |
+| `holdPresence` | `false` | Whether to hold a presence session open for this machine, so a presence you set has something to show against. Needs `setPresence`. |
 | `chats` | `25` | How many chats to list (1–40). |
 | `density` | `cosy` | How much room the window gives things: `compact`, `cosy`, `roomy`, `spacious`. A multiplier over the theme's own spacing, so it follows your font size rather than fighting it. |
 | `refreshIntervalSec` | `120` | How often to poll (30–3600). |
@@ -257,6 +270,53 @@ Sending a file appears in your own OneDrive as well as in the chat, exactly as
 it does when Teams sends one. Names collide by adding a number rather than
 replacing what was there.
 
+## Your presence
+
+With `Presence.ReadWrite` granted and **Set your presence** on, the header grows
+a dot with a word beside it, `p` opens the menu, and a number picks a row:
+
+| | |
+|---|---|
+| `0` | **Automatic** — hand presence back to Teams, which is its own *Reset status* |
+| `1`–`6` | Available, Busy, Do not disturb, Be right back, Appear away, Appear offline |
+
+Those six are not a choice of wording. Graph pairs an availability with an
+activity and refuses combinations of its own devising, so the picker offers one
+row per pair Microsoft actually documents — `Offline` with `OffWork` among them,
+which is the one whose two halves differ and the one that would otherwise fail
+as a `400`. What you set holds until you clear it, exactly as it does in Teams:
+a preferred presence overrides whatever your clients are reporting, which is
+what makes *Do not disturb* stay on while you keep typing.
+
+The dot says what Graph reports **now**, not what you chose. Graph will hand
+back your effective presence and will not say whether a preference is behind it,
+so the menu ticks the row that matches what is true rather than inventing a
+memory of the last button pressed.
+
+### The part nobody expects
+
+A presence only exists while you have a *presence session* — a Teams client
+signed in somewhere. With none, your preferred presence is stored and you are
+`Offline` regardless, and a picker that appears to do nothing is worse than no
+picker. Teams on your phone is a session; so is Teams on another machine.
+
+**Let Teams see you at this machine** makes this plugin one of those clients.
+It holds a session open and renews it every twenty minutes, following the
+desktop rather than asserting anything: available while somebody is at the
+machine, away once the screen has been idle five minutes, and let go when the
+shell stops so you are not left looking available to a room you have gone home
+from. Idle inhibitors count as being present, so a call does not look like an
+empty desk.
+
+It will not say more than that. Graph takes `Busy` in a session only as
+*InACall* or *InAConferenceCall*, and this plugin knows about neither, so it
+does not claim them to get a red dot. Busy and Do not disturb are yours to set
+from the menu, where they mean you said so.
+
+The session is named after the app registration rather than after the machine —
+Graph's requirement, not a shortcut — so two machines running this plugin renew
+one session between them instead of holding two.
+
 ## What it does not do
 
 - **Only the six reactions Teams offers.** 👍 ❤️ 😂 😮 😢 😡. Graph refuses anything else with "Unicode ... is not supported", so the picker offers exactly what will work rather than letting you pick something that silently fails.
@@ -266,6 +326,8 @@ replacing what was there.
 - **A message never chooses its own markup.** A Teams message is HTML written by whoever sent it, and Qt's rich text fetches what it is told to fetch. So the markup is flattened in `teams.py`, and the only tag the window ever builds is an `<a>` around text it escaped first. Emoji come from the character Teams already puts in the tag's `alt`. A link keeps its address, but as an offset into the flattened text rather than as a tag — so what reaches the window is still only words, and the window still builds every tag it draws. Only `http`, `https` and `mailto` become links, checked in `teams.py`, again in `Model.js` where the anchor is written, and once more in `openUrl` before `xdg-open` sees it; anything else stays the plain words it was.
 - **Images are fetched by the helper, never by the window.** They live behind the Graph API and need your token; the host is checked before that token is attached, so an `<img src="https://evil/">` in a message cannot be used to collect it. Anything not on `graph.microsoft.com` is dropped from the message entirely.
 - **Files go into chats, not channels, and up to 4 MB.** See [Sending a file](#sending-a-file) for why both of those are where they are.
+- **No status message.** Teams lets you write a line of text under your presence, and Graph will take one. The six states are what the picker offers; a text field with an expiry and an @-mention picker in it is a different feature, and it is not here yet.
+- **No "in a call", and no reading back which presence you chose.** Both for the same reason: the plugin will not report something it does not know. See [Your presence](#your-presence).
 
 ## Development
 
@@ -298,6 +360,32 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.3.0 — 2026-09-02
+
+- **Your own presence, set from the window.** `p`, or the dot that is now in
+  the header: the six states Teams' own status menu offers, and *Automatic* to
+  hand presence back to it. Reading everybody else's presence has been here
+  since 0.1.0; setting your own is the other half, and it was missing because
+  it is the dearer permission — `Presence.ReadWrite` needs an administrator
+  where `Presence.Read.All` does not. So it is opt-in, gated on what the tenant
+  actually granted, and nothing appears until it is really there.
+- **A presence session, so setting one means something.** Graph stores a
+  preferred presence but shows `Offline` unless a Teams client is signed in
+  somewhere, which on a desktop with no Teams running is every time. **Let
+  Teams see you at this machine** makes the plugin one of those clients:
+  available while somebody is at the machine, away once nobody is, and let go
+  when the shell stops. It claims nothing it cannot know — not in a call, not
+  presenting.
+- **A refresh no longer asks for less than the sign-in was granted.** The
+  hourly token refresh asked for the base scope set, and the granted scopes are
+  recorded from whatever comes back — so an account that had signed in for
+  `Files.ReadWrite` lost the **Attach** button an hour later, until it was
+  signed in again. It now asks for exactly what that sign-in holds.
+- `Presence.Read.All` was missing from the permission table in this README,
+  which is a scope the plugin has always requested. Anybody whose sign-in
+  worked had added it anyway; a registration built strictly from that table
+  would have failed at the first sign-in.
 
 ### 0.2.0 — 2026-09-01
 

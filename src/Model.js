@@ -235,6 +235,11 @@ function accountView(snapshot, alias) {
       canUpload: data.canUpload === true,
       canStartChat: data.canStartChat === true,
       presence: data.presence === true,
+      canSetPresence: data.canSetPresence === true,
+      // The user's own presence, from the same batched request the sidebar's
+      // dots come out of. Null until a fetch has answered, which is not the
+      // same as being offline - so the chip says nothing rather than guessing.
+      me: data.me || null,
       chats: data.chats || [],
       teams: data.teams || [],
       unreadCount: Number(data.unreadCount || 0),
@@ -246,6 +251,7 @@ function accountView(snapshot, alias) {
   return {
     alias: String(alias || ""), ok: false, loaded: false, username: "", displayName: "",
     userId: "", channels: false, canMarkRead: false, canUpload: false, canStartChat: false, presence: false,
+    canSetPresence: false, me: null,
     chats: [], teams: [], unreadCount: 0,
     errorCode: "", errorMessage: "", warnings: []
   }

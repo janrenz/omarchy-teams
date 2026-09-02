@@ -254,12 +254,39 @@ class Scopes(unittest.TestCase):
         self.assertTrue(teams.can_mark_read({"scopes": "Chat.ReadWrite"}))
         self.assertFalse(teams.can_mark_read({"scopes": "Chat.Read ChatMessage.Send"}))
 
+    def test_setting_a_presence_needs_its_own_grant(self):
+        # Reading everybody's presence is ordinary user consent; writing your
+        # own is admin consent, so the two are not the same question.
+        self.assertTrue(teams.can_set_presence({"scopes": "Chat.ReadWrite Presence.ReadWrite"}))
+        self.assertFalse(teams.can_set_presence({"scopes": "Chat.ReadWrite Presence.Read.All"}))
+        self.assertTrue(teams.can_see_presence({"scopes": "Presence.Read.All"}))
+        self.assertFalse(teams.can_see_presence({"scopes": "Presence.ReadWrite"}))
+
+    def test_presence_write_is_a_tier_asked_for_only_when_wanted(self):
+        self.assertNotIn("Presence.ReadWrite", teams.scopes_for(False))
+        self.assertNotIn("Presence.ReadWrite", teams.scopes_for(True, True))
+        self.assertIn("Presence.ReadWrite", teams.scopes_for(False, False, True))
+
+    def test_a_refresh_asks_for_what_this_sign_in_was_actually_granted(self):
+        # Not for what the settings currently want, and not for less than was
+        # granted: the refreshed token comes back with whatever was asked for,
+        # and store_tokens records that as this sign-in's scopes. Asking for
+        # the base set would have the file and presence tiers fall off an
+        # account an hour after it signed in.
+        held = "Chat.ReadWrite Files.ReadWrite Presence.ReadWrite ChannelMessage.Read.All"
+        asked = teams.scopes_held_by({"scopes": held})
+        for scope in ("Files.ReadWrite", "Presence.ReadWrite", "ChannelMessage.Read.All"):
+            self.assertIn(scope, asked)
+        # And nothing is asked for that this sign-in never had.
+        self.assertNotIn("Presence.ReadWrite", teams.scopes_held_by({"scopes": "Chat.ReadWrite"}))
+
     def test_a_sign_in_from_before_scopes_were_recorded_may_do_neither(self):
         # Unknown has to mean no: offering a button that 403s is worse than
         # not offering it, and the window says which sign-in would fix it.
         for account in ({}, None, {"scopes": ""}):
             self.assertFalse(teams.has_channels(account))
             self.assertFalse(teams.can_mark_read(account))
+            self.assertFalse(teams.can_set_presence(account))
 
     def test_the_asked_for_scopes_differ_only_by_the_channel_ones(self):
         chats = set(teams.SCOPES_CHATS.split())
@@ -341,6 +368,138 @@ class MarkRead(unittest.TestCase):
         result = self.run_mark("Chat.ReadWrite",
                                responses=[(403, {"error": {"message": "Missing scope"}})])
         self.assertEqual(result["error"]["code"], "mark_read_permission_required")
+
+
+class SettingYourPresence(unittest.TestCase):
+    """The status menu, written through Graph."""
+
+    def run_presence(self, command=None, scopes="Chat.ReadWrite Presence.ReadWrite",
+                     responses=None, **kwargs):
+        self.calls = []
+        queue = list(responses or [(200, {})])
+
+        def http(url, method="GET", data=None, json_body=None, headers=None, timeout=20):
+            self.calls.append({"url": url, "method": method, "body": json_body})
+            return queue.pop(0) if queue else (200, {})
+
+        token = "h." + base64.urlsafe_b64encode(
+            json.dumps({"oid": "user-1", "tid": "tenant-1"}).encode()).decode().rstrip("=") + ".s"
+
+        args = Args()
+        args.state = "dnd"
+        args.duration = ""
+        for name, value in kwargs.items():
+            setattr(args, name, value)
+        patched = {
+            "read_json": lambda *a, **k: {"scopes": scopes, "client_id": "app-1"},
+            "access_token": lambda alias, account: (token, account),
+            "http": http,
+        }
+        original = {name: getattr(teams, name) for name in patched}
+        for name, stub in patched.items():
+            setattr(teams, name, stub)
+        try:
+            return capture(command or teams.cmd_presence, args)
+        finally:
+            for name, value in original.items():
+                setattr(teams, name, value)
+
+    def test_a_preferred_presence_is_posted_for_the_signed_in_user(self):
+        result = self.run_presence()
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.calls[0]["url"],
+                         teams.GRAPH + "/users/user-1/presence/setUserPreferredPresence")
+        self.assertEqual(self.calls[0]["body"],
+                         {"availability": "DoNotDisturb", "activity": "DoNotDisturb"})
+
+    def test_auto_clears_it_rather_than_setting_a_state(self):
+        result = self.run_presence(state="auto")
+        self.assertEqual(result["state"], "auto")
+        self.assertTrue(self.calls[0]["url"].endswith("/clearUserPreferredPresence"))
+        self.assertEqual(self.calls[0]["body"], {})
+
+    def test_an_expiry_is_passed_on_only_when_one_was_asked_for(self):
+        self.run_presence(duration="PT8H")
+        self.assertEqual(self.calls[0]["body"].get("expirationDuration"), "PT8H")
+        self.run_presence()
+        self.assertNotIn("expirationDuration", self.calls[0]["body"])
+
+    def test_a_state_graph_would_refuse_is_refused_here_first(self):
+        # Graph takes six availability/activity pairs and nothing else, so a
+        # state that is not one of them costs no round trip to find out about.
+        result = self.run_presence(state="lunch")
+        self.assertEqual(result["error"]["code"], "bad_presence")
+        self.assertEqual(self.calls, [])
+
+    def test_without_the_write_scope_nothing_is_attempted(self):
+        result = self.run_presence(scopes="Chat.ReadWrite Presence.Read.All")
+        self.assertEqual(result["error"]["code"], "presence_permission_required")
+        self.assertEqual(self.calls, [], "a request was made that was known to be refused")
+
+    def test_a_403_says_the_permission_rather_than_the_failure(self):
+        result = self.run_presence(responses=[(403, {"error": {"message": "Missing scope"}})])
+        self.assertEqual(result["error"]["code"], "presence_permission_required")
+
+    def test_every_pair_offered_is_one_graph_takes(self):
+        # The picker's rows and the sender's table are the same list, so a row
+        # that would fail cannot be offered.
+        states = capture(teams.cmd_presence_states, Args())["states"]
+        self.assertEqual([row["state"] for row in states],
+                         ["available", "busy", "dnd", "brb", "away", "offline"])
+        for row in states:
+            self.assertEqual(teams.preferred_pair(row["state"]),
+                             (row["availability"], row["activity"]))
+            self.assertIn(row["dot"], ("available", "busy", "away", "offline"))
+        # Appear offline is the one pair whose two halves differ, and getting
+        # it wrong is a 400 rather than a silent no-op.
+        offline = [row for row in states if row["state"] == "offline"][0]
+        self.assertEqual((offline["availability"], offline["activity"]), ("Offline", "OffWork"))
+
+
+class HoldingAPresenceSession(unittest.TestCase):
+    """The session that makes a preferred presence visible at all."""
+
+    def run_hold(self, **kwargs):
+        helper = SettingYourPresence()
+        kwargs.setdefault("state", "available")
+        kwargs.setdefault("duration", "PT1H")
+        result = helper.run_presence(command=teams.cmd_hold_presence, **kwargs)
+        self.calls = helper.calls
+        return result
+
+    def test_the_session_is_named_after_the_application(self):
+        # Graph's own requirement: "Provide the ID of the application as
+        # sessionId". Anything else opens a session nothing can renew.
+        result = self.run_hold()
+        self.assertTrue(result["ok"])
+        self.assertTrue(self.calls[0]["url"].endswith("/presence/setPresence"))
+        self.assertEqual(self.calls[0]["body"], {
+            "sessionId": "app-1", "availability": "Available",
+            "activity": "Available", "expirationDuration": "PT1H",
+        })
+
+    def test_away_is_the_other_thing_a_desktop_can_honestly_say(self):
+        self.run_hold(state="away")
+        self.assertEqual(self.calls[0]["body"]["availability"], "Away")
+
+    def test_it_will_not_claim_to_be_in_a_call(self):
+        # setPresence takes Busy only as InACall or InAConferenceCall, and the
+        # plugin knows about neither.
+        result = self.run_hold(state="busy")
+        self.assertEqual(result["error"]["code"], "bad_presence")
+        self.assertEqual(self.calls, [])
+
+    def test_letting_go_clears_the_session_by_id(self):
+        result = self.run_hold(state="none")
+        self.assertTrue(result["ok"])
+        self.assertTrue(self.calls[0]["url"].endswith("/presence/clearPresence"))
+        self.assertEqual(self.calls[0]["body"], {"sessionId": "app-1"})
+
+    def test_letting_go_of_a_session_that_already_expired_is_not_a_failure(self):
+        # Graph answers 404, and that is the state being asked for.
+        result = self.run_hold(state="none", responses=[(404, {})])
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["alreadyGone"])
 
 
 class PendingSignIn(unittest.TestCase):

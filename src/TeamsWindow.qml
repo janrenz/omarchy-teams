@@ -142,6 +142,31 @@ Item {
   property string focusPane: "list"
   property bool showHelp: false
 
+  // The status menu, open only while somebody is choosing. Not a pane in the
+  // focus ladder: it is over the window, takes the digits while it is up, and
+  // Escape closes it before anything else.
+  property bool pickingPresence: false
+
+  function togglePresencePicker() {
+    if (!service.canSetPresence) return
+    // Asked for lazily as well as at start-up: the window may have been built
+    // before the account was configured, and a picker with no rows in it is
+    // not worth opening.
+    service.loadPresenceChoices()
+    pickingPresence = !pickingPresence
+  }
+
+  // The nth row, by number, for the same reason the reactions are numbered:
+  // six states arrowed through is slower than six states typed. Row 0 is
+  // Automatic, which is Teams' own "Reset status".
+  function presenceAt(index) {
+    if (index === 0) { pickingPresence = false; service.setPresence("auto"); return }
+    var choices = service.presenceChoices
+    if (index < 1 || index > choices.length) return
+    pickingPresence = false
+    service.setPresence(String(choices[index - 1].state || ""))
+  }
+
   readonly property bool typing: composer.activeFocus
 
   // The list that is actually on screen: narrow, that is the drawer's copy.
@@ -421,6 +446,7 @@ Item {
     // Outermost layer on screen, so the first thing Escape takes back.
     if (viewingImage) { closeImage(); return }
     if (showHelp) { showHelp = false; return }
+    if (pickingPresence) { pickingPresence = false; return }
     if (composingNew) { closeNewChat(); return }
     if (showSettings) { showSettings = false; return }
     if (pickingMessageId !== "") { pickingMessageId = ""; return }
@@ -720,6 +746,174 @@ Item {
             fg: Color.foreground
             fontFamily: Style.font.family
             agentHandover: service.agentHandover
+            canSetPresence: service.canSetPresence
+          }
+        }
+      }
+
+      // Your own presence, as Teams' own status menu: pick one and it holds
+      // until it is handed back. Dropped from the top right rather than
+      // centred like the other overlays, because it belongs to the chip in the
+      // header that opens it.
+      Item {
+        id: presenceMenu
+        anchors.fill: parent
+        visible: root.pickingPresence
+        z: 95
+
+        // Automatic leads, because handing presence back to Teams is the state
+        // everything else is a departure from - and it is the row somebody who
+        // set Do not disturb this morning is looking for.
+        readonly property var rows: [{
+          state: "auto", label: "Automatic", dot: "", availability: "",
+          hint: "however Teams sees you"
+        }].concat(service.presenceChoices)
+
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.6)
+
+          MouseArea { anchors.fill: parent; onClicked: root.pickingPresence = false }
+        }
+
+        Rectangle {
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.topMargin: root.padPanel
+          anchors.rightMargin: root.padPanel
+          width: Math.min(Style.space(300), presenceMenu.width - root.padPanel * 2)
+          height: menuColumn.implicitHeight + Style.spacing.md * 2
+          radius: Style.cornerRadius
+          color: Color.background
+          border.width: Style.space(1)
+          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+
+          // Swallows the clicks that would otherwise reach the scrim and shut
+          // the menu on the way to a row.
+          MouseArea { anchors.fill: parent }
+
+          Column {
+            id: menuColumn
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.spacing.md
+            spacing: Style.spacing.xs
+
+            Text {
+              width: parent.width
+              text: "Your presence"
+              textFormat: Text.PlainText
+              color: Color.foreground
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+              font.bold: true
+            }
+
+            Text {
+              width: parent.width
+              visible: service.presenceError !== ""
+              text: service.presenceError
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              color: Color.urgent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
+
+            Repeater {
+              model: presenceMenu.rows
+
+              delegate: Rectangle {
+                required property var modelData
+                required property int index
+
+                // Whichever row is what Graph reports right now. Compared on
+                // the availability rather than the dot, so Busy and Do not
+                // disturb - one colour, two states - are not both ticked. It
+                // says what is true now, not what was chosen: Graph will read
+                // back a preferred presence but not tell anyone it is one.
+                readonly property bool current: service.myPresence
+                  && String(modelData.availability || "") !== ""
+                  && String(service.myPresence.availability || "") === String(modelData.availability)
+
+                width: parent ? parent.width : 0
+                implicitHeight: rowText.implicitHeight + Style.spacing.sm * 2
+                radius: Style.space(5)
+                color: hover.containsMouse
+                  ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.1)
+                  : "transparent"
+
+                Text {
+                  id: numberText
+                  anchors.left: parent.left
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(14)
+                  text: String(parent.index)
+                  textFormat: Text.PlainText
+                  horizontalAlignment: Text.AlignRight
+                  color: Color.accent
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                // The same four circles the sidebar draws, and the same way
+                // round: filled for available and busy, a ring for away, dim
+                // for offline. A reader should not have to learn them twice.
+                Rectangle {
+                  id: dot
+                  anchors.left: numberText.right
+                  anchors.leftMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  width: Style.space(9)
+                  height: width
+                  radius: width / 2
+                  visible: Model.presenceColor(modelData.dot, service.themeColors) !== ""
+                  color: String(modelData.dot) === "away"
+                         ? "transparent"
+                         : Model.presenceColor(modelData.dot, service.themeColors)
+                  opacity: String(modelData.dot) === "offline" ? 0.75 : 1.0
+                  border.width: String(modelData.dot) === "away" ? Style.space(2) : 0
+                  border.color: Model.presenceColor(modelData.dot, service.themeColors)
+                }
+
+                Text {
+                  id: rowText
+                  anchors.left: numberText.right
+                  anchors.leftMargin: Style.spacing.sm + Style.space(9) + Style.spacing.sm
+                  anchors.right: parent.right
+                  anchors.rightMargin: Style.spacing.sm
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: String(modelData.label || "")
+                        + (modelData.hint ? "  ·  " + modelData.hint : "")
+                        + (parent.current ? "  ·  now" : "")
+                  textFormat: Text.PlainText
+                  elide: Text.ElideRight
+                  color: parent.current ? Color.accent : Color.foreground
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                MouseArea {
+                  id: hover
+                  anchors.fill: parent
+                  hoverEnabled: true
+                  cursorShape: Qt.PointingHandCursor
+                  enabled: !service.settingPresence
+                  onClicked: root.presenceAt(parent.index)
+                }
+              }
+            }
+
+            Text {
+              width: parent.width
+              text: service.settingPresence ? "Setting…" : "A number picks one.  Esc closes this"
+              textFormat: Text.PlainText
+              color: Qt.darker(Color.foreground, 1.8)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
           }
         }
       }
@@ -929,6 +1123,13 @@ Item {
             else if (text === "o") imageLayer.item.openExternally()
             return
           }
+          // The status menu is over the window, so it takes the digits while
+          // it is up - the same rule the reaction picker follows below.
+          if (root.pickingPresence) {
+            if (text >= "0" && text <= "9") root.presenceAt(Number(text))
+            else if (text === "p") root.pickingPresence = false
+            return
+          }
           // While the picker is open the digits are the choices, and nothing
           // else should be acting on the conversation behind it.
           if (root.pickingMessageId !== "") {
@@ -946,6 +1147,7 @@ Item {
           // Where the hands already are, for the box you type in.
           else if (text === "i") root.focusComposer()
           else if (text === "n" && service.canStartChat) root.openNewChat()
+          else if (text === "p") root.togglePresencePicker()
           else if (text === "g") root.scrollToEnd(view, false)
           else if (text === "G") root.scrollToEnd(view, true)
         }
@@ -1053,6 +1255,65 @@ Item {
                   color: Qt.darker(Color.foreground, 1.5)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
+                }
+
+                // Your own presence, and the handle the status menu drops
+                // from. Only where it can be acted on: a dot that says how
+                // you look to other people, on a sign-in that cannot change
+                // it, is a fact with nothing to do about it.
+                // A backing item rather than a bare Row: the click target is
+                // the dot and the word together, and a MouseArea cannot be
+                // anchored inside a Row without Qt refusing the anchors.
+                Item {
+                  id: presenceChip
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: service.signedIn && service.canSetPresence && !root.showSettings
+                  implicitWidth: chipRow.implicitWidth
+                  implicitHeight: chipRow.implicitHeight
+
+                  Row {
+                  id: chipRow
+                  spacing: Style.spacing.xs
+
+                  Rectangle {
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Style.space(9)
+                    height: width
+                    radius: width / 2
+                    readonly property string state: service.myPresence
+                      ? String(service.myPresence.state || "") : ""
+                    // Nothing at all until a fetch has answered. An empty dot
+                    // would read as offline, which is a different thing from
+                    // not having asked yet.
+                    visible: Model.presenceColor(state, service.themeColors) !== ""
+                    color: state === "away"
+                           ? "transparent" : Model.presenceColor(state, service.themeColors)
+                    opacity: state === "offline" ? 0.75 : 1.0
+                    border.width: state === "away" ? Style.space(2) : 0
+                    border.color: Model.presenceColor(state, service.themeColors)
+                  }
+
+                  Text {
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: service.settingPresence
+                      ? "setting…"
+                      : (service.myPresence
+                         ? Model.presenceLabel(service.myPresence.state,
+                                               service.myPresence.activity).toLowerCase()
+                         : "presence")
+                    textFormat: Text.PlainText
+                    color: Qt.darker(Color.foreground, 1.5)
+                    font.family: Style.font.family
+                    font.pixelSize: Style.font.caption
+                  }
+                  }
+
+                  MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.togglePresencePicker()
+                  }
                 }
               }
             }

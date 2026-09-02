@@ -276,6 +276,7 @@ class MessageQuotes(unittest.TestCase):
         # The reply is still just the reply: the placeholder strips as before.
         self.assertEqual(row["text"], "Already on it")
         self.assertEqual(row["quotes"], [{"id": "1788346025582", "from": "Jan Renz",
+                                          "fromId": "8d6ba48e",
                                           "text": "the thing being answered",
                                           "when": "", "forwarded": False}])
 
@@ -329,6 +330,93 @@ class MessageQuotes(unittest.TestCase):
     def test_no_more_than_the_cap(self):
         many = [self.reply("q%d" % i) for i in range(teams.QUOTE_CAP + 3)]
         self.assertEqual(len(teams.message_quotes({"attachments": many})), teams.QUOTE_CAP)
+
+
+class NamelessSenders(unittest.TestCase):
+    """Graph naming somebody with an id and no display name.
+
+    Seen on a real forwarded message: `displayName: null` on the message's own
+    sender and on the reference inside it at the same time, so the message was
+    drawn with no author and the forward it carried with no source.
+    """
+
+    def setUp(self):
+        self.asked = []
+
+        def fake_get(token, path, params=None, extra_headers=None):
+            self.asked.append((path, dict(params or {})))
+            return 200, {"value": [
+                {"id": "fe93dd81", "displayName": "Yahya Narvil"},
+                {"id": "0de1edf6", "displayName": "Prof. Dr. Mike Friedrichsen"},
+            ]}
+
+        self.real_get = teams.graph_get
+        teams.graph_get = fake_get
+
+    def tearDown(self):
+        teams.graph_get = self.real_get
+
+    def nameless(self, **extra):
+        row = {"id": "1", "from": "", "fromId": "fe93dd81", "system": False, "quotes": []}
+        row.update(extra)
+        return row
+
+    def test_a_sender_with_only_an_id_gets_a_name(self):
+        rows = teams.name_the_nameless("tok", [self.nameless()])
+        self.assertEqual(rows[0]["from"], "Yahya Narvil")
+
+    def test_a_quote_with_only_an_id_gets_one_too(self):
+        rows = teams.name_the_nameless("tok", [self.nameless(
+            **{"from": "Yahya Narvil", "quotes": [{"from": "", "fromId": "0de1edf6"}]})])
+        self.assertEqual(rows[0]["quotes"][0]["from"], "Prof. Dr. Mike Friedrichsen")
+
+    def test_a_conversation_where_everybody_was_named_asks_nothing(self):
+        # The point of the whole thing: no request unless a name is missing.
+        rows = teams.name_the_nameless("tok", [
+            {"id": "1", "from": "Jan Renz", "fromId": "8d6ba48e", "system": False,
+             "quotes": [{"from": "Priya", "fromId": "p"}]}])
+        self.assertEqual(self.asked, [])
+        self.assertEqual(rows[0]["from"], "Jan Renz")
+
+    def test_one_request_covers_every_missing_name(self):
+        teams.name_the_nameless("tok", [
+            self.nameless(),
+            self.nameless(**{"fromId": "0de1edf6"}),
+            self.nameless(**{"quotes": [{"from": "", "fromId": "fe93dd81"}]}),
+        ])
+        self.assertEqual(len(self.asked), 1)
+        # And each id asked for once, however many rows wanted it.
+        self.assertEqual(self.asked[0][1]["$filter"].count("'fe93dd81'"), 1)
+
+    def test_a_system_message_is_left_without_one(self):
+        # "X added Y to the chat" has no sender by nature; there is nothing to
+        # look up and a name on it would read as somebody having said it.
+        rows = teams.name_the_nameless("tok", [self.nameless(**{"system": True})])
+        self.assertEqual(self.asked, [])
+        self.assertEqual(rows[0]["from"], "")
+
+    def test_an_id_the_directory_does_not_know_stays_nameless(self):
+        teams.graph_get = lambda *a, **k: (200, {"value": []})
+        rows = teams.name_the_nameless("tok", [self.nameless()])
+        self.assertEqual(rows[0]["from"], "")
+
+    def test_a_refusal_costs_the_transcript_nothing(self):
+        # A tenant that will not answer this is not a reason to lose the
+        # messages: they keep the empty name they already had.
+        teams.graph_get = lambda *a, **k: (403, {"error": {"message": "no"}})
+        rows = teams.name_the_nameless("tok", [self.nameless(**{"text": "still here"})])
+        self.assertEqual(rows[0]["from"], "")
+        self.assertEqual(rows[0]["text"], "still here")
+
+    def test_a_quote_in_a_filter_cannot_break_out_of_it(self):
+        # The ids come out of a message, so the OData literal is escaped even
+        # though a real user id is a GUID.
+        teams.fetch_display_names("tok", ["a'b"])
+        self.assertIn("'a''b'", self.asked[0][1]["$filter"])
+
+    def test_no_more_ids_than_the_cap(self):
+        teams.fetch_display_names("tok", ["id%d" % i for i in range(teams.NAME_LOOKUP_CAP + 9)])
+        self.assertEqual(self.asked[0][1]["$filter"].count(","), teams.NAME_LOOKUP_CAP - 1)
 
 
 class MessageImages(unittest.TestCase):

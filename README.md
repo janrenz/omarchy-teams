@@ -261,8 +261,14 @@ either of them — the quote is already in the message that was fetched.
 
 The text is cut to 400 characters. A quote is context for the reply, and past a
 few lines it stops being context and becomes something to scroll past to reach
-what was actually said. Graph returns a null display name often enough to matter,
-and an unnamed quote still shows its text rather than an empty line.
+what was actually said.
+
+Graph will also name somebody with an id and no display name at all — seen on a
+forwarded message and on the forward inside it at the same time, so the message
+had no author and the forward no source. Those ids are looked up in the
+directory, all of them in one request and only ever when a name is actually
+missing: a conversation where everybody was named costs nothing extra. An id the
+directory will not resolve leaves the name out rather than the message.
 
 ## Sending a file
 
@@ -393,6 +399,17 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.4.7 — 2026-09-02
+
+- **A message whose sender Graph would not name had no author.** It returns
+  `displayName: null` and gives the id on its own — on a real forwarded message
+  it did it twice at once, so the message showed with no author and the forward
+  it carried with no source, which is how "I got this from mike" ended up
+  attributed to nobody. The unnamed ids are resolved against the directory now:
+  one request for all of them, and none at all when every sender was named, so
+  the ordinary conversation costs nothing. A tenant that refuses the lookup, or
+  an id it does not know, leaves the name out rather than the message.
 
 ### 0.4.6 — 2026-09-02
 

@@ -841,6 +841,9 @@ def message_quotes(message):
         rows.append({
             "id": str(content.get("originalMessageId") or content.get("messageId") or ""),
             "from": who,
+            # Kept even when the name is there, so one code path fills both -
+            # see name_the_nameless, which is the only reason this is here.
+            "fromId": str(((sender.get("user") or {}).get("id") or "")),
             "text": text[:QUOTE_CHARS],
             "when": when,
             "forwarded": forwarded,
@@ -1097,10 +1100,81 @@ def cmd_messages(args):
         fail("messages_failed", graph_error(payload, "Could not read this conversation"))
 
     me_id = token_claims(token).get("oid") or account.get("userId") or ""
-    rows = [message_row(message, me_id) for message in payload.get("value", [])]
+    rows = name_the_nameless(token, [message_row(message, me_id)
+                                     for message in payload.get("value", [])])
     # Graph returns newest first; a transcript reads the other way.
     rows.reverse()
     out({"ok": True, "messages": rows})
+
+
+# Graph will hand back `displayName: null` for a sender and give only the id -
+# seen on a forwarded message and on the reference inside it, both at once, so
+# the message was drawn with no author and the forward it carried with no
+# source. The id is the only thing left to go on, and the directory will turn
+# ids into names.
+#
+# Only ever for the ids that came back nameless: a conversation where everybody
+# was named costs nothing, which is the point. One request for the lot when
+# some were not, the way presence does it.
+NAME_LOOKUP_CAP = 20
+
+
+def fetch_display_names(token, user_ids):
+    """Display names for a batch of user ids, as {id: name}.
+
+    Best effort. A tenant that will not answer this is no reason to lose a
+    transcript over, so a refusal is an empty answer and the rows keep the
+    empty name they already had.
+    """
+    ids = [uid for uid in dict.fromkeys(user_ids) if uid][:NAME_LOOKUP_CAP]
+    if not ids:
+        return {}
+    # OData string literals escape a quote by doubling it. A user id is a GUID
+    # and will not contain one, but this is building a filter out of values
+    # that arrived in a message, and that is reason enough not to trust them.
+    listed = ",".join("'" + uid.replace("'", "''") + "'" for uid in ids)
+    status, payload = graph_get(token, "/users", {
+        "$filter": "id in (%s)" % listed,
+        "$select": "id,displayName",
+    })
+    if status != 200:
+        return {}
+    found = {}
+    for row in payload.get("value") or []:
+        name = str(row.get("displayName") or "").strip()
+        if name:
+            found[str(row.get("id") or "")] = name
+    return found
+
+
+def name_the_nameless(token, rows):
+    """Fill in the senders Graph left unnamed, in the messages and their quotes.
+
+    In place, and returning the same list: the transcript is already built by
+    the time this runs, and this is a repair rather than a step in building it.
+    """
+    wanted = []
+    for row in rows:
+        # A system message ("X added Y to the chat") has no sender by nature,
+        # and looking one up would find nothing to look up.
+        if not row.get("system") and not row.get("from") and row.get("fromId"):
+            wanted.append(row["fromId"])
+        for quote in row.get("quotes") or []:
+            if not quote.get("from") and quote.get("fromId"):
+                wanted.append(quote["fromId"])
+    if not wanted:
+        return rows
+
+    names = fetch_display_names(token, wanted)
+    if not names:
+        return rows
+    for row in rows:
+        if not row.get("system") and not row.get("from"):
+            row["from"] = names.get(row.get("fromId") or "", "")
+        for quote in row.get("quotes") or []:
+            if not quote.get("from"):
+                quote["from"] = names.get(quote.get("fromId") or "", "")
+    return rows
 
 
 def fetch_bytes(url, token, limit=IMAGE_CAP):
@@ -2138,6 +2212,7 @@ def demo_messages(target):
             # And one quotes the line before it, so the quote block has
             # something to draw without anybody having to reply to anything.
             "quotes": ([{"id": "d%d" % index, "from": turns[index - 1][0],
+                         "fromId": turns[index - 1][1],
                          "text": plain_text(turns[index - 1][3]),
                          "when": "", "forwarded": False}]
                        if index == len(turns) - 1 and index > 0 else []),

@@ -374,6 +374,21 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.4.2 — 2026-09-02
+
+- **A file in a conversation is now something you can see.** Teams puts nothing
+  in the body of a message that carries a file — an `<attachment>` tag, which
+  strips to nothing, with the file itself in a field this plugin only ever
+  wrote and never read back. So a file sent with no comment arrived as a
+  message with nothing in it at all, from either side: sending one worked
+  perfectly and looked exactly like it had not. Files now draw as their name,
+  linked, and open where anything else opens.
+- **A chat whose newest message is a file no longer reads as an empty chat.**
+  Graph strips the tag out of the preview it hands back with a chat and puts
+  nothing in its place, so the sidebar line was blank. It says "a file or a
+  picture" instead, which is as much as can be told without one request per
+  chat — and more than a blank line was telling anybody.
+
 ### 0.4.1 — 2026-09-02
 
 - **Opening the window finds the one you already have.** Asking for the window

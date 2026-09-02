@@ -1828,6 +1828,39 @@ Item {
                               }
                             }
 
+                            // A file somebody sent, as the one thing there is
+                            // to do with it: its name, and a way to open it.
+                            // The body a file arrives in is an <attachment>
+                            // tag and nothing else, so before this a file was
+                            // a message with nothing in it whatsoever - which
+                            // is what sending one from this window looked
+                            // like, however well it had gone.
+                            Repeater {
+                              model: modelData.attachments || []
+
+                              delegate: Text {
+                                required property var modelData
+                                width: parent.width
+                                textFormat: Text.RichText
+                                wrapMode: Text.Wrap
+                                // Built here rather than sent as markup: the
+                                // name is somebody else's text and Model.anchor
+                                // escapes it, so a file cannot name itself into
+                                // a tag.
+                                text: Model.anchor(String(modelData.url || ""),
+                                                   String(modelData.name || "a file"), "")
+                                linkColor: service.themeColors.blue
+                                           || service.themeColors.accent || Color.accent
+                                font.family: Style.font.family
+                                font.pixelSize: Style.font.body
+                                onLinkActivated: function(url) { service.openUrl(url) }
+                                HoverHandler {
+                                  enabled: parent.hoveredLink !== ""
+                                  cursorShape: Qt.PointingHandCursor
+                                }
+                              }
+                            }
+
                             Repeater {
                               model: modelData.images || []
 

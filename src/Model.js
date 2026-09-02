@@ -410,6 +410,7 @@ function groupMessages(messages, meId) {
     if (last && !message.system && !last.system && String(last.fromId) === String(message.fromId || "")) {
       last.lines.push({ id: message.id, text: message.text, when: message.when,
                         edited: message.edited === true, images: message.images || [],
+                        attachments: message.attachments || [],
                         links: message.links || [],
                         reactions: message.reactions || [] })
       last.when = message.when
@@ -424,6 +425,7 @@ function groupMessages(messages, meId) {
       when: message.when,
       lines: [{ id: message.id, text: message.text, when: message.when,
                 edited: message.edited === true, images: message.images || [],
+                attachments: message.attachments || [],
                 links: message.links || [],
                 reactions: message.reactions || [] }]
     })

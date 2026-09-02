@@ -265,6 +265,22 @@ test("consecutive messages from one person are one block", () => {
   eq(groups[1].mine, true)
 })
 
+test("a file on a message survives being grouped", () => {
+  // The line is what the transcript draws, and a message that is only a file
+  // has nothing but this to draw.
+  const file = { id: "a", name: "memo.pdf", url: "https://x.y/memo.pdf" }
+  const groups = Model.groupMessages(
+    [
+      { id: "1", from: "Jan", fromId: "me", text: "", attachments: [file] },
+      { id: "2", from: "Jan", fromId: "me", text: "and this" },
+    ],
+    "me"
+  )
+  eq(groups[0].lines[0].attachments.length, 1)
+  eq(groups[0].lines[0].attachments[0].name, "memo.pdf")
+  eq(groups[0].lines[1].attachments.length, 0)
+})
+
 test("a block knows which of them is yours", () => {
   const groups = Model.groupMessages([{ id: "1", from: "Jan", fromId: "me", text: "x" }], "me")
   eq(groups[0].mine, true)

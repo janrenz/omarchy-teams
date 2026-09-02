@@ -174,6 +174,73 @@ class MessageLinks(unittest.TestCase):
         self.assertEqual(row["links"], [{"href": "https://x.y", "start": 4, "end": 8}])
 
 
+class MessageAttachments(unittest.TestCase):
+    """A file on a message, which is the whole message when nothing was typed."""
+
+    FILE = {"id": "e545b93a", "contentType": "reference", "name": "memo.pdf",
+            "contentUrl": "https://buds365-my.sharepoint.com/personal/x/memo.pdf"}
+
+    def test_a_sent_file_is_the_only_thing_the_message_says(self):
+        # The shape Teams posts and this helper writes: an <attachment> tag,
+        # which strips to nothing, and the file itself alongside it.
+        row = teams.message_row({
+            "id": "1", "createdDateTime": "2026-09-02T09:31:48Z",
+            "from": {"user": {"id": "u", "displayName": "Jan"}},
+            "body": {"content": '<attachment id="e545b93a"></attachment>'},
+            "attachments": [self.FILE],
+        })
+        self.assertEqual(row["text"], "")
+        self.assertEqual(row["attachments"],
+                         [{"id": "e545b93a", "name": "memo.pdf", "url": self.FILE["contentUrl"]}])
+
+    def test_a_comment_sent_with_a_file_keeps_both(self):
+        row = teams.message_row({
+            "id": "1",
+            "body": {"content": 'here<br><attachment id="e545b93a"></attachment>'},
+            "attachments": [self.FILE],
+        })
+        self.assertEqual(row["text"], "here")
+        self.assertEqual(len(row["attachments"]), 1)
+
+    def test_an_attachment_with_nowhere_to_go_is_dropped(self):
+        # A card is an attachment too, and has no file behind it. So is a
+        # quoted reply. Neither is something this window can open.
+        for attachment in ({"contentType": "application/vnd.microsoft.card.adaptive",
+                            "content": "{}"},
+                           {"contentType": "messageReference", "contentUrl": None},
+                           {"contentUrl": "file:///etc/passwd"},
+                           {"contentUrl": "javascript:alert(1)"}):
+            self.assertEqual(teams.message_attachments({"attachments": [attachment]}), [])
+
+    def test_a_file_with_no_name_is_still_openable(self):
+        rows = teams.message_attachments(
+            {"attachments": [{"contentUrl": "https://x.y/z"}]})
+        self.assertEqual(rows[0]["name"], "a file")
+
+    def test_no_more_than_the_cap(self):
+        many = [{"contentUrl": "https://x.y/%d" % i} for i in range(teams.ATTACHMENT_CAP + 5)]
+        self.assertEqual(len(teams.message_attachments({"attachments": many})),
+                         teams.ATTACHMENT_CAP)
+
+    def test_a_chat_whose_last_message_is_a_file_does_not_preview_as_empty(self):
+        # Graph hands back an empty body for one, and no attachments with it.
+        self.assertEqual(teams.preview_text({"createdDateTime": "2026-09-02T09:31:48Z",
+                                             "body": {"content": ""}}), "a file or a picture")
+        self.assertEqual(teams.preview_text({"body": {"content": "<p>said something</p>"}}),
+                         "said something")
+
+    def test_an_empty_preview_that_is_not_a_message_says_nothing(self):
+        # "X added Y to the chat" is an event, and a deleted message is a
+        # deletion. Both are empty, and neither is a file.
+        when = "2026-09-02T09:31:48Z"
+        self.assertEqual(teams.preview_text({"createdDateTime": when,
+                                             "messageType": "systemEventMessage"}), "")
+        self.assertEqual(teams.preview_text({"createdDateTime": when, "isDeleted": True}), "")
+        # And a chat nobody has said anything in has no preview at all.
+        self.assertEqual(teams.preview_text(None), "")
+        self.assertEqual(teams.preview_text({}), "")
+
+
 class MessageImages(unittest.TestCase):
     """Which pictures in a message are ours to fetch."""
 

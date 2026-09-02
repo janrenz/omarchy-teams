@@ -671,6 +671,65 @@ def chat_title(chat, me_id):
     return "%s and %d others" % (", ".join(names[:3]), len(names) - 3)
 
 
+# A message that carries a file says nothing at all in its body: Teams puts an
+# <attachment> tag there and the file itself in `attachments`, so a file sent
+# with no comment arrived here as a message with no text - which is what a file
+# sent from this window looked like. Nothing had gone wrong; there was just
+# nothing drawn.
+ATTACHMENT_CAP = 10
+
+
+def message_attachments(message):
+    """The files on a message: what to call each one, and where it is.
+
+    Not the inline images - those arrive as hostedContents and message_images
+    draws them where they were written. What is left is Teams' reference
+    attachment, a file in somebody's OneDrive with a link to it, and cards,
+    which have no file behind them and nothing this window could do with one.
+    Having somewhere to go is what separates the two, so that is the test.
+    """
+    rows = []
+    for attachment in (message.get("attachments") or []):
+        url = str(attachment.get("contentUrl") or "").strip()
+        if not url.lower().startswith(("http://", "https://")):
+            continue
+        rows.append({
+            "id": str(attachment.get("id") or ""),
+            "name": str(attachment.get("name") or "").strip() or "a file",
+            "url": url,
+        })
+        if len(rows) >= ATTACHMENT_CAP:
+            break
+    return rows
+
+
+def preview_text(preview):
+    """One line of a conversation for the sidebar, after the sender's name.
+
+    A message that is only a file came out blank here, and a chat whose newest
+    message is a file read as a chat with nothing in it. Graph does not merely
+    leave the <attachment> tag in the preview for this to strip - it hands back
+    an empty body and no attachments at all, so what the file was called cannot
+    be known from here without a request per chat, and there are forty chats.
+    Something in the sender's own voice is worth more than a blank line.
+
+    Only for a message somebody sent, though: "X added Y to the chat" is an
+    event and a deleted one is a deletion, and both are empty for their own
+    reasons.
+    """
+    row = preview or {}
+    text = plain_text((row.get("body") or {}).get("content"))[:160]
+    if text:
+        return text
+    # A chat nobody has said anything in yet has no preview, rather than an
+    # empty one, and has never had a file in it either.
+    if not str(row.get("createdDateTime") or ""):
+        return ""
+    if row.get("isDeleted") or str(row.get("messageType") or "message") != "message":
+        return ""
+    return "a file or a picture"
+
+
 def message_row(message, me_id=""):
     sender = ((message.get("from") or {}).get("user") or {})
     body = (message.get("body") or {})
@@ -687,6 +746,7 @@ def message_row(message, me_id=""):
         "links": links,
         "edited": bool(message.get("lastEditedDateTime")),
         "images": message_images(body.get("content")),
+        "attachments": message_attachments(message),
         "reactions": reaction_summary(message, me_id),
         # A system message ("X added Y to the chat") has no sender and reads
         # oddly in a list of things people said.
@@ -719,7 +779,7 @@ def chat_rows(token, me_id, top):
             "title": chat_title(chat, me_id),
             "chatType": chat.get("chatType", "oneOnOne"),
             "lastFrom": (((preview.get("from") or {}).get("user") or {}).get("displayName") or ""),
-            "lastText": plain_text((preview.get("body") or {}).get("content"))[:160],
+            "lastText": preview_text(preview),
             "when": last_when,
             # No read timestamp at all means never opened, which is unread.
             "unread": bool(last_when) and (not read_when or read_when < last_when),

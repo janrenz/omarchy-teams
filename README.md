@@ -3,7 +3,7 @@
 Teams chats and channels in the Omarchy bar, and in a window of their own.
 
 - **A bar icon** that tints when a chat is unread, with a tooltip naming the account and the count.
-- **A dropdown behind it**, and deliberately only two things: your presence, and what is unread. Those are the two questions a bar is asked — *how do I look to people* and *does anything need me* — and both are answered by picking from a short list, which is what a popup that closes on click-away can do. Reading a conversation and writing a reply is not, so a row here opens the window at that chat rather than being a smaller copy of it. Right-click the icon to skip the dropdown and go straight to the window.
+- **A dropdown behind it**, and deliberately only two things: your presence, and what is unread. Those are the two questions a bar is asked — *how do I look to people* and *does anything need me* — and both are answered by picking from a short list, which is what a popup that closes on click-away can do. Reading a conversation and writing a reply is not, so a row here opens the window at that chat rather than being a smaller copy of it. The one thing it does beyond answering those two is **mark every unread chat read** — `m`, asked twice — because that is the other way of being done with a list of what needs you. Right-click the icon to skip the dropdown and go straight to the window.
 - **A window** — a real Hyprland toplevel, tiled like anything else — with conversations on the left, the transcript on the right, and a box to answer in. Bound to `SUPER+G`, also on the Omarchy menu under *Teams*.
 - **Chats and channels.** One-to-one chats, group chats, and the channels of every team you have joined.
 - **Replying**, to a chat or a channel. `Shift+Enter` or `Ctrl+Enter` sends; plain `Enter` is a newline, because a chat box that sends on Enter posts half-written thoughts.
@@ -57,9 +57,15 @@ one rung at a time, and `j`/`k` always mean "down and up in whatever has
 focus".
 
 The dropdown behind the bar icon has its own handful, because it holds its own
-two things: `p` opens the presence picker (`0`–`6` pick, `Escape` goes back),
-`o` opens the window, `r` refreshes, `j`/`k` and `Enter` walk what is unread,
-and `Escape` closes it.
+few things: `p` opens the presence picker (`0`–`6` pick, `Escape` goes back),
+`m` marks every unread chat read, `o` opens the window, `r` refreshes, `j`/`k`
+and `Enter` walk what is unread, and `Escape` closes it.
+
+`m` asks twice. Graph has no route back to unread, so the first press says how
+many chats it is about and the second does it — `Escape`, or any other key,
+answers no. It is offered only when something is unread and the sign-in may
+mark chats read at all, and it is about chats alone: a channel has no unread
+mark to clear.
 
 ### Moving
 
@@ -399,6 +405,34 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.5.0 — 2026-09-02
+
+- **Mark every unread chat read, from the dropdown.** `m`, or the tick beside
+  the header's buttons. Being done with a list of what needs you is the other
+  half of the question the dropdown exists to answer, and until now the only
+  way to answer it was to open all of them.
+
+  It asks twice: Graph has no route back to unread, and in a popup whose every
+  other key is a single keystroke, one stray `m` would have cleared a mailbox.
+  The first press says how many chats it is about, the second does it, and
+  `Escape` — or any other key at all — answers no. `Escape` backs out of the
+  question before it backs out of the panel, the same order the presence picker
+  uses, and an armed question never survives the panel being closed and opened
+  again: coming back to one still holding a question is how the answer gets
+  given by accident.
+
+  Offered only when there is something to mark and the sign-in may mark it. A
+  mailbox signed in before `Chat.ReadWrite` was asked for cannot, and an offer
+  that would fail is worse than no offer. Chats only, because a channel has no
+  unread mark to clear — see the note about channel unread counts above.
+- **Marks are queued rather than dropped.** Graph wants a request per chat and
+  one `Process` cannot run two commands, so a second mark asked for while the
+  first was in flight used to be discarded silently — opening two unread chats
+  quickly read only one of them. They now go one at a time, the refresh that
+  has to follow is spent once at the end rather than after each, and a refusal
+  empties the queue instead of asking twenty more times to be told the same
+  thing.
 
 ### 0.4.7 — 2026-09-02
 

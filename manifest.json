@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.4.7",
+  "version": "0.5.0",
   "author": "Jan Renz",
   "license": "MIT",
   "description": "Teams chats and channels in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and an Azure app registration of yours - see the README. Talks to Microsoft Graph and nothing else.",

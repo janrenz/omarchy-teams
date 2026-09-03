@@ -23,7 +23,9 @@ src/BarWidget.qml       The bar icon, and the Loader that mounts BarPanel
                         the window.
 src/BarPanel.qml        The dropdown: your presence, and what is unread. Two
                         things on purpose - see its header for why the rest is
-                        not here.
+                        not here. Plus `m`, which marks all of them read and is
+                        the one thing here that cannot be undone, so it is
+                        armed by the first press and done by the second.
 src/PresenceDot.qml     The circle. Four states, one place they are drawn.
 src/PresenceChip.qml    The circle plus the word, and the click that opens the
                         picker. In the window's header and the dropdown's.

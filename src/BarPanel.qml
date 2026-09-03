@@ -47,6 +47,29 @@ Panel {
   readonly property bool picking: pickingPresence && !!service && service.canSetPresence
   property bool pickingPresence: false
 
+  // Whether there is anything to mark, and whether this sign-in may. A mailbox
+  // signed in before Chat.ReadWrite was asked for cannot - see can_mark_read
+  // in teams.py - and an offer that would fail is worse than no offer.
+  readonly property bool canMarkAll: !!service && service.canMarkRead
+                                     && service.unreadCount > 0
+
+  // "Mark all as read", asked for but not yet done.
+  //
+  // Graph has no route back to unread, so this is the one thing in the panel
+  // that cannot be undone - and in a popup whose other keys are one keystroke
+  // each, that is too easy to do by accident. So it is asked twice: the hint
+  // line says how many chats and what will happen, and `m` again does it.
+  // Anything else at all backs out, and Escape backs out of this before it
+  // backs out of the panel - the same order the presence picker uses.
+  property bool armingMarkAll: false
+
+  function markAll() {
+    if (!canMarkAll) { armingMarkAll = false; return }
+    if (!armingMarkAll) { armingMarkAll = true; return }
+    armingMarkAll = false
+    service.markAllRead()
+  }
+
   // Rows come from the Service already filtered to what is unread, so this
   // draws the same list the window's unread filter draws - including its
   // "Nothing unread" note, which is a truer empty state than a blank panel.
@@ -94,8 +117,11 @@ Panel {
 
   function open() {
     // The picker is a way of looking at the panel now, not a state to come
-    // back to: every opening starts on what is waiting.
+    // back to: every opening starts on what is waiting. So does an armed
+    // "mark all read": coming back to a panel that is still holding a
+    // question from last time is how the answer gets given by accident.
     pickingPresence = false
+    armingMarkAll = false
     list.cursorIndex = -1
     root.controller.show()
     if (service) service.refresh()
@@ -103,6 +129,7 @@ Panel {
 
   function close() {
     pickingPresence = false
+    armingMarkAll = false
     root.controller.hide()
   }
 
@@ -138,11 +165,19 @@ Panel {
       // While the picker is up it owns the keyboard: the digits pick a
       // presence and Escape backs out of it before it closes the panel, the
       // same order the window uses.
-      onMoveRequested: function(dx, dy) { if (dy !== 0 && !root.picking) list.moveCursor(dy) }
-      onActivateRequested: if (!root.picking) list.activateCursor()
+      onMoveRequested: function(dx, dy) {
+        root.armingMarkAll = false
+        if (dy !== 0 && !root.picking) list.moveCursor(dy)
+      }
+      onActivateRequested: {
+        root.armingMarkAll = false
+        if (!root.picking) list.activateCursor()
+      }
       onCloseRequested: {
-        // One layer at a time: the picker you opened, then the panel.
+        // One layer at a time: the question you were asked, or the picker you
+        // opened, then the panel.
         if (root.picking) root.pickingPresence = false
+        else if (root.armingMarkAll) root.armingMarkAll = false
         else root.close()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
@@ -152,6 +187,9 @@ Panel {
           else if (text === "p") root.pickingPresence = false
           return
         }
+        if (text === "m") { root.markAll(); return }
+        // Any other key is an answer of "no" to a question that was asked.
+        root.armingMarkAll = false
         if (text === "p") root.togglePresencePicker()
         else if (text === "r" && root.service) root.service.refresh()
         else if (text === "o") root.openWindow({})
@@ -229,6 +267,20 @@ Panel {
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.spacing.sm
+
+            PanelActionButton {
+              iconText: "\u{F012C}"   // nf-md-check_all
+              // Only while there is something to mark and a sign-in that may:
+              // a button that would fail is worse than no button.
+              visible: root.canMarkAll
+              tooltipText: root.armingMarkAll
+                ? "Mark " + root.service.unreadCount + " chats read — again to confirm"
+                : "Mark all as read  ·  m"
+              // Armed, it is the one thing here that changes anything, and it
+              // says so in the colour the panel uses for that.
+              foreground: root.armingMarkAll ? root.accent : root.fg
+              onClicked: root.markAll()
+            }
 
             PanelActionButton {
               iconText: "\u{F03CC}"   // nf-md-open_in_new
@@ -324,6 +376,19 @@ Panel {
           font.pixelSize: Style.font.caption
         }
 
+        // A mark that Graph refused. Said here rather than left to the chat
+        // list, which would simply look as though nothing had happened.
+        Text {
+          width: parent.width
+          visible: !root.picking && !!root.service && root.service.markReadError !== ""
+          text: root.service ? Model.plainText(root.service.markReadError) : ""
+          textFormat: Text.PlainText
+          wrapMode: Text.WordWrap
+          color: root.accent
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+        }
+
         Repeater {
           model: root.picking ? [] : (root.service ? root.service.warnings : [])
 
@@ -343,13 +408,24 @@ Panel {
           width: parent.width
           visible: !root.picking
           text: {
+            // The armed question takes the line over rather than being one
+            // more key in a list of them: it is a question, and it is about to
+            // change somebody's mailbox.
+            if (root.armingMarkAll && root.service)
+              return "Mark " + root.service.unreadCount + " read?  m confirms  ·  Esc cancels"
+            if (root.service && root.service.marking) return "Marking read…"
             var keys = ["o window", "r refresh"]
-            if (root.service && root.service.canSetPresence) keys.splice(1, 0, "p presence")
+            // "m read all" rather than "m mark all read": a fourth key is what
+            // this line has room for, and not a word more - the longer wording
+            // pushed "r refresh" off the end of it.
+            if (root.canMarkAll) keys.splice(0, 0, "m read all")
+            if (root.service && root.service.canSetPresence)
+              keys.splice(keys.length - 1, 0, "p presence")
             return keys.join("  ·  ")
           }
           textFormat: Text.PlainText
           elide: Text.ElideRight
-          color: Qt.darker(root.fg, 1.8)
+          color: root.armingMarkAll ? root.accent : Qt.darker(root.fg, 1.8)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }

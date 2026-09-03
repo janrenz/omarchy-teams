@@ -918,11 +918,48 @@ Item {
     }
   }
 
+  // Chats still waiting to be marked. Graph wants a request per chat and one
+  // Process cannot run two commands, so they go one at a time - and the
+  // refresh that has to follow is spent once, at the end, rather than after
+  // every one of them.
+  //
+  // Queued rather than dropped, which is what a second mark used to be while
+  // the first was still in flight: opening two unread chats quickly meant only
+  // one of them was read.
+  property var markQueue: []
+  // Something is being marked - one chat being opened, or all of them at once.
+  readonly property bool marking: markQueue.length > 0
+
   function markRead(chatId) {
     var id = String(chatId || "")
-    if (id === "" || !canMarkRead || markReadProc.running || pluginDir === "") return
+    if (id === "" || !canMarkRead || pluginDir === "") return
     if (setting("demo", false) === true) return
-    markReadProc.command = ["python3", helper(), "mark-read", "--account", alias, "--chat", id]
+    if (markQueue.indexOf(id) !== -1) return
+    markQueue = markQueue.concat([id])
+    pumpMarkRead()
+  }
+
+  // Every chat with something waiting in it, read in one go. Chats only,
+  // because a channel has no unread mark to clear - Graph exposes nothing
+  // equivalent, which is why the list never draws one.
+  function markAllRead() {
+    if (!canMarkRead || pluginDir === "") return
+    if (setting("demo", false) === true) return
+    var chats = view.chats || []
+    var next = markQueue.slice()
+    for (var i = 0; i < chats.length; i++) {
+      if (chats[i].unread !== true) continue
+      var id = String(chats[i].id || "")
+      if (id !== "" && next.indexOf(id) === -1) next.push(id)
+    }
+    markQueue = next
+    pumpMarkRead()
+  }
+
+  function pumpMarkRead() {
+    if (markReadProc.running || markQueue.length === 0) return
+    markReadProc.command = ["python3", helper(), "mark-read",
+                            "--account", alias, "--chat", String(markQueue[0])]
     markReadProc.running = true
   }
 
@@ -935,9 +972,19 @@ Item {
       if (exitCode !== 0 || !parsed || parsed.ok === false) {
         root.markReadError = parsed && parsed.error
           ? String(parsed.error.message) : "Could not mark this chat read"
+        // The rest go with it. Whatever refused this one - a sign-in that
+        // cannot mark, or Graph saying no - will refuse the next twenty the
+        // same way, and twenty requests to be told so is not worth the one
+        // message it produces.
+        root.markQueue = []
         return
       }
       root.markReadError = ""
+      root.markQueue = root.markQueue.slice(1)
+      if (root.markQueue.length > 0) {
+        root.pumpMarkRead()
+        return
+      }
       // The dot lives in the chat list, which this has just changed on the
       // server; re-read it so the list agrees with what was done.
       root.refresh()

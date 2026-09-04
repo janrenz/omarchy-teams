@@ -533,6 +533,17 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.6.1 — 2026-09-04
+
+- **The key list scrolls.** `?` draws every binding the window has, and since
+  the calendar added a section of its own that is more list than a tiled
+  window is tall — so the last of it, including the line saying `Esc` closes
+  it, was drawn off the bottom edge with no way to reach it. It is now as
+  tall as it is until the window is shorter, and then it scrolls: the wheel,
+  `j` and `k`, `Page up` and `Page down`, `Ctrl-d` and `Ctrl-u`, `g` and `G`.
+  While it is up those keys move the list rather than the conversations
+  behind it.
+
 ### 0.6.0 — 2026-09-04
 
 - **Your calendar, in the same window.** `c`, or **Calendar** in the header:

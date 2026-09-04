@@ -824,6 +824,23 @@ Item {
         // While a field has focus these belong to the text in it.
         if (composer.activeFocus || codeField.activeFocus) return
         if (root.composingNew || root.composingMeeting) return
+        // The key list is over everything, so while it is up the scroll keys
+        // move it rather than the pane behind it.
+        if (root.showHelp) {
+          var helpPage = Math.max(Style.space(80), helpScroll.height * 0.9)
+          var helpControl = (event.modifiers & Qt.ControlModifier) !== 0
+          if (event.key === Qt.Key_PageDown) root.scrollBy(helpScroll, helpPage)
+          else if (event.key === Qt.Key_PageUp) root.scrollBy(helpScroll, -helpPage)
+          else if (event.key === Qt.Key_Home) root.scrollToEnd(helpScroll, false)
+          else if (event.key === Qt.Key_End) root.scrollToEnd(helpScroll, true)
+          else if (helpControl && event.key === Qt.Key_D) root.scrollBy(helpScroll, helpPage / 2)
+          else if (helpControl && event.key === Qt.Key_U) root.scrollBy(helpScroll, -helpPage / 2)
+          else if (helpControl && event.key === Qt.Key_F) root.scrollBy(helpScroll, helpPage)
+          else if (helpControl && event.key === Qt.Key_B) root.scrollBy(helpScroll, -helpPage)
+          else return
+          event.accepted = true
+          return
+        }
         // The calendar scrolls itself: what is under the pointer there is a
         // clock face inside the pane rather than one of the window's own
         // ScrollViews.
@@ -963,13 +980,30 @@ Item {
 
           MouseArea { anchors.fill: parent; onClicked: root.showHelp = false }
 
-          KeyHelp {
+          // Measured on the outside and scrolled on the inside, the way the
+          // panel's list is: the list of keys is as tall as it is, and a
+          // short window - or a sign-in with the calendar keys in it as well
+          // - has more of it than there is room for. The last rows still have
+          // to be reachable, so what does not fit scrolls.
+          Item {
             anchors.centerIn: parent
-            fg: Color.foreground
-            fontFamily: Style.font.family
-            agentHandover: service.agentHandover
-            canSetPresence: service.canSetPresence
-            hasCalendar: service.hasCalendar
+            width: Math.min(help.implicitWidth, parent.width - root.padPanel * 2)
+            height: Math.min(help.implicitHeight, parent.height - root.padPanel * 2)
+
+            ScrollView {
+              id: helpScroll
+              anchors.fill: parent
+              clip: true
+
+              KeyHelp {
+                id: help
+                fg: Color.foreground
+                fontFamily: Style.font.family
+                agentHandover: service.agentHandover
+                canSetPresence: service.canSetPresence
+                hasCalendar: service.hasCalendar
+              }
+            }
           }
         }
       }
@@ -1336,6 +1370,11 @@ Item {
                  // letters while it has focus.
                  || root.composingMeeting || eventDetail.typing
         onMoveRequested: function(dx, dy) {
+          // Down and up in the key list, while it is the thing on screen.
+          if (root.showHelp) {
+            if (dy !== 0) root.scrollBy(helpScroll, dy * Style.space(40))
+            return
+          }
           // On the calendar, down and up walk the meetings and left and right
           // are the week before and the week after - which is what the two
           // arrows in the toolbar do, and what every calendar's arrows do.
@@ -1379,6 +1418,15 @@ Item {
             if (!imageLayer.item) return
             if (text === "s") imageLayer.item.save()
             else if (text === "o") imageLayer.item.openExternally()
+            return
+          }
+          // The same for the key list: it is over everything, so g and G go
+          // to its own top and bottom and the rest of the vocabulary waits
+          // until it is closed. ? still shuts it, as the last line says.
+          if (root.showHelp) {
+            if (text === "g") root.scrollToEnd(helpScroll, false)
+            else if (text === "G") root.scrollToEnd(helpScroll, true)
+            else if (text === "?") root.showHelp = false
             return
           }
           // The status menu is over the window, so it takes the digits while

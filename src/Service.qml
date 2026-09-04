@@ -142,6 +142,7 @@ Item {
     // The background poll still leaves the transcript alone: re-reading it
     // every couple of minutes unasked is not the same as being asked for it.
     reloadConversation()
+    if (calendarActive) reloadCalendar()
   }
 
   // ---- teams open and shut ----------------------------------------------
@@ -259,7 +260,13 @@ Item {
     repeat: true
     running: root.configured && !poll.paused
     triggeredOnStart: true
-    onTriggered: root.refresh()
+    onTriggered: {
+      root.refresh()
+      // A poll is the calendar's tick as well: somebody else moving a meeting
+      // should reach the grid without anybody pressing anything, and the
+      // reminder for the next one is decided from what came back.
+      if (root.calendarActive || root.wantsMeetingAlerts) root.reloadCalendar()
+    }
   }
 
   // Each of these is a way the account can have just become known, and a
@@ -273,7 +280,12 @@ Item {
     flushQueuedMessages()
   }
   onPluginDirChanged: if (configured) { loadPalette(); refresh(); flushQueuedMessages() }
-  onSettingsChanged: if (configured) { refresh(); flushQueuedMessages() }
+  onSettingsChanged: {
+    // The view the calendar opens on comes from the settings once, and after
+    // that from whoever last pressed a view button.
+    if (!calendarModeChosen) calendarMode = validCalendarMode(setting("calendarView", "week"))
+    if (configured) { refresh(); flushQueuedMessages() }
+  }
 
   // ---- telling you something arrived --------------------------------------
 
@@ -317,8 +329,8 @@ Item {
 
   // Another account's chats are not this one's, and a sign-out means the next
   // sign-in starts over: prime again rather than announce the backlog.
-  onAliasChanged: notifier.forget()
-  onSignedInChanged: if (!signedIn) notifier.forget()
+  onAliasChanged: { notifier.forget(); meetingNotifier.forget() }
+  onSignedInChanged: if (!signedIn) { notifier.forget(); meetingNotifier.forget() }
 
   function announceNewChats() {
     var chats = view.chats || []
@@ -1073,6 +1085,441 @@ Item {
     }
   }
 
+  // ---- the calendar --------------------------------------------------------
+  //
+  // A range of days is asked for and a range comes back, occurrences already
+  // expanded - so the view is only ever a question of which days to ask about.
+  // Which is what `calendarMode` and `calendarAnchor` are between them, and
+  // why changing either is a fetch rather than a filter: a month of a busy
+  // calendar is two hundred events, and keeping every month anybody scrolled
+  // past would be a cache with no way of knowing it had gone stale.
+
+  // Whether to ask for the calendar scopes at the next sign-in. Off by
+  // default, for the reason every opt-in tier here is: a registration that
+  // does not declare a permission fails the whole sign-in when it is asked
+  // for, not just that scope.
+  readonly property bool wantCalendar: setting("calendar", false) === true
+  // And whether to ask for the wider of the two. Reading a calendar and
+  // writing to it are both ordinary user consent - no administrator - but
+  // they are separately declared, so this is the user saying their
+  // registration has the second one.
+  readonly property bool wantCalendarWrite: wantCalendar && setting("calendarWrite", false) === true
+  readonly property bool hasCalendar: view.calendar === true
+  readonly property bool canWriteCalendar: view.canWriteCalendar === true
+  // Which day a week starts on is a local convention and Graph has no opinion
+  // about it, so it is a setting rather than a guess.
+  readonly property bool sundayFirst: String(setting("weekStart", "monday")) === "sunday"
+
+  // A minute hand, for the line across today and for "starts in four
+  // minutes". Deliberately not what the day columns are built from - a date
+  // that changes every minute would rebuild every delegate in the grid once a
+  // minute - so the layout binds to `todayKey`, which changes at midnight and
+  // not before.
+  property var clock: new Date()
+  readonly property string todayKey: Model.keyOf(clock)
+
+  Timer {
+    interval: 60 * 1000
+    repeat: true
+    running: root.calendarActive || root.wantsMeetingAlerts
+    onTriggered: root.clock = new Date()
+  }
+
+  // The view the calendar opens on. A setting for the first paint and a plain
+  // property afterwards: flipping to Month for one look is not a preference,
+  // and writing shell.json every time somebody did would be.
+  property string calendarMode: "week"
+  property bool calendarModeChosen: false
+  // Which day the view is about. Empty until something asks, so that a window
+  // opened at half past eleven at night and looked at again after midnight
+  // opens on the new day rather than on the old one.
+  property string calendarAnchor: ""
+  // Whether anybody is looking. The window sets it; the bar never does, which
+  // is what keeps a bar icon from fetching a month of meetings to draw a
+  // number it does not draw.
+  property bool calendarActive: false
+
+  property var calendarEvents: []
+  property bool calendarLoading: false
+  property string calendarError: ""
+  property bool calendarCapped: false
+
+  function validCalendarMode(name) {
+    var wanted = String(name || "").toLowerCase()
+    return Model.calendarViewNames().indexOf(wanted) === -1 ? "week" : wanted
+  }
+
+  function setCalendarMode(name) {
+    calendarModeChosen = true
+    calendarMode = validCalendarMode(name)
+  }
+
+  function cycleCalendarMode(step) {
+    var names = Model.calendarViewNames()
+    var at = names.indexOf(calendarMode)
+    setCalendarMode(names[(at + names.length + Number(step || 1)) % names.length])
+  }
+
+  function calendarToday() {
+    calendarAnchor = Model.keyOf(new Date())
+  }
+
+  function moveCalendar(step) {
+    calendarAnchor = Model.shiftAnchor(calendarMode, calendarAnchor || todayKey,
+                                       Number(step || 0), sundayFirst)
+  }
+
+  // The days on screen, and the days worth asking about. They are the same
+  // range while the window is open; with only the reminders running there is
+  // nothing on screen and today is all that is needed.
+  readonly property var calendarSpan: calendarActive
+    ? Model.calendarRange(calendarMode, calendarAnchor || todayKey, sundayFirst)
+    : { from: todayKey, days: 1, keys: [todayKey], view: "day" }
+  readonly property var calendarDays: Model.calendarDays(
+    calendarEvents, calendarSpan.keys, calendarAnchor || todayKey, todayKey)
+
+  // A range nobody has fetched yet, as one string, so that changing the view
+  // or stepping a week is one comparison rather than two properties racing.
+  readonly property string calendarWanted: (configured && hasCalendar)
+    ? (calendarSpan.from + "+" + calendarSpan.days) : ""
+  property string calendarLoaded: ""
+
+  onCalendarWantedChanged: if (calendarWanted !== "") loadCalendar()
+
+  function loadCalendar(force) {
+    if (!configured || pluginDir === "" || !hasCalendar) return
+    if (calendarProc.running) return
+    if (force !== true && calendarLoaded === calendarWanted && calendarEvents.length > 0
+        && calendarError === "") return
+    calendarLoading = true
+    var command = ["python3", helper(), "calendar", "--account", alias,
+                   "--from", String(calendarSpan.from), "--days", String(calendarSpan.days)]
+    if (setting("demo", false) === true) command.push("--demo")
+    calendarProc.command = command
+    calendarProc.running = true
+  }
+
+  // What Refresh means for the calendar: ask again for the range on screen,
+  // whether or not it is the one already loaded.
+  function reloadCalendar() {
+    calendarLoaded = ""
+    loadCalendar(true)
+  }
+
+  Process {
+    id: calendarProc
+    running: false
+    stdout: StdioCollector { id: calendarOut; waitForEnd: true }
+    stderr: StdioCollector { id: calendarErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.calendarLoading = false
+      var parsed = Model.parseJson(calendarOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.calendarError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(calendarErrOut.text || "Could not read your calendar", 160)
+        return
+      }
+      root.calendarError = ""
+      root.calendarEvents = parsed.events || []
+      root.calendarCapped = parsed.capped === true
+      root.calendarLoaded = String(parsed.from || "") + "+" + String(parsed.days || 0)
+      root.announceMeetings()
+      // The range moved while the last fetch was in flight - somebody holding
+      // the next-week key down - so the answer that just landed is about a
+      // week nobody is looking at any more.
+      if (root.calendarLoaded !== root.calendarWanted) Qt.callLater(root.loadCalendar)
+    }
+  }
+
+  // ---- one meeting -------------------------------------------------------
+
+  property string openEventId: ""
+  property var openEvent: null
+  property bool eventLoading: false
+  property string eventError: ""
+
+  readonly property bool readingEvent: openEventId !== ""
+
+  function showEvent(eventId) {
+    var id = String(eventId || "")
+    if (id === "") return
+    if (openEventId === id) { closeEvent(); return }
+    openEventId = id
+    openEvent = null
+    eventError = ""
+    rsvpError = ""
+    cancelError = ""
+    fetchEvent()
+  }
+
+  function fetchEvent() {
+    if (openEventId === "" || pluginDir === "" || !configured) return
+    if (eventProc.running) eventProc.running = false
+    eventLoading = true
+    var command = ["python3", helper(), "event", "--account", alias, "--event", openEventId]
+    if (setting("demo", false) === true) command.push("--demo")
+    eventProc.command = command
+    eventProc.running = true
+  }
+
+  function closeEvent() {
+    openEventId = ""
+    openEvent = null
+    eventError = ""
+    eventLoading = false
+    rsvpComment = ""
+  }
+
+  Process {
+    id: eventProc
+    running: false
+    stdout: StdioCollector { id: eventOut; waitForEnd: true }
+    stderr: StdioCollector { id: eventErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.eventLoading = false
+      var parsed = Model.parseJson(eventOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.eventError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(eventErrOut.text || "Could not read that meeting", 160)
+        return
+      }
+      root.eventError = ""
+      root.openEvent = parsed.event || null
+    }
+  }
+
+  // ---- answering an invitation -------------------------------------------
+
+  // What to say to the organiser, if anything. Held here rather than in the
+  // detail pane so that it survives the pane being rebuilt under it, the way
+  // a message draft does.
+  property string rsvpComment: ""
+  property bool rsvpSending: false
+  property string rsvpError: ""
+  // Whether the organiser hears about it. Teams offers the same three ways of
+  // answering, and this is its "Don't send a response".
+  property bool rsvpReplies: true
+
+  function rsvp(eventId, response, comment, silent) {
+    var id = String(eventId || "")
+    if (id === "" || rsvpSending || pluginDir === "") return
+    if (!canWriteCalendar) {
+      rsvpError = "This sign-in can read your calendar but not answer invitations. "
+                + "Turn on \"Answer and create meetings\" in settings and sign in again."
+      return
+    }
+    rsvpSending = true
+    rsvpError = ""
+    rsvpPayload = JSON.stringify({ comment: String(comment || "") })
+    var command = ["python3", helper(), "rsvp", "--account", alias,
+                   "--event", id, "--response", String(response), "--stdin"]
+    if (silent === true) command.push("--silent")
+    if (setting("demo", false) === true) command.push("--demo")
+    rsvpProc.command = command
+    rsvpProc.running = true
+  }
+
+  // On stdin, not in argv, for the reason a message is: "I cannot make this
+  // one, I am at the hospital" is somebody's words, and anyone on this
+  // machine can read another process's command line.
+  property string rsvpPayload: "{}"
+
+  Process {
+    id: rsvpProc
+    running: false
+    stdinEnabled: true
+    onStarted: rsvpProc.write(root.rsvpPayload + "\n")
+    stdout: StdioCollector { id: rsvpOut; waitForEnd: true }
+    stderr: StdioCollector { id: rsvpErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.rsvpSending = false
+      var parsed = Model.parseJson(rsvpOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.rsvpError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(rsvpErrOut.text || "Could not send that answer", 160)
+        return
+      }
+      root.rsvpError = ""
+      root.rsvpComment = ""
+      // Read back rather than assume: an accepted invitation changes how it
+      // is drawn in the grid, and the grid is what says the answer went.
+      root.reloadCalendar()
+      if (root.readingEvent) root.fetchEvent()
+    }
+  }
+
+  // ---- booking one -------------------------------------------------------
+
+  property bool creatingEvent: false
+  property string createEventError: ""
+  // The meeting just made, so the calendar can be moved to the day it is on
+  // and the detail opened on it.
+  property string createdEventId: ""
+  property string newEventPayload: "{}"
+
+  function createEvent(draft) {
+    if (creatingEvent || pluginDir === "") return
+    if (!canWriteCalendar) {
+      createEventError = "This sign-in can read your calendar but not add to it. "
+                       + "Turn on \"Answer and create meetings\" in settings and sign in again."
+      return
+    }
+    var problem = Model.newMeetingProblem(draft)
+    if (problem !== "") { createEventError = problem; return }
+    creatingEvent = true
+    createEventError = ""
+    createdEventId = ""
+    newEventPayload = JSON.stringify(Model.newMeetingPayload(draft))
+    var command = ["python3", helper(), "new-event", "--account", alias, "--stdin"]
+    if (setting("demo", false) === true) command.push("--demo")
+    newEventProc.command = command
+    newEventProc.running = true
+  }
+
+  Process {
+    id: newEventProc
+    running: false
+    stdinEnabled: true
+    // Everything about the meeting goes this way: a subject, an agenda and a
+    // guest list are somebody's words and other people's addresses.
+    onStarted: newEventProc.write(root.newEventPayload + "\n")
+    stdout: StdioCollector { id: newEventOut; waitForEnd: true }
+    stderr: StdioCollector { id: newEventErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.creatingEvent = false
+      var parsed = Model.parseJson(newEventOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.createEventError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(newEventErrOut.text || "Could not create that meeting", 160)
+        return
+      }
+      root.createEventError = ""
+      var made = parsed.event || {}
+      root.createdEventId = String(made.id || "")
+      // Onto the day it was booked for, which is not necessarily the day that
+      // was on screen when the form was opened.
+      if (String(made.startDate || "") !== "") root.calendarAnchor = String(made.startDate)
+      root.reloadCalendar()
+    }
+  }
+
+  // ---- calling one off ---------------------------------------------------
+
+  property bool cancelling: false
+  property string cancelError: ""
+  property string cancelNotice: ""
+  property string cancelPayload: "{}"
+
+  function cancelEvent(eventId, comment) {
+    var id = String(eventId || "")
+    if (id === "" || cancelling || pluginDir === "") return
+    if (!canWriteCalendar) {
+      cancelError = "This sign-in can read your calendar but not change it."
+      return
+    }
+    cancelling = true
+    cancelError = ""
+    cancelNotice = ""
+    cancelPayload = JSON.stringify({ comment: String(comment || "") })
+    var command = ["python3", helper(), "cancel-event", "--account", alias,
+                   "--event", id, "--stdin"]
+    if (setting("demo", false) === true) command.push("--demo")
+    cancelProc.command = command
+    cancelProc.running = true
+  }
+
+  Process {
+    id: cancelProc
+    running: false
+    stdinEnabled: true
+    onStarted: cancelProc.write(root.cancelPayload + "\n")
+    stdout: StdioCollector { id: cancelOut; waitForEnd: true }
+    stderr: StdioCollector { id: cancelErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.cancelling = false
+      var parsed = Model.parseJson(cancelOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.cancelError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(cancelErrOut.text || "Could not call that meeting off", 160)
+        return
+      }
+      root.cancelError = ""
+      // Which of the two happened is worth saying: an organiser's cancellation
+      // reaches everybody who was invited, and an attendee's removal reaches
+      // nobody at all.
+      root.cancelNotice = String(parsed.action || "") === "cancelled"
+        ? "Cancelled, and everybody invited has been told"
+        : "Taken off your calendar"
+      root.closeEvent()
+      root.reloadCalendar()
+    }
+  }
+
+  // Joining is the one thing this window cannot do itself: a meeting is audio
+  // and video, and this is a QML panel. The link goes to whatever handles
+  // Teams meetings on this machine - the desktop client, or a browser - which
+  // is the honest answer rather than a button that pretends.
+  function joinMeeting(url) {
+    openUrl(url)
+  }
+
+  // ---- the meeting about to start ------------------------------------------
+  //
+  // The other half of what a calendar is for. Behind the same announcer flag
+  // the message notifications use - there is a Service per monitor behind the
+  // bar and another behind the window - and behind the same setting, plus one
+  // of its own, because somebody who wants message toasts does not
+  // necessarily want to be told about a meeting they are already in a room
+  // for.
+  readonly property bool meetingReminders: setting("meetingReminders", true) !== false
+  readonly property int reminderMinutes: intSetting("reminderMinutes", 5, 1, 60)
+  readonly property bool wantsMeetingAlerts:
+    notifies && notifyOnNew && meetingReminders && hasCalendar && configured
+
+  Notifier {
+    id: meetingNotifier
+    appName: "Teams"
+    plural: "meetings starting"
+    glyph: "󰃭"
+    defaultExec: root.summonArgv(JSON.stringify({ pane: "calendar" }))
+    enabled: root.wantsMeetingAlerts && root.setting("demo", false) !== true
+  }
+
+  function announceMeetings() {
+    if (!wantsMeetingAlerts) return
+    var soon = Model.startingSoon(calendarEvents, clock, reminderMinutes)
+    var fresh = []
+    var present = []
+    var all = calendarEvents || []
+    // Everything in the range is present, so an event that has been announced
+    // is not announced again when the next poll finds it still there - and an
+    // occurrence of a daily meeting is a different id tomorrow, which is what
+    // makes tomorrow's standup news again.
+    for (var i = 0; i < all.length; i++)
+      present.push(String(all[i].id || "") + "@" + String(all[i].when || ""))
+    for (var s = 0; s < soon.length; s++) {
+      var event = soon[s]
+      var minutes = Model.minutesUntil(event, clock)
+      fresh.push({
+        id: String(event.id || "") + "@" + String(event.when || ""),
+        summary: String(event.subject || "A meeting"),
+        body: (minutes <= 0 ? "Starting now" : "Starting in " + minutes + " min")
+              + " · " + Model.eventTimeLabel(event)
+              + (String(event.where || "") !== "" ? " · " + String(event.where) : ""),
+        // Clicking opens the window on the calendar with that meeting open,
+        // which is where the Join button is.
+        exec: root.summonArgv(JSON.stringify({ pane: "calendar", event: String(event.id || "") })),
+        replaceKey: "meeting:" + String(event.id || "")
+      })
+    }
+    meetingNotifier.observe("meetings", fresh, present)
+  }
+
   // ---- sign-in ----------------------------------------------------------
 
   property bool loggingIn: false
@@ -1134,6 +1581,8 @@ Item {
     // itself - see the comment on SCOPES_FILES in teams.py.
     if (wantFiles) command.push("--files")
     if (wantPresence) command.push("--presence")
+    if (wantCalendar) command.push("--calendar")
+    if (wantCalendarWrite) command.push("--calendar-write")
     loginStartProc.command = command
     loginStartProc.running = true
   }

@@ -241,6 +241,99 @@ Column {
 
   PanelSeparator { width: parent.width }
 
+  // ---------------- the calendar ----------------
+
+  PanelSectionHeader { width: parent.width; text: "Calendar" }
+
+  Toggle {
+    width: parent.width
+    label: "Show my calendar"
+    description: "A calendar beside the conversations: day, work week, week and month, what each meeting is, who is coming, and the link that joins it. Needs Calendars.Read on your app registration - ordinary user consent, no administrator involved - and takes effect at the next sign-in. Turn it on only once the registration declares it, because a scope it does not declare fails the whole sign-in rather than just itself."
+    checked: root.current("calendar", false) === true
+    onClicked: root.change("calendar", !(root.current("calendar", false) === true))
+  }
+
+  Toggle {
+    width: parent.width
+    // Meaningless without a calendar to answer for, so it is dimmed rather
+    // than sitting there taking clicks that do nothing - the same shape as
+    // the presence session above.
+    enabled: root.current("calendar", false) === true
+    opacity: enabled ? 1.0 : 0.5
+    label: "Answer and create meetings"
+    description: "Accept, tentative and decline, booking a meeting with people in it, and calling one off. Asks for Calendars.ReadWrite in place of Calendars.Read - also ordinary user consent, but a registration declares the two separately, so yours has to list it. Takes effect at the next sign-in."
+    checked: root.current("calendarWrite", false) === true
+    onClicked: root.change("calendarWrite", !(root.current("calendarWrite", false) === true))
+  }
+
+  Row {
+    spacing: Style.spacing.md
+
+    Dropdown {
+      width: Style.space(180)
+      label: "Opens on"
+      options: Model.calendarViewNames()
+      value: String(root.current("calendarView", "week"))
+      onValueChanged: if (value !== root.current("calendarView", "week"))
+        root.change("calendarView", value)
+    }
+
+    Dropdown {
+      width: Style.space(160)
+      label: "Weeks start on"
+      options: ["monday", "sunday"]
+      value: String(root.current("weekStart", "monday"))
+      onValueChanged: if (value !== root.current("weekStart", "monday"))
+        root.change("weekStart", value)
+    }
+  }
+
+  Toggle {
+    width: parent.width
+    enabled: root.current("calendar", false) === true
+    opacity: enabled ? 1.0 : 0.5
+    label: "Tell me when a meeting is about to start"
+    description: "A notification a few minutes before each one, which opens it where the Join button is. Nothing you have declined is announced, and neither is anything that was already under way when the shell started. Needs the notification setting above."
+    checked: root.current("meetingReminders", true) !== false
+    onClicked: root.change("meetingReminders", !(root.current("meetingReminders", true) !== false))
+  }
+
+  NumberField {
+    label: "Say so this long before (minutes)"
+    from: 1
+    to: 60
+    stepSize: 1
+    value: parseInt(String(root.current("reminderMinutes", 5)), 10) || 5
+    onValueChanged: if (value !== parseInt(String(root.current("reminderMinutes", 5)), 10))
+      root.change("reminderMinutes", value)
+  }
+
+  Text {
+    width: parent.width
+    visible: !!root.service && root.service.signedIn && root.service.wantCalendar
+             && !root.service.hasCalendar
+    text: "This sign-in cannot read your calendar yet. Sign in again to ask for Calendars.Read."
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Color.urgent
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    width: parent.width
+    visible: !!root.service && root.service.signedIn && root.service.wantCalendarWrite
+             && root.service.hasCalendar && !root.service.canWriteCalendar
+    text: "This sign-in can read your calendar but not change it. Sign in again to ask for Calendars.ReadWrite."
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Color.urgent
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
+  PanelSeparator { width: parent.width }
+
   // ---------------- your own presence ----------------
 
   PanelSectionHeader { width: parent.width; text: "Your presence" }

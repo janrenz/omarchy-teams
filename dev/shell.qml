@@ -41,7 +41,18 @@ ShellRoot {
         demoOpen: dev.openConversation,
         channels: true,
         chats: 25,
-        density: dev.density
+        density: dev.density,
+        // The calendar is opt-in on a real account, because the scopes are.
+        // In the harness it is always on: the fixtures answer it locally, and
+        // a view that has to be switched on before it can be looked at is a
+        // view nobody looks at.
+        calendar: true,
+        calendarWrite: true,
+        calendarView: dev.calendarView,
+        weekStart: "monday",
+        // A toast about an invented meeting on a real desktop is exactly what
+        // the demo flag exists to prevent, and this is the second switch.
+        meetingReminders: false
       }
     }
 
@@ -88,6 +99,7 @@ ShellRoot {
 
     property string density: "cosy"
     property string openConversation: "demo-chat-0"
+    property string calendarView: "week"
 
     // The harness draws its own screenshots rather than being photographed off
     // the screen: offscreen means there is no screen, and a compositor grab of
@@ -229,11 +241,85 @@ ShellRoot {
       return out.join("\n")
     }
 
+    // How big the window is, because half of this layout is about what it
+    // does when there is not room: the sidebar folds into a drawer, and the
+    // calendar's columns fold into an agenda. Neither can be looked at
+    // offscreen without being able to say how wide the window is.
+    function size(width: int, height: int): string {
+      // The implicit size, not the real one: offscreen there is no
+      // compositor to ask for a resize, and the toplevel keeps whatever it
+      // was given - but what it was given is the implicit size.
+      if (panel.floatingWindow) {
+        panel.floatingWindow.implicitWidth = width
+        panel.floatingWindow.implicitHeight = height
+      }
+      return JSON.stringify({ width: panel.floatingWindow ? panel.floatingWindow.width : 0,
+                              height: panel.floatingWindow ? panel.floatingWindow.height : 0 })
+    }
+
     // The overlays, which have no other way of being reached from a script.
     // Not called show(): `qs ipc show` is a subcommand of its own, and the
     // argument parser takes the call for that one and refuses the argument.
     function pane(what: string): void {
       panel.showHelp = what === "help"
+      if (what === "calendar" || what === "chats") panel.showPane(what)
+    }
+
+    // The calendar, driven the way the keyboard drives it - offscreen means no
+    // keyboard reaches the window, and every one of these is a key.
+    function calendar(view: string, anchor: string): string {
+      panel.showPane("calendar")
+      if (view !== "") {
+        dev.calendarView = view
+        panel.teamsService.setCalendarMode(view)
+      }
+      if (anchor !== "") panel.teamsService.calendarAnchor = anchor
+      var svc = panel.teamsService
+      return JSON.stringify({
+        mode: svc.calendarMode,
+        anchor: svc.calendarAnchor,
+        from: svc.calendarSpan.from,
+        days: svc.calendarSpan.days,
+        loading: svc.calendarLoading,
+        error: svc.calendarError,
+        events: svc.calendarEvents.length,
+        canWrite: svc.canWriteCalendar,
+        onCalendar: panel.onCalendar
+      })
+    }
+
+    // Opening a meeting, and answering it. The reply goes nowhere: --demo
+    // answers as if it had been sent and sends nothing.
+    function meeting(id: string): string {
+      if (id !== "") panel.teamsService.showEvent(id)
+      var svc = panel.teamsService
+      return JSON.stringify({
+        open: svc.openEventId,
+        loading: svc.eventLoading,
+        error: svc.eventError,
+        subject: svc.openEvent ? svc.openEvent.subject : "",
+        attendees: svc.openEvent && svc.openEvent.attendees
+                   ? svc.openEvent.attendees.length : 0,
+        join: svc.openEvent ? svc.openEvent.joinUrl : ""
+      })
+    }
+
+    function answer(response: string): string {
+      var svc = panel.teamsService
+      svc.rsvp(svc.openEventId, response, "", false)
+      return JSON.stringify({ error: svc.rsvpError })
+    }
+
+    // The booking form, filled in and sent - the two halves of it that a
+    // script can reach without a pointer.
+    function book(subject: string, date: string, from: string, to: string): string {
+      panel.openNewMeeting(date, -1)
+      panel.changeMeeting("subject", subject)
+      if (from !== "") panel.changeMeeting("from", from)
+      if (to !== "") panel.changeMeeting("to", to)
+      panel.createMeeting()
+      return JSON.stringify({ draft: panel.meetingDraft,
+                              error: panel.teamsService.createEventError })
     }
   }
 }

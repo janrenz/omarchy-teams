@@ -1356,6 +1356,407 @@ class SendingAFile(unittest.TestCase):
         self.assertIn("Chat.ReadWrite", teams.scopes_for(False, True))
 
 
+class CalendarTimes(unittest.TestCase):
+    """Turning what Graph sends into the local day a meeting is on."""
+
+    def test_seven_fractional_digits_still_parse(self):
+        # Graph writes seven; fromisoformat takes three or six, so a naive
+        # parse throws on every event there is.
+        when = teams.graph_moment({"dateTime": "2026-09-04T09:00:00.0000000",
+                                   "timeZone": "UTC"})
+        self.assertIsNotNone(when)
+        self.assertEqual(when.astimezone(teams.timezone.utc).hour, 9)
+
+    def test_a_moment_comes_back_local_rather_than_utc(self):
+        when = teams.graph_moment({"dateTime": "2026-09-04T09:00:00", "timeZone": "UTC"})
+        # Whatever this machine's offset is, the instant is the same one and
+        # the offset is no longer UTC's unless the machine is on UTC.
+        self.assertEqual(when.utcoffset(), when.astimezone().utcoffset())
+
+    def test_nothing_parseable_is_nothing_rather_than_a_crash(self):
+        self.assertIsNone(teams.graph_moment({}))
+        self.assertIsNone(teams.graph_moment({"dateTime": "not a time"}))
+        self.assertIsNone(teams.graph_moment(None))
+
+    def test_an_unknown_zone_name_falls_back_rather_than_failing(self):
+        # Graph answers in UTC unless asked otherwise, but a Windows zone name
+        # has no entry in the system database and losing the day over it would
+        # be worse than being an hour out.
+        self.assertEqual(teams.zone_of("W. Europe Standard Time"), teams.timezone.utc)
+        self.assertEqual(teams.zone_of(""), teams.timezone.utc)
+
+
+class CalendarRows(unittest.TestCase):
+    """One event, shaped for a day column."""
+
+    def event(self, **fields):
+        base = {
+            "id": "AAMk",
+            "subject": "Sprint planning",
+            "start": {"dateTime": "2026-09-04T09:00:00.0000000", "timeZone": "UTC"},
+            "end": {"dateTime": "2026-09-04T10:00:00.0000000", "timeZone": "UTC"},
+            "organizer": {"emailAddress": {"name": "Ana", "address": "ana@example.com"}},
+            "responseStatus": {"response": "notResponded"},
+            "showAs": "busy",
+            "type": "singleInstance",
+        }
+        base.update(fields)
+        return base
+
+    def local(self, day, hour, minute=0):
+        """A local wall-clock moment written the way Graph writes it: in UTC."""
+        when = teams.datetime(2026, 9, day, hour, minute).astimezone()
+        return {"dateTime": when.astimezone(teams.timezone.utc)
+                                .strftime("%Y-%m-%dT%H:%M:%S.0000000"),
+                "timeZone": "UTC"}
+
+    def test_the_day_it_is_on_is_the_local_one(self):
+        row = teams.event_row(self.event(start=self.local(4, 9), end=self.local(4, 10)))
+        self.assertEqual(row["startDate"], "2026-09-04")
+        self.assertEqual(row["endDate"], "2026-09-04")
+        self.assertEqual(row["minutes"], 60)
+
+    def test_an_all_day_event_ends_on_the_day_it_covers(self):
+        # Graph's end is exclusive - a one-day event ends at the next
+        # midnight - so reading it as the last day draws the event over two.
+        row = teams.event_row(self.event(isAllDay=True, start=self.local(4, 0),
+                                         end=self.local(5, 0)))
+        self.assertTrue(row["allDay"])
+        self.assertEqual(row["startDate"], "2026-09-04")
+        self.assertEqual(row["endDate"], "2026-09-04")
+
+    def test_a_three_day_absence_covers_three_days(self):
+        row = teams.event_row(self.event(isAllDay=True, start=self.local(6, 0),
+                                         end=self.local(9, 0)))
+        self.assertEqual((row["startDate"], row["endDate"]), ("2026-09-06", "2026-09-08"))
+
+    def test_a_call_ending_at_midnight_belongs_to_the_day_it_began(self):
+        row = teams.event_row(self.event(start=self.local(4, 23), end=self.local(5, 0)))
+        self.assertEqual(row["endDate"], "2026-09-04")
+
+    def test_a_call_running_past_midnight_covers_both_days(self):
+        row = teams.event_row(self.event(start=self.local(4, 23), end=self.local(5, 1)))
+        self.assertEqual((row["startDate"], row["endDate"]), ("2026-09-04", "2026-09-05"))
+
+    def test_an_answer_is_translated_into_this_plugin_s_words(self):
+        for sent, meant in (("notResponded", "pending"), ("tentativelyAccepted", "tentative"),
+                            ("accepted", "accepted"), ("declined", "declined"),
+                            ("organizer", "organizer"), ("none", "none"), ("", "none")):
+            row = teams.event_row(self.event(responseStatus={"response": sent}))
+            self.assertEqual(row["response"], meant, sent)
+
+    def test_a_join_link_has_to_be_https(self):
+        # It is handed to xdg-open, which opens whatever it is handed.
+        good = teams.event_row(self.event(onlineMeeting={
+            "joinUrl": "https://teams.microsoft.com/l/meetup-join/x"}))
+        self.assertTrue(good["online"])
+        self.assertTrue(good["joinUrl"].startswith("https://"))
+        for bad in ("http://teams.microsoft.com/x", "javascript:alert(1)", "file:///etc/passwd"):
+            row = teams.event_row(self.event(onlineMeeting={"joinUrl": bad}))
+            self.assertEqual(row["joinUrl"], "", bad)
+
+    def test_an_occurrence_is_marked_as_repeating(self):
+        self.assertTrue(teams.event_row(self.event(type="occurrence"))["recurring"])
+        self.assertTrue(teams.event_row(self.event(type="seriesMaster"))["recurring"])
+        self.assertFalse(teams.event_row(self.event())["recurring"])
+
+    def test_a_list_row_carries_no_agenda_and_no_guest_list(self):
+        # Two hundred of these are fetched to draw a month, and an invitation
+        # to forty people carries forty addresses.
+        row = teams.event_row(self.event(body={"contentType": "html", "content": "<p>hi</p>"},
+                                         attendees=[{"emailAddress": {"address": "a@b.c"}}]))
+        self.assertNotIn("text", row)
+        self.assertNotIn("attendees", row)
+
+    def test_an_opened_meeting_carries_both(self):
+        row = teams.event_row(self.event(
+            body={"contentType": "html",
+                  "content": '<p>See <a href="https://example.com/x">the notes</a></p>'},
+            attendees=[{"emailAddress": {"name": "Priya", "address": "p@example.com"},
+                        "type": "optional", "status": {"response": "accepted"}}]),
+            detailed=True)
+        self.assertEqual(row["text"], "See the notes")
+        # The link survives as an offset rather than as a tag: the window
+        # builds every tag it draws.
+        self.assertEqual(row["links"], [{"href": "https://example.com/x", "start": 4, "end": 13}])
+        self.assertEqual(row["attendees"], [{"name": "Priya", "address": "p@example.com",
+                                             "kind": "optional", "response": "accepted"}])
+
+    def test_an_agenda_longer_than_the_cap_says_so(self):
+        row = teams.event_row(
+            self.event(body={"contentType": "text", "content": "x" * (teams.EVENT_BODY_CHARS + 50)}),
+            detailed=True)
+        self.assertTrue(row["truncated"])
+        self.assertEqual(len(row["text"]), teams.EVENT_BODY_CHARS)
+
+    def test_an_event_with_no_subject_is_still_called_something(self):
+        self.assertEqual(teams.event_row(self.event(subject=""))["subject"], "(no subject)")
+
+    def test_a_room_booking_fills_in_where_it_is(self):
+        self.assertEqual(teams.event_row(self.event(location={"displayName": "Room 3.14"}))["where"],
+                         "Room 3.14")
+        self.assertEqual(teams.event_row(self.event(locations=[{"displayName": "Room 2"}]))["where"],
+                         "Room 2")
+
+
+class CalendarWindow(unittest.TestCase):
+    """The range asked for is a range of local days, not of UTC ones."""
+
+    def test_a_day_starts_at_midnight_where_the_user_is(self):
+        start, end, span = teams.calendar_window("2026-09-04", 1)
+        self.assertEqual(span, 1)
+        self.assertEqual(start.strftime("%Y-%m-%d %H:%M"), "2026-09-04 00:00")
+        self.assertEqual((end - start).days, 1)
+        # And the offset is this machine's, so the UTC instant it turns into
+        # is the right one wherever it is run.
+        self.assertEqual(start.utcoffset(), start.astimezone().utcoffset())
+
+    def test_a_range_is_capped_rather_than_refused(self):
+        _, _, span = teams.calendar_window("2026-09-04", 400)
+        self.assertEqual(span, teams.CALENDAR_DAYS_CAP)
+        _, _, span = teams.calendar_window("2026-09-04", 0)
+        self.assertEqual(span, 1)
+
+    def test_a_date_that_is_not_one_is_refused_by_name(self):
+        with self.assertRaises(teams.AccountError):
+            teams.calendar_window("the fourth", 1)
+
+
+class CalendarScopes(unittest.TestCase):
+    """Two tiers, because a registration declares reading and writing apart."""
+
+    def test_reading_is_true_of_either_grant(self):
+        self.assertTrue(teams.can_see_calendar({"scopes": "Chat.ReadWrite Calendars.Read"}))
+        self.assertTrue(teams.can_see_calendar({"scopes": "Chat.ReadWrite Calendars.ReadWrite"}))
+        self.assertFalse(teams.can_see_calendar({"scopes": "Chat.ReadWrite"}))
+
+    def test_writing_needs_the_wider_one(self):
+        self.assertFalse(teams.can_write_calendar({"scopes": "Calendars.Read"}))
+        self.assertTrue(teams.can_write_calendar({"scopes": "Calendars.ReadWrite"}))
+
+    def test_neither_is_asked_for_unless_it_is_wanted(self):
+        self.assertNotIn("Calendars", teams.scopes_for(True, True, True))
+        self.assertIn("Calendars.Read", teams.scopes_for(False, calendar=True))
+        self.assertNotIn("Calendars.ReadWrite", teams.scopes_for(False, calendar=True))
+
+    def test_the_wider_grant_replaces_the_narrower_rather_than_joining_it(self):
+        asked = teams.scopes_for(False, calendar=True, calendar_write=True)
+        self.assertIn("Calendars.ReadWrite", asked)
+        self.assertNotIn("Calendars.Read ", asked + " ")
+
+    def test_a_refresh_keeps_whichever_tier_the_account_holds(self):
+        # Asking for less than was granted gets less back, and store_tokens
+        # records that - so the calendar would fall off an hour after sign-in.
+        self.assertIn("Calendars.ReadWrite",
+                      teams.scopes_held_by({"scopes": "Chat.ReadWrite Calendars.ReadWrite"}))
+        held = teams.scopes_held_by({"scopes": "Chat.ReadWrite Calendars.Read"})
+        self.assertIn("Calendars.Read", held)
+        self.assertNotIn("Calendars.ReadWrite", held)
+        self.assertNotIn("Calendars", teams.scopes_held_by({"scopes": "Chat.ReadWrite"}))
+
+
+class CalendarRequests(unittest.TestCase):
+    """What the helper asks Graph for, and what it refuses to ask."""
+
+    def run_command(self, command, scopes="Chat.ReadWrite Calendars.ReadWrite",
+                    responses=None, stdin=None, **kwargs):
+        self.calls = []
+        queue = list(responses or [(200, {"value": []})])
+
+        def http(url, method="GET", data=None, json_body=None, raw=None,
+                 headers=None, timeout=20):
+            self.calls.append({"url": url, "method": method, "body": json_body})
+            return queue.pop(0) if queue else (200, {})
+
+        args = Args()
+        args.since = "2026-09-04"
+        args.days = 7
+        args.event = "AAMk"
+        args.response = "accept"
+        args.comment = ""
+        args.stdin = stdin is not None
+        args.silent = False
+        for key, value in kwargs.items():
+            setattr(args, key, value)
+
+        patched = {
+            "read_json": lambda *a, **k: {"scopes": scopes},
+            "access_token": lambda alias, account: ("token", account),
+            "http": http,
+            "read_stdin_json": lambda: (stdin or {}),
+        }
+        original = {name: getattr(teams, name) for name in patched}
+        for name, stub in patched.items():
+            setattr(teams, name, stub)
+        try:
+            return capture(command, args)
+        finally:
+            for name, value in original.items():
+                setattr(teams, name, value)
+
+    def test_the_range_is_a_calendar_view_ordered_by_when_things_start(self):
+        self.run_command(teams.cmd_calendar)
+        url = self.calls[0]["url"]
+        self.assertIn("/me/calendarView", url)
+        self.assertIn("startDateTime=", url)
+        self.assertIn("endDateTime=", url)
+        self.assertIn("orderby=start%2FdateTime", url)
+
+    def test_without_the_scope_nothing_is_asked_at_all(self):
+        result = self.run_command(teams.cmd_calendar, scopes="Chat.ReadWrite")
+        self.assertEqual(result["error"]["code"], "calendar_permission_required")
+        self.assertEqual(self.calls, [], "a request was made that was known to be refused")
+
+    def test_a_range_that_hits_the_cap_says_so_rather_than_ending_early(self):
+        many = [{"id": str(n), "subject": "x",
+                 "start": {"dateTime": "2026-09-04T09:00:00", "timeZone": "UTC"},
+                 "end": {"dateTime": "2026-09-04T10:00:00", "timeZone": "UTC"}}
+                for n in range(teams.CALENDAR_CAP + 5)]
+        result = self.run_command(teams.cmd_calendar, responses=[(200, {"value": many})])
+        self.assertTrue(result["capped"])
+        self.assertEqual(len(result["events"]), teams.CALENDAR_CAP)
+
+    def test_an_answer_posts_to_the_action_graph_names(self):
+        for answer, action in (("accept", "accept"), ("tentative", "tentativelyAccept"),
+                               ("decline", "decline")):
+            self.run_command(teams.cmd_rsvp, response=answer, responses=[(202, {})])
+            self.assertTrue(self.calls[0]["url"].endswith("/" + action), answer)
+            self.assertEqual(self.calls[0]["method"], "POST")
+
+    def test_a_word_graph_does_not_take_is_refused_here(self):
+        result = self.run_command(teams.cmd_rsvp, response="maybe")
+        self.assertEqual(result["error"]["code"], "bad_response")
+        self.assertEqual(self.calls, [])
+
+    def test_the_line_for_the_organiser_arrives_on_stdin(self):
+        # It is somebody's words, and everybody invited reads it.
+        self.run_command(teams.cmd_rsvp, responses=[(202, {})],
+                         stdin={"comment": "At the hospital, sorry"})
+        self.assertEqual(self.calls[0]["body"]["comment"], "At the hospital, sorry")
+        self.assertTrue(self.calls[0]["body"]["sendResponse"])
+
+    def test_answering_quietly_sends_the_organiser_nothing(self):
+        self.run_command(teams.cmd_rsvp, responses=[(202, {})], silent=True)
+        self.assertFalse(self.calls[0]["body"]["sendResponse"])
+
+    def test_answering_needs_the_write_grant(self):
+        result = self.run_command(teams.cmd_rsvp, scopes="Calendars.Read")
+        self.assertEqual(result["error"]["code"], "calendar_write_permission_required")
+        self.assertEqual(self.calls, [])
+
+    def test_an_organiser_calling_it_off_tells_everybody(self):
+        result = self.run_command(
+            teams.cmd_cancel_event,
+            responses=[(200, {"isOrganizer": True, "attendees": [{"emailAddress": {}}]}),
+                       (202, {})],
+            stdin={"comment": "Moving it to Thursday"})
+        self.assertEqual(result["action"], "cancelled")
+        self.assertTrue(self.calls[1]["url"].endswith("/cancel"))
+        self.assertEqual(self.calls[1]["body"], {"comment": "Moving it to Thursday"})
+
+    def test_an_attendee_removing_it_tells_nobody(self):
+        # Two different things, and guessing would either mail forty people or
+        # silently fail to.
+        result = self.run_command(
+            teams.cmd_cancel_event,
+            responses=[(200, {"isOrganizer": False, "attendees": [{"emailAddress": {}}]}),
+                       (204, {})])
+        self.assertEqual(result["action"], "removed")
+        self.assertEqual(self.calls[1]["method"], "DELETE")
+
+
+class BookingAMeeting(unittest.TestCase):
+    """Wall-clock time in, a meeting Graph will take out."""
+
+    def test_a_time_with_a_zone_name_goes_as_that_zone_s_wall_clock(self):
+        # Which is the only way an all-day event lands on the right day, and
+        # the only way a meeting across a clock change keeps its time.
+        self.assertEqual(teams.meeting_time("2026-09-04T14:00", False, "Europe/Berlin"),
+                         {"dateTime": "2026-09-04T14:00:00", "timeZone": "Europe/Berlin"})
+
+    def test_without_a_zone_name_a_meeting_becomes_a_utc_instant(self):
+        sent = teams.meeting_time("2026-09-04T14:00", False, "")
+        self.assertEqual(sent["timeZone"], "UTC")
+        # The same instant, whatever this machine's offset is.
+        local = teams.datetime(2026, 9, 4, 14, 0).astimezone()
+        self.assertEqual(sent["dateTime"],
+                         local.astimezone(teams.timezone.utc).replace(tzinfo=None).isoformat())
+
+    def test_a_whole_day_cannot_be_filed_in_utc(self):
+        # Midnight UTC is the previous evening in half the world, and Graph
+        # would put the day one out rather than refuse it.
+        with self.assertRaises(teams.AccountError):
+            teams.meeting_time("2026-09-04", True, "")
+
+    def test_a_whole_day_is_midnight_to_midnight_in_a_named_zone(self):
+        self.assertEqual(teams.meeting_time("2026-09-04T09:30", True, "Europe/Berlin"),
+                         {"dateTime": "2026-09-04T00:00:00", "timeZone": "Europe/Berlin"})
+
+    def test_a_meeting_needs_a_subject_and_an_end_after_its_start(self):
+        for draft, code in (
+                ({"start": "2026-09-04T09:00", "end": "2026-09-04T10:00"}, "no_subject"),
+                ({"subject": "x", "start": "2026-09-04T10:00", "end": "2026-09-04T09:00"},
+                 "bad_range")):
+            with self.assertRaises(teams.AccountError) as caught:
+                teams.new_event_body(draft, "Europe/Berlin")
+            self.assertEqual(caught.exception.code, code)
+
+    def test_a_teams_meeting_is_asked_for_by_name(self):
+        body = teams.new_event_body({"subject": "Sync", "start": "2026-09-04T09:00",
+                                     "end": "2026-09-04T09:30", "online": True},
+                                    "Europe/Berlin")
+        self.assertTrue(body["isOnlineMeeting"])
+        self.assertEqual(body["onlineMeetingProvider"], "teamsForBusiness")
+
+    def test_the_agenda_is_sent_as_text_so_a_stray_bracket_stays_one(self):
+        body = teams.new_event_body({"subject": "Sync", "start": "2026-09-04T09:00",
+                                     "end": "2026-09-04T09:30", "text": "a < b"},
+                                    "Europe/Berlin")
+        self.assertEqual(body["body"], {"contentType": "text", "content": "a < b"})
+
+    def test_guests_are_shaped_the_way_graph_wants_and_default_to_required(self):
+        body = teams.new_event_body({
+            "subject": "Sync", "start": "2026-09-04T09:00", "end": "2026-09-04T09:30",
+            "attendees": [{"address": "a@b.c"},
+                          {"address": "d@e.f", "name": "Dana", "kind": "optional"},
+                          {"address": "   "}]}, "Europe/Berlin")
+        self.assertEqual(body["attendees"], [
+            {"emailAddress": {"address": "a@b.c", "name": "a@b.c"}, "type": "required"},
+            {"emailAddress": {"address": "d@e.f", "name": "Dana"}, "type": "optional"},
+        ])
+
+
+class CalendarFixtures(unittest.TestCase):
+    """--demo answers the calendar too, so the layout can be built."""
+
+    def test_the_fixtures_land_on_the_days_they_claim_to(self):
+        midnight = teams.demo_midnight()
+        rows = teams.demo_events(midnight, midnight + teams.timedelta(days=1))
+        self.assertTrue(rows, "today should never be empty in the fixtures")
+        today = midnight.strftime("%Y-%m-%d")
+        for row in rows:
+            self.assertLessEqual(row["startDate"], today)
+            self.assertGreaterEqual(row["endDate"], today)
+
+    def test_an_all_day_fixture_is_one_day_long(self):
+        midnight = teams.demo_midnight()
+        rows = teams.demo_events(midnight, midnight + teams.timedelta(days=1))
+        leave = [row for row in rows if row["allDay"]]
+        self.assertEqual(len(leave), 1)
+        self.assertEqual(leave[0]["startDate"], leave[0]["endDate"])
+
+    def test_two_of_them_overlap_so_the_columns_have_something_to_do(self):
+        midnight = teams.demo_midnight()
+        rows = [row for row in teams.demo_events(midnight, midnight + teams.timedelta(days=1))
+                if not row["allDay"]]
+        overlapping = [(a, b) for a in rows for b in rows
+                       if a["id"] < b["id"] and a["when"] < b["until"] and b["when"] < a["until"]]
+        self.assertTrue(overlapping, "no two fixtures overlap")
+
+    def test_an_opened_fixture_keeps_the_id_it_was_asked_for(self):
+        self.assertEqual(teams.demo_event_detail("demo-event-new")["id"], "demo-event-new")
+        self.assertIn("attendees", teams.demo_event_detail("demo-event-1"))
+
 class Aliases(unittest.TestCase):
     """An account name becomes a filename, so it is checked."""
 

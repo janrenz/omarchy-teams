@@ -17,6 +17,8 @@ Column {
   property bool agentHandover: true
   // And the p key is only there on a sign-in that may set your presence.
   property bool canSetPresence: false
+  // The calendar's own keys are only worth listing where there is one.
+  property bool hasCalendar: false
 
   // [key, what it does, which section]
   readonly property var bindings: [
@@ -42,7 +44,20 @@ Column {
     ["p", "Set your presence, or hand it back to Teams", "Doing"],
     ["r", "Reload this conversation", "Doing"],
     [",", "Settings", "Doing"],
-    ["?", "This list", "Doing"]
+    ["?", "This list", "Doing"],
+
+    ["c", "The calendar, and back to the conversations", "Calendar"],
+    ["j / k", "The meeting before / after", "Calendar"],
+    ["h / l", "The period before / after", "Calendar"],
+    ["[ / ]", "The same, for hands that know them", "Calendar"],
+    ["1 - 4", "Day, work week, week, month", "Calendar"],
+    ["v", "The next view along", "Calendar"],
+    ["t", "Back to today", "Calendar"],
+    ["Enter", "Open the meeting under the cursor", "Calendar"],
+    ["J", "Join it", "Calendar"],
+    ["n", "Book a meeting", "Calendar"],
+    ["1 / 2 / 3", "In a meeting: accept, tentative, decline", "Calendar"],
+    ["x", "In a meeting: call it off. Asked twice", "Calendar"]
   ]
 
   spacing: Style.spacing.md
@@ -57,7 +72,8 @@ Column {
   }
 
   Repeater {
-    model: ["Moving", "Scrolling", "Doing"]
+    model: root.hasCalendar ? ["Moving", "Scrolling", "Doing", "Calendar"]
+                            : ["Moving", "Scrolling", "Doing"]
 
     delegate: Column {
       required property string modelData

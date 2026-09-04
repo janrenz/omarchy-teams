@@ -203,6 +203,11 @@ capture() {
 # position depends on the theme's font size.
 capture "showcase-conversations" '{}'
 capture "showcase-conversation"  '{"demoOpen": "demo-chat-0"}'
+# And the calendar, which the fixtures anchor to today - so a run next month
+# still photographs a working week rather than an empty grid. demoPane is the
+# calendar's demoOpen: there is no key an automated run can press.
+capture "showcase-calendar" \
+  '{"calendar": true, "calendarWrite": true, "calendarView": "week", "demoPane": "calendar", "meetingReminders": false}'
 
 # The marketplace looks for preview.png in the repository root and nothing
 # else - showcase-*.png is invisible to it - so the card image is kept in step

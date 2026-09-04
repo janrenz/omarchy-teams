@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "author": "Jan Renz",
   "license": "MIT",
-  "description": "Teams chats and channels in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and an Azure app registration of yours - see the README. Talks to Microsoft Graph and nothing else.",
+  "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and an Azure app registration of yours - see the README. Talks to Microsoft Graph and nothing else.",
   "kinds": [
     "bar-widget",
     "panel"
@@ -35,6 +35,12 @@
       "sendFiles": false,
       "setPresence": false,
       "holdPresence": false,
+      "calendar": false,
+      "calendarWrite": false,
+      "calendarView": "week",
+      "weekStart": "monday",
+      "meetingReminders": true,
+      "reminderMinutes": 5,
       "refreshIntervalSec": 120,
       "pausePolling": true,
       "tintOnUnread": true,
@@ -88,6 +94,60 @@
         "label": "Let Teams see you at this machine",
         "description": "A presence you set only shows while Teams believes you are signed in somewhere; with no Teams client running anywhere you are Offline whatever you pick. This makes the plugin one of those clients - available while somebody is at the machine, away once nobody is - renewed every twenty minutes and let go when the shell stops. Needs the setting above.",
         "defaultValue": false
+      },
+      {
+        "key": "calendar",
+        "type": "boolean",
+        "label": "Calendar",
+        "description": "Adds a calendar beside the conversations: day, work week, week and month, with what each meeting is and who is coming. Needs Calendars.Read on your app registration - ordinary user consent, no administrator - and takes effect at the next sign-in. A registration that does not declare it fails the whole sign-in, which is why this is off until you say it has it.",
+        "defaultValue": false
+      },
+      {
+        "key": "calendarWrite",
+        "type": "boolean",
+        "label": "Answer and create meetings",
+        "description": "Accept, tentative and decline, booking a meeting, and calling one off. Asks for Calendars.ReadWrite instead of Calendars.Read - also ordinary user consent, but separately declared, so your registration has to list it. Needs the setting above, and takes effect at the next sign-in.",
+        "defaultValue": false
+      },
+      {
+        "key": "calendarView",
+        "type": "string",
+        "label": "The calendar opens on",
+        "description": "Which view the calendar starts in. Changing it in the window is for that look only; this is what it comes back to.",
+        "defaultValue": "week",
+        "options": [
+          "day",
+          "work week",
+          "week",
+          "month"
+        ]
+      },
+      {
+        "key": "weekStart",
+        "type": "string",
+        "label": "Weeks start on",
+        "description": "Which day a week begins with. Graph has no opinion about this and neither has the plugin.",
+        "defaultValue": "monday",
+        "options": [
+          "monday",
+          "sunday"
+        ]
+      },
+      {
+        "key": "meetingReminders",
+        "type": "boolean",
+        "label": "Tell me when a meeting is about to start",
+        "description": "A desktop notification a few minutes before each meeting, with a click that opens it where the Join button is. Needs the calendar and the notification setting. Nothing you have declined is announced.",
+        "defaultValue": true
+      },
+      {
+        "key": "reminderMinutes",
+        "type": "integer",
+        "label": "How long before a meeting to say so (minutes)",
+        "min": 1,
+        "max": 60,
+        "step": 1,
+        "defaultValue": 5
       },
       {
         "key": "chats",

@@ -1,6 +1,6 @@
 # Microsoft Teams for Omarchy
 
-Teams chats and channels in the Omarchy bar, and in a window of their own.
+Teams chats, channels and your calendar in the Omarchy bar, and in a window of their own.
 
 - **A bar icon** that tints when a chat is unread, with a tooltip naming the account and the count.
 - **A dropdown behind it**, and deliberately only two things: your presence, and what is unread. Those are the two questions a bar is asked — *how do I look to people* and *does anything need me* — and both are answered by picking from a short list, which is what a popup that closes on click-away can do. Reading a conversation and writing a reply is not, so a row here opens the window at that chat rather than being a smaller copy of it. The one thing it does beyond answering those two is **mark every unread chat read** — `m`, asked twice — because that is the other way of being done with a list of what needs you. Right-click the icon to skip the dropdown and go straight to the window.
@@ -13,6 +13,7 @@ Teams chats and channels in the Omarchy bar, and in a window of their own.
 - **Presence.** Beside each one-to-one chat: a filled circle for available, a filled circle for busy, a ring for away, a dim circle for offline — in the running theme's own colours. Group chats have none, because a group is not away. Told apart from unread by shape and place, not by hue: presence sits immediately in front of the name because it is about the person, unread is a bar down the leading edge because it is about the conversation, and a chat can show both. Needs `Presence.Read.All` — ordinary user consent.
 - **Your own presence, set from here.** `p`, or the dot in the header: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and *Automatic* to hand it back to Teams. It is the client's own status menu, written through Graph, and it sticks until you hand it back. This one needs `Presence.ReadWrite`, which an administrator has to consent to — writing your own presence is the dearer permission, not reading everybody's — so it is off until you turn it on. There is a second setting for the part nobody expects: a presence you set only shows while Teams believes you are signed in *somewhere*, so the plugin can be that somewhere. See [Your presence](#your-presence).
 - **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. The pointer on a chip says who reacted, what Teams calls that reaction, and which of the two a click would do. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
+- **Your calendar**, in the same window: `c`, or **Calendar** in the header. Day, work week, week and month; a clock face with overlapping meetings side by side and a line across today; whole-day things in a strip of their own; a month grid that runs into the months either side; and an agenda instead when the window is too narrow for columns. Open a meeting for who is coming and what each of them said, **accept, tentative or decline** with a line for the organiser, **book one** with people from the directory in it, or **call one off**. **Join** hands the link to whatever handles Teams meetings here, which is the one thing a QML window cannot do itself. A notification a few minutes before each one. Needs `Calendars.Read`, and `Calendars.ReadWrite` for anything that changes something — both ordinary user consent. See [Your calendar](#your-calendar).
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
 
 ![The conversation list, and a chat open beside it](showcase-conversation.png)
@@ -91,6 +92,24 @@ reading, which is the step that used to be missing.
 | `g` / `G` | To the top / to the newest |
 | `Home` / `End` | The same as `g` / `G` |
 
+### The calendar
+
+| Key | What it does |
+|---|---|
+| `c` | The calendar, and back to the conversations |
+| `j` / `k` | The meeting before / after, in the order they are drawn |
+| `h` / `l`, or `[` / `]` | The period before / after |
+| `1` – `4` | Day, work week, week, month |
+| `v` | The next view along |
+| `t` | Back to today |
+| `Enter` | Open the meeting under the cursor |
+| `J` | Join it |
+| `n` | Book a meeting |
+| `r` | Read the range again |
+| `1` / `2` / `3` | In an open meeting: accept, tentative, decline |
+| `x` | In an open meeting: call it off. Asked twice |
+| `Escape` | Close the meeting, then the form, then back to the conversations |
+
 ### Doing
 
 | Key | What it does |
@@ -135,6 +154,8 @@ An Azure app registration declares up front which delegated permissions it is al
    | `Presence.Read.All` | the presence dot beside a one-to-one chat | user |
    | `Files.ReadWrite` | sending a file into a chat — optional, see below | user |
    | `Presence.ReadWrite` | setting your own presence — optional, see below | **admin** |
+   | `Calendars.Read` | your calendar — optional, see below | user |
+   | `Calendars.ReadWrite` | answering an invitation, booking a meeting, calling one off — optional, see below | user |
 
    `Chat.ReadWrite` rather than `Chat.Read` on purpose: marking a chat read is
    a write, and `markChatReadForUser` refuses anything less. Everything in that
@@ -146,6 +167,15 @@ An Azure app registration declares up front which delegated permissions it is al
    list fails the whole sign-in rather than that one scope. Add it here and turn
    on **Send files** in the widget's settings; leave both alone and everything
    else works exactly as before.
+
+   The two calendar permissions are opt-in for the same reason as
+   `Files.ReadWrite` and not for consent: both are ordinary user consent — it
+   is your own calendar — but a registration declares reading and writing
+   separately, so a plugin that asked for the write scope uninvited would fail
+   the sign-in of everybody whose registration lists only the read one. Add
+   whichever you want and turn on **Calendar**, and **Answer and create
+   meetings** for the second. `Calendars.ReadWrite` is sent *in place of*
+   `Calendars.Read`, not beside it — it contains it.
 
    `Presence.ReadWrite` is opt-in for that reason *and* because of consent. It
    is the only permission besides the channel ones that needs an administrator:
@@ -189,6 +219,12 @@ own.
 | `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. Your app registration has to declare it first. |
 | `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p` and the status chip need. Your registration has to declare it and an administrator has to consent to it. |
 | `holdPresence` | `false` | Whether to hold a presence session open for this machine, so a presence you set has something to show against. Needs `setPresence`. |
+| `calendar` | `false` | Whether to ask for `Calendars.Read` at sign-in, which is what the calendar pane needs. |
+| `calendarWrite` | `false` | Whether to ask for `Calendars.ReadWrite` instead, which is what answering an invitation, booking a meeting and calling one off need. Needs `calendar`. |
+| `calendarView` | `week` | Which view the calendar opens on: `day`, `work week`, `week`, `month`. |
+| `weekStart` | `monday` | Which day a week begins with: `monday` or `sunday`. |
+| `meetingReminders` | `true` | A notification a few minutes before each meeting. Needs `calendar` and `notify`. |
+| `reminderMinutes` | `5` | How long before a meeting to say so (1–60). |
 | `chats` | `25` | How many chats to list (1–40). |
 | `density` | `cosy` | How much room the window gives things: `compact`, `cosy`, `roomy`, `spacious`. A multiplier over the theme's own spacing, so it follows your font size rather than fighting it. |
 | `refreshIntervalSec` | `120` | How often to poll (30–3600). |
@@ -362,6 +398,90 @@ The session is named after the app registration rather than after the machine �
 Graph's requirement, not a shortcut — so two machines running this plugin renew
 one session between them instead of holding two.
 
+## Your calendar
+
+`c`, or **Calendar** in the header. The same window, the other pane: day, work
+week, week and month, on the same account and the same keyboard.
+
+- **Four views**, numbered `1`–`4` and stepped with `[` and `]`. `t` comes back
+  to today. Which one it opens on is a setting; switching in the window is for
+  that look only, because flipping to Month for one glance is not a preference
+  worth writing to `shell.json`.
+- **A clock face** for the day, work week and week: a column per day, blocks
+  positioned by the minute, meetings that overlap drawn side by side, and a
+  line across today at the time it actually is. Whole-day things — leave, a
+  conference, an away day — sit in a strip of their own above it, because an
+  absence that covers Tuesday is not a meeting from midnight to midnight.
+- **A month grid** that runs into the months either side rather than leaving
+  the corners blank. Those are real days with real meetings on them, and a grid
+  that showed the 1st as empty because the week began in August would be saying
+  something untrue. A cell shows as many as it has room for and counts the
+  rest.
+- **An agenda instead**, when the window is too narrow for columns. A week of
+  columns forty pixels wide is a week nobody can read, and this window is as
+  often tiled into a third of a screen as it is not.
+- **Colour means availability**, not decoration: busy, tentative, free, out of
+  office, working elsewhere — in the running theme's own hues. An invitation
+  nobody has answered is drawn as an outline, because that is the one state
+  with something still to do about it, and anything declined or cancelled is
+  drawn faint. A meeting that is happening *now* takes the accent.
+- **Open one** with `Enter` or a click: when and where, whether it repeats,
+  who organised it, everyone invited and what each of them said, and the
+  agenda — flattened out of the HTML the invitation was written in, with its
+  links kept and tinted, the same way a chat message is.
+- **Answer it.** Accept, tentative, decline — `1`, `2`, `3`, or the buttons —
+  with a line for the organiser if you want one, and a switch for Teams' own
+  *don't send a response*. Changing your mind later is the same three buttons.
+- **Book one.** `n`, **New meeting**, or a double-click on an empty hour, which
+  fills the day and the time in from where you clicked. Subject, day, from and
+  to or all-day, a room, an agenda, and people from the same directory search
+  the new-chat card uses — click a guest to make them optional. **Teams
+  meeting** is on by default, which is what puts the join link in the
+  invitation.
+- **Call one off.** Your own meeting is cancelled and everybody invited is
+  told; somebody else's is taken off your calendar and nobody is told. The
+  button says which, and asks twice — there is no route back from either.
+- **Join** with `J` or the button, and from the block itself without opening
+  it — which is what somebody four minutes late wants.
+- **A word before it starts.** A notification a few minutes ahead, with a click
+  that opens the meeting where the Join button is. Nothing you have declined is
+  announced, and neither is anything that was already running when the shell
+  started — the same prime-then-announce rule the message notifications follow.
+
+Reading it needs `Calendars.Read` and everything that changes anything needs
+`Calendars.ReadWrite`. Both are ordinary user consent — no administrator — but
+an app registration declares the two separately, so they are two settings and
+two tiers. With only the read one, the calendar is there and the buttons that
+would change it are not.
+
+### Joining hands off, and that is deliberate
+
+**Join** opens the meeting's link in whatever handles Teams meetings on this
+machine — the desktop client, or a browser. It is the one thing in this plugin
+that leaves the window, and it is not a gap waiting to be closed: a meeting is
+audio, video and screen sharing, and this is a QML panel over a Python helper.
+Everything *around* the meeting — knowing it is coming, what it is about, who
+is in it, and whether you are going — is here so that opening the other thing
+is the last step rather than the first.
+
+### Times, and why none of them are guessed
+
+Graph answers in UTC. `teams.py` converts every timestamp to this machine's
+local time and works out which local day each event belongs to, and the window
+groups by that — so no timezone arithmetic happens above the helper at all.
+Two places where the obvious reading is wrong, and both are covered by tests:
+
+- **An end is exclusive.** An all-day Friday ends at Saturday midnight, and a
+  23:00 call ends on the following date. The last day an event covers is
+  computed from the last moment it covers, or both would be drawn on a day they
+  are not in.
+- **A whole day has to be filed in a named zone.** Midnight UTC is the previous
+  evening in half the world, so booking an all-day event sends the date with
+  this machine's IANA zone name — read from `TZ` or `/etc/localtime`. A
+  timed meeting does not need one and is sent as a UTC instant, worked out with
+  the offset that will be in force *on that date*, so a meeting booked across a
+  clock change keeps the time it was typed at.
+
 ## What it does not do
 
 - **Only the six reactions Teams offers.** 👍 ❤️ 😂 😮 😢 😡. Graph refuses anything else with "Unicode ... is not supported", so the picker offers exactly what will work rather than letting you pick something that silently fails.
@@ -371,6 +491,12 @@ one session between them instead of holding two.
 - **A message never chooses its own markup.** A Teams message is HTML written by whoever sent it, and Qt's rich text fetches what it is told to fetch. So the markup is flattened in `teams.py`, and the only tag the window ever builds is an `<a>` around text it escaped first. Emoji come from the character Teams already puts in the tag's `alt`. A link keeps its address, but as an offset into the flattened text rather than as a tag — so what reaches the window is still only words, and the window still builds every tag it draws. Only `http`, `https` and `mailto` become links, checked in `teams.py`, again in `Model.js` where the anchor is written, and once more in `openUrl` before `xdg-open` sees it; anything else stays the plain words it was.
 - **Images are fetched by the helper, never by the window.** They live behind the Graph API and need your token; the host is checked before that token is attached, so an `<img src="https://evil/">` in a message cannot be used to collect it. Anything not on `graph.microsoft.com` is dropped from the message entirely.
 - **Files go into chats, not channels, and up to 4 MB.** See [Sending a file](#sending-a-file) for why both of those are where they are.
+- **Joining opens something else.** A meeting is audio and video; this is a QML panel. Everything around the meeting is here, and the join link goes to whatever handles Teams meetings on this machine. See [Joining hands off](#joining-hands-off-and-that-is-deliberate).
+- **A meeting can be booked and called off, but not edited.** Moving one, renaming it, or changing who is invited is a form with a recurrence editor in it, and that is a feature of its own. Cancel and rebook, or use Outlook for that one thing.
+- **One calendar: yours.** Not a shared one, not a room's, not a colleague's — and no free/busy lookup of anybody else before booking. What the plugin shows is what `/me/calendarView` answers.
+- **A whole-day event is drawn on each day it covers**, not as one bar spanning them. Both say the same thing; the bar is the harder one to lay out beside meetings that begin mid-morning.
+- **No reminders inside the window**, and none for what is already running: the notification is the reminder, it comes from the poll rather than from a timer of its own, and what was under way when the shell started is not announced.
+- **No search, in a calendar or anywhere else.** Graph has one; this plugin does not use it. Step to the week.
 - **No status message.** Teams lets you write a line of text under your presence, and Graph will take one. The six states are what the picker offers; a text field with an expiry and an @-mention picker in it is a different feature, and it is not here yet.
 - **No "in a call", and no reading back which presence you chose.** Both for the same reason: the plugin will not report something it does not know. See [Your presence](#your-presence).
 
@@ -399,12 +525,65 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 |---|---|
 | `demo` | Answer every read from the fixtures, and refuse every write. |
 | `demoOpen` | The id of a conversation to open by itself once the list loads, e.g. `demo-chat-0`. There is no key that opens a conversation — only a click, which an automated run cannot aim at a row whose position depends on the theme's font size. |
+| `demoPane` | `calendar` opens the calendar by itself once the fetch says there is one. The calendar's `demoOpen`, and for the same reason: `c` is a keystroke aimed at a window an automated run has not focused. |
 
 `SHOWCASE_WIDTH` and `SHOWCASE_HEIGHT` override the window size it photographs (1080×720 by default).
 
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.6.0 — 2026-09-04
+
+- **Your calendar, in the same window.** `c`, or **Calendar** in the header:
+  day, work week, week and month, on the account that was already signed in.
+  A clock face with a column per day, meetings that overlap drawn side by
+  side, whole-day things in a strip of their own, and a line across today at
+  the time it actually is; a month grid that runs into the months either side,
+  because those are real days with real meetings on them; and an agenda
+  instead when the window is too narrow for columns, which is most of the time
+  on a tiled desktop.
+
+  Colour says what a meeting does to your day rather than what the theme's
+  accent is — busy, tentative, free, out of office — and an invitation nobody
+  has answered is an outline, because that is the one state with something
+  still to do about it.
+
+- **What a meeting is, and what to do about it.** Open one for when and where,
+  whether it repeats, who organised it, everybody invited and what each of them
+  said, and the agenda — flattened out of the invitation's HTML with its links
+  kept, exactly the way a chat message is, because an invitation is somebody
+  else's markup too. Accept, tentative or decline with a line for the
+  organiser and a switch for Teams' own *don't send a response*; book one, with
+  people from the same directory search the new-chat card uses; call one off,
+  which cancels it for everybody if it is yours and quietly removes it if it is
+  not. **Join** hands the link to whatever handles Teams meetings on this
+  machine — the one thing a QML window genuinely cannot do itself, and the
+  README says so rather than pretending otherwise.
+
+- **A word before a meeting starts.** A notification a few minutes ahead,
+  clicking through to the meeting where the Join button is. Nothing declined is
+  announced, and neither is anything already under way when the shell started —
+  the same prime-then-announce rule the message notifications follow. Off with
+  one setting, and it only ever costs a request on the Service that already
+  does the announcing.
+
+- **Two new permission tiers, both ordinary user consent.** `Calendars.Read`
+  for the calendar and `Calendars.ReadWrite` for anything that changes it.
+  Separately declared by an app registration, so they are separately opt-in:
+  asking for the write scope uninvited would fail the sign-in of everybody
+  whose registration lists only the read one. With the read grant alone the
+  calendar is there and the buttons that would change it are not, which is the
+  same shape as `channels: false` still leaving chats working.
+
+- **Every timestamp is converted once, in the helper.** Graph answers in UTC
+  and a calendar is drawn in local days, so `teams.py` does the conversion and
+  hands the window the local day each event belongs to — no timezone
+  arithmetic above it at all. Two things the obvious reading gets wrong are
+  covered by tests: an end is exclusive, so the last day an event covers is
+  computed from the last moment it covers rather than from its end; and a
+  whole-day event has to be filed in a named zone, because midnight UTC is the
+  previous evening in half the world.
 
 ### 0.5.0 — 2026-09-02
 

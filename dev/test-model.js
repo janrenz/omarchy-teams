@@ -18,7 +18,13 @@ const Model = new Function(
   source +
     "; return { accountView, conversationRows, selectableRows, groupMessages, whenLabel, " +
     "subtitleFor, oneLine, plainText, parseJson, linkify, hasLink, escapeHtml, " +
-    "densityScale, densityNames, reactionIsMine, presenceColor, presenceLabel }"
+    "densityScale, densityNames, reactionIsMine, presenceColor, presenceLabel, " +
+    "calendarViewNames, calendarRange, calendarDays, shiftAnchor, rangeLabel, " +
+    "agendaRows, eventCursorKeys, eventCursorKey, daySpan, layoutColumns, " +
+    "eventTimeLabel, durationLabel, responseLabel, showAsLabel, answerable, " +
+    "eventTint, attendeeSummary, attendeeTally, minutesUntil, isNow, nextUp, " +
+    "startingSoon, firstBusyHour, nowMinutes, newMeetingProblem, newMeetingPayload, " +
+    "keyOf, dateOf, addDays, addMonths, weekStart, todayKey, clockLabel }"
 )()
 
 let passed = 0
@@ -654,6 +660,265 @@ test("with no colour it is a plain anchor, as before", () => {
 test("tinting does not weaken the escaping", () => {
   const html = Model.linkify('<script>bad()</script> https://x.y', "#7aa2f7")
   ok(!html.includes("<script"), "a script tag survived: " + html)
+})
+
+
+// ------------------------------------------------------------------ calendar
+//
+// Days are strings and the events already carry the one they belong to, so
+// none of this needs a timezone - which is what makes it testable at all.
+// `now` goes in wherever today matters.
+
+const SEP4 = new Date(2026, 8, 4, 10, 20)   // a Friday
+const day = (key, when, until, extra) =>
+  Object.assign({ id: key + "@" + when, subject: "Meeting", when: when, until: until,
+                  startDate: key, endDate: key, allDay: false, showAs: "busy",
+                  response: "accepted" }, extra || {})
+const slot = (key, from, to) =>
+  day(key, key + "T" + from + ":00", key + "T" + to + ":00")
+
+test("a week runs Monday to Sunday, and a work week stops on Friday", () => {
+  eq(Model.calendarRange("week", "2026-09-04").keys, [
+    "2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03",
+    "2026-09-04", "2026-09-05", "2026-09-06"])
+  eq(Model.calendarRange("work week", "2026-09-04").keys.length, 5)
+  eq(Model.calendarRange("work week", "2026-09-04").keys[4], "2026-09-04")
+  eq(Model.calendarRange("day", "2026-09-04").keys, ["2026-09-04"])
+})
+
+test("a week can start on Sunday instead, and the work week follows it", () => {
+  eq(Model.calendarRange("week", "2026-09-04", true).keys[0], "2026-08-30")
+  // Monday to Friday either way: what moves is where the week begins, not
+  // which days people work.
+  eq(Model.calendarRange("work week", "2026-09-04", true).keys[0], "2026-08-31")
+})
+
+test("a month runs from the Monday before the 1st to the Sunday after the last", () => {
+  const range = Model.calendarRange("month", "2026-09-04")
+  eq(range.keys[0], "2026-08-31")
+  eq(range.keys[range.keys.length - 1], "2026-10-04")
+  ok(range.days % 7 === 0, "a month grid is whole weeks, got " + range.days)
+})
+
+test("stepping a month from the 31st does not skip one", () => {
+  // setDate on a 30-day month rolls over, which is how "next month" from 31
+  // August lands in October.
+  eq(Model.shiftAnchor("month", "2026-08-31", 1), "2026-09-30")
+  eq(Model.shiftAnchor("month", "2026-01-31", 1), "2026-02-28")
+  eq(Model.shiftAnchor("day", "2026-09-30", 1), "2026-10-01")
+})
+
+test("a work week steps a whole week, not five days", () => {
+  // Five would walk the anchor onto a Saturday, and the week after that is
+  // the wrong one.
+  eq(Model.shiftAnchor("work week", "2026-09-04", 1), "2026-09-07")
+  eq(Model.shiftAnchor("work week", "2026-09-04", -1), "2026-08-24")
+})
+
+test("the range says what it is showing, and leaves this year off", () => {
+  eq(Model.rangeLabel("day", ["2026-09-04"], SEP4), "Friday 4 September")
+  eq(Model.rangeLabel("day", ["2027-09-04"], SEP4), "Saturday 4 September 2027")
+  eq(Model.rangeLabel("week", Model.calendarRange("week", "2026-09-04").keys, SEP4),
+     "31 Aug – 6 Sep")
+  eq(Model.rangeLabel("week", ["2026-09-07", "2026-09-11"], SEP4), "7 – 11 September")
+  // Named for the month it is about, not for the six weeks it draws.
+  eq(Model.rangeLabel("month", Model.calendarRange("month", "2026-09-04").keys, SEP4),
+     "September 2026")
+})
+
+test("an event is on every day it touches", () => {
+  const leave = day("2026-09-04", "2026-09-04T00:00:00", "2026-09-07T00:00:00",
+                    { allDay: true, endDate: "2026-09-06" })
+  const days = Model.calendarDays([leave], Model.calendarRange("week", "2026-09-04").keys,
+                                  "2026-09-04", "2026-09-04")
+  eq(days.map(d => d.allDay.length), [0, 0, 0, 0, 1, 1, 1])
+  eq(days[4].isToday, true)
+  eq(days[3].isPast, true)
+})
+
+test("all-day events are kept apart from the ones with a clock face", () => {
+  const days = Model.calendarDays(
+    [day("2026-09-04", "2026-09-04T00:00:00", "2026-09-05T00:00:00", { allDay: true }),
+     slot("2026-09-04", "09:00", "10:00")],
+    ["2026-09-04"], "2026-09-04", "2026-09-04")
+  eq(days[0].allDay.length, 1)
+  eq(days[0].timed.length, 1)
+  eq(days[0].count, 2)
+})
+
+test("a block is clipped to the day it is being drawn on", () => {
+  // A call from 23:00 to 01:00 is the tail of one day and the head of the
+  // next, which is what every calendar draws.
+  const overnight = day("2026-09-04", "2026-09-04T23:00:00", "2026-09-05T01:00:00",
+                        { endDate: "2026-09-05" })
+  eq(Model.daySpan(overnight, "2026-09-04"), { start: 1380, end: 1440 })
+  eq(Model.daySpan(overnight, "2026-09-05"), { start: 0, end: 60 })
+})
+
+test("a meeting with no length is still tall enough to click", () => {
+  eq(Model.daySpan(slot("2026-09-04", "09:00", "09:00"), "2026-09-04"),
+     { start: 540, end: 555 })
+})
+
+test("overlapping meetings are given columns, and the ones after them are not", () => {
+  const rows = Model.layoutColumns([
+    slot("2026-09-04", "09:00", "10:00"),
+    slot("2026-09-04", "09:30", "10:30"),
+    slot("2026-09-04", "14:00", "15:00")], "2026-09-04")
+  eq(rows.map(r => [r.column, r.columns]), [[0, 2], [1, 2], [0, 1]])
+})
+
+test("a chain of overlaps is one cluster, and reuses a column that has ended", () => {
+  // Three meetings chained across an hour share one width; the third can sit
+  // back in the first's column because the first is over by then.
+  const rows = Model.layoutColumns([
+    slot("2026-09-04", "09:00", "10:00"),
+    slot("2026-09-04", "09:30", "10:30"),
+    slot("2026-09-04", "10:15", "11:00")], "2026-09-04")
+  eq(rows.map(r => r.column), [0, 1, 0])
+  eq(rows.map(r => r.columns), [2, 2, 2])
+})
+
+test("three at once are three columns", () => {
+  const rows = Model.layoutColumns([
+    slot("2026-09-04", "14:00", "15:00"),
+    slot("2026-09-04", "14:00", "14:30"),
+    slot("2026-09-04", "14:00", "14:15")], "2026-09-04")
+  eq(rows.map(r => r.columns), [3, 3, 3])
+  eq(rows.map(r => r.column).sort(), [0, 1, 2])
+})
+
+test("an agenda leaves out the empty days, unless every day is one", () => {
+  const days = Model.calendarDays([slot("2026-09-04", "09:00", "10:00")],
+                                  Model.calendarRange("week", "2026-09-04").keys,
+                                  "2026-09-04", "2026-09-04")
+  eq(Model.agendaRows(days).map(r => r.kind), ["day", "event"])
+  const empty = Model.calendarDays([], ["2026-09-04"], "2026-09-04", "2026-09-04")
+  eq(Model.agendaRows(empty).map(r => r.kind), ["day", "note"])
+})
+
+test("the cursor walks the days in the order they are drawn", () => {
+  const days = Model.calendarDays(
+    [day("2026-09-04", "2026-09-04T00:00:00", "2026-09-05T00:00:00",
+         { allDay: true, id: "leave" }),
+     Object.assign(slot("2026-09-04", "09:00", "10:00"), { id: "stand" }),
+     Object.assign(slot("2026-09-05", "09:00", "10:00"),
+                   { id: "next", startDate: "2026-09-05", endDate: "2026-09-05" })],
+    ["2026-09-04", "2026-09-05"], "2026-09-04", "2026-09-04")
+  // All-day first, then the clock, then the next day.
+  eq(Model.eventCursorKeys(days),
+     ["2026-09-04:leave", "2026-09-04:stand", "2026-09-05:next"])
+})
+
+test("a meeting says when it is, and how long for", () => {
+  eq(Model.eventTimeLabel(slot("2026-09-04", "09:00", "09:30")), "09:00 – 09:30")
+  eq(Model.eventTimeLabel({ allDay: true }), "All day")
+  eq(Model.durationLabel({ minutes: 45 }), "45 min")
+  eq(Model.durationLabel({ minutes: 60 }), "1 h")
+  eq(Model.durationLabel({ minutes: 90 }), "1 h 30 min")
+  eq(Model.durationLabel({ minutes: 2880, allDay: true }), "2 days")
+})
+
+test("there is only a question to answer where there is an invitation", () => {
+  ok(Model.answerable({ response: "pending" }), "an unanswered invitation")
+  ok(Model.answerable({ response: "accepted" }), "changing your mind is the common case")
+  ok(!Model.answerable({ response: "none" }), "nobody was invited")
+  ok(!Model.answerable({ response: "pending", isOrganizer: true }), "your own meeting")
+  ok(!Model.answerable({ response: "pending", cancelled: true }), "a cancelled one")
+})
+
+test("the colour says what it does to your day, and declined says nothing", () => {
+  const palette = { blue: "#7aa2f7", yellow: "#e0af68", green: "#9ece6a",
+                    magenta: "#bb9af7", muted: "#565f89" }
+  eq(Model.eventTint({ showAs: "busy" }, palette), "#7aa2f7")
+  eq(Model.eventTint({ showAs: "tentative" }, palette), "#e0af68")
+  eq(Model.eventTint({ showAs: "oof" }, palette), "#bb9af7")
+  eq(Model.eventTint({ showAs: "free" }, palette), "#9ece6a")
+  eq(Model.eventTint({ showAs: "busy", response: "declined" }, palette), "#565f89")
+  eq(Model.eventTint({ showAs: "busy", cancelled: true }, palette), "#565f89")
+})
+
+test("who has answered is counted rather than listed", () => {
+  eq(Model.attendeeSummary([{ response: "accepted" }, { response: "accepted" },
+                            { response: "tentative" }, { response: "pending" }]),
+     "2 accepted, 1 tentative, 1 no reply")
+  eq(Model.attendeeSummary([]), "")
+})
+
+test("what is next is what has not ended, and never an all-day row", () => {
+  const events = [
+    Object.assign(slot("2026-09-04", "09:00", "10:00"), { id: "past" }),
+    Object.assign(slot("2026-09-04", "10:00", "11:00"), { id: "now" }),
+    Object.assign(slot("2026-09-04", "14:00", "15:00"), { id: "later" }),
+    day("2026-09-04", "2026-09-04T00:00:00", "2026-09-05T00:00:00",
+        { allDay: true, id: "leave" })]
+  eq(Model.nextUp(events, SEP4).id, "now")
+  ok(Model.isNow(events[1], SEP4), "10:20 is inside 10:00-11:00")
+  ok(!Model.isNow(events[0], SEP4), "and outside 09:00-10:00")
+  eq(Model.minutesUntil(events[2], SEP4), 220)
+})
+
+test("a declined meeting is neither next up nor worth a toast", () => {
+  const declined = Object.assign(slot("2026-09-04", "10:25", "11:00"),
+                                 { id: "no", response: "declined" })
+  eq(Model.nextUp([declined], SEP4), null)
+  eq(Model.startingSoon([declined], SEP4, 5).length, 0)
+})
+
+test("only what is about to start is worth a toast, and not what already has", () => {
+  const soon = Object.assign(slot("2026-09-04", "10:23", "11:00"), { id: "soon" })
+  const running = Object.assign(slot("2026-09-04", "10:00", "11:00"), { id: "running" })
+  const far = Object.assign(slot("2026-09-04", "11:00", "11:30"), { id: "far" })
+  eq(Model.startingSoon([soon, running, far], SEP4, 5).map(e => e.id), ["soon"])
+})
+
+test("the grid opens on the working day rather than on midnight", () => {
+  const days = Model.calendarDays([slot("2026-09-04", "09:00", "10:00")],
+                                  ["2026-09-04"], "2026-09-04", "2026-09-04")
+  eq(Model.firstBusyHour(days, SEP4), 8)
+  // With nothing on, it opens on the hour it actually is.
+  eq(Model.firstBusyHour(Model.calendarDays([], ["2026-09-04"], "2026-09-04", "2026-09-04"),
+                         SEP4), 9)
+})
+
+test("the now line is only drawn on the day it is now on", () => {
+  eq(Model.nowMinutes("2026-09-04", SEP4), 620)
+  eq(Model.nowMinutes("2026-09-05", SEP4), null)
+})
+
+test("a meeting is checked before it is sent, and told what is wrong", () => {
+  const good = { subject: "Sync", date: "2026-09-04", from: "09:00", to: "10:00" }
+  eq(Model.newMeetingProblem(good), "")
+  eq(Model.newMeetingProblem(Object.assign({}, good, { subject: " " })),
+     "A meeting needs a subject")
+  eq(Model.newMeetingProblem(Object.assign({}, good, { date: "the fourth" })),
+     "The date has to be YYYY-MM-DD")
+  eq(Model.newMeetingProblem(Object.assign({}, good, { from: "9am" })),
+     "The start time has to be HH:MM")
+  eq(Model.newMeetingProblem(Object.assign({}, good, { to: "08:00" })),
+     "A meeting has to end after it starts")
+  // A whole day has no time of day to get wrong.
+  eq(Model.newMeetingProblem({ subject: "Away", date: "2026-09-04", allDay: true }), "")
+})
+
+test("what is sent is wall-clock time with no zone on it", () => {
+  // The helper is the side that knows this machine's timezone.
+  const payload = Model.newMeetingPayload(
+    { subject: " Sync ", date: "2026-09-04", from: "09:00", to: "10:00",
+      attendees: [{ address: "a@b.c" }, { address: "" }] })
+  eq(payload.start, "2026-09-04T09:00:00")
+  eq(payload.end, "2026-09-04T10:00:00")
+  eq(payload.subject, "Sync")
+  eq(payload.online, true)
+  eq(payload.attendees, [{ address: "a@b.c", name: "", kind: "required" }])
+})
+
+test("a whole day ends at the next midnight, which is what Graph means by it", () => {
+  const payload = Model.newMeetingPayload(
+    { subject: "Away", date: "2026-09-04", allDay: true, days: 3 })
+  eq(payload.start, "2026-09-04T00:00:00")
+  eq(payload.end, "2026-09-07T00:00:00")
+  eq(payload.showAs, "free")
 })
 
 // ---------------------------------------------------------------------------

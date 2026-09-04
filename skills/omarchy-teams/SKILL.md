@@ -47,6 +47,22 @@ teams, when the Azure app registration was granted enough to see them.
 Two things Graph will not give you, so do not go looking: a channel has no read
 state at all, and there is no search. To find something in a channel, read it.
 
+## The calendar
+
+    python3 $HELPER calendar --account work --from 2026-09-04 --days 7
+    python3 $HELPER event    --account work --event AAMkAD...
+
+`calendar` is a range of **local** days with recurring meetings already
+expanded - one row per occurrence, each carrying `startDate` and `endDate` (the
+local days it covers), `when` and `until` as ISO timestamps with this machine's
+offset, `allDay`, `showAs`, `response` (`accepted`, `tentative`, `declined`,
+`pending`, `organizer`, or `none` when nobody was invited), and `joinUrl` when
+it is a Teams meeting. It does not carry the agenda or the guest list, because
+a month of those is a great deal of nothing; `event` has both.
+
+Reading it needs `Calendars.Read` on the registration and the `calendar`
+setting; the helper says so plainly when either is missing.
+
 ## Handing a draft back to the window
 
 This is the point of the handover. The window opens if it is closed, the text
@@ -80,6 +96,28 @@ A file goes into a chat - not into a channel, where it would need
 It needs the opt-in file scope and the `sendFiles` setting; the helper says so
 plainly when either is missing. Read the path back to the user before sending -
 a wrong file in a chat cannot be taken back.
+
+Answering an invitation, booking a meeting and calling one off all reach other
+people, so all three are asked-for work:
+
+    printf '%s' '{"comment":"..."}' \
+      | python3 $HELPER rsvp --account work --event AAMkAD... --response accept --stdin
+    printf '%s' '{"subject":"...","start":"2026-09-04T14:00","end":"2026-09-04T15:00",
+                  "online":true,"attendees":[{"address":"a@example.com"}],"text":"..."}' \
+      | python3 $HELPER new-event --account work --stdin
+    python3 $HELPER cancel-event --account work --event AAMkAD... --stdin
+
+`--response` is `accept`, `tentative` or `decline`; `--silent` answers without
+sending the organiser a reply. Times for `new-event` are **wall clock with no
+zone on them** - the helper attaches this machine's - and an all-day event
+needs `"allDay": true` with `end` on the *following* midnight. `cancel-event`
+does one of two different things depending on whose meeting it is: an
+organiser's is cancelled and everybody invited is told, an attendee's is
+removed from their own calendar and nobody is; the answer says which. All of
+these need `Calendars.ReadWrite` and the `calendarWrite` setting.
+
+Joining is not something you can do: hand the user the `joinUrl` or tell them
+to press `J` in the window.
 
 Your presence is visible to the whole organisation, so it is asked-for work
 too:

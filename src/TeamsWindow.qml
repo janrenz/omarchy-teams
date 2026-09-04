@@ -107,6 +107,15 @@ Item {
         focusPane = "conversation"
       }
     }
+    // A clicked meeting reminder, which is the calendar's equivalent of a
+    // clicked message toast: the pane, and the meeting to open on it.
+    var meeting = String(payload.event || "")
+    if (String(payload.pane || "") === "calendar" || meeting !== "") {
+      showPane("calendar")
+      // Not showEvent(), which toggles: a reminder clicked twice should leave
+      // the meeting open rather than close it.
+      if (meeting !== "" && service.openEventId !== meeting) service.showEvent(meeting)
+    }
     if (payload.draft) {
       agentDraftPending = payload.draft
       flushAgentDraft()
@@ -169,6 +178,9 @@ Item {
     id: service
     settings: root.settings
     pluginDir: root.pluginDir
+    // Nobody is looking at a calendar in a window that is not on screen, and
+    // a month of meetings is a Graph request that should not be spent on one.
+    calendarActive: root.pane === "calendar" && window.visible
   }
 
   // ---- keyboard -----------------------------------------------------------
@@ -379,6 +391,154 @@ Item {
   property bool showSettings: false
   property bool composingNew: false
 
+  // ---- the calendar -------------------------------------------------------
+  //
+  // A second pane rather than a second window: it is the same account, the
+  // same service and the same keyboard, and a Teams that opened two toplevels
+  // would be two things to find on a workspace instead of one.
+
+  // "chats" or "calendar".
+  property string pane: "chats"
+  readonly property bool onCalendar: pane === "calendar" && service.hasCalendar
+
+  function showPane(name) {
+    var wanted = String(name || "chats")
+    if (wanted === "calendar" && !service.hasCalendar) return
+    pane = wanted
+    if (wanted === "calendar") {
+      if (service.calendarAnchor === "") service.calendarToday()
+    } else {
+      // A meeting and the form that books one belong to the calendar. Left
+      // open, they hang over the conversations - and Escape would then be
+      // closing something nobody can see.
+      service.closeEvent()
+      composingMeeting = false
+    }
+    keyCatcher.forceActiveFocus()
+  }
+
+  function toggleCalendar() {
+    showPane(pane === "calendar" ? "chats" : "calendar")
+  }
+
+  // Which meeting the keys are on, as day-and-id: a meeting running past
+  // midnight is drawn in two columns, and the cursor is on one of them.
+  property string calendarCursor: ""
+
+  function moveEventCursor(step) {
+    var keys = Model.eventCursorKeys(service.calendarDays)
+    if (keys.length === 0) { calendarCursor = ""; return }
+    var at = keys.indexOf(calendarCursor)
+    var next = at < 0 ? (step > 0 ? 0 : keys.length - 1)
+                      : Math.max(0, Math.min(keys.length - 1, at + step))
+    calendarCursor = keys[next]
+  }
+
+  // The meeting under the cursor, or the next one there is if the cursor is
+  // nowhere yet - pressing Enter on a freshly opened calendar should open
+  // something rather than nothing.
+  function cursoredEvent() {
+    var days = service.calendarDays
+    for (var d = 0; d < days.length; d++) {
+      var all = days[d].allDay.concat(days[d].timed)
+      for (var e = 0; e < all.length; e++)
+        if (Model.eventCursorKey(days[d].key, all[e].id) === calendarCursor) return all[e]
+    }
+    return null
+  }
+
+  function openCursoredEvent() {
+    var event = cursoredEvent()
+    if (!event) {
+      var keys = Model.eventCursorKeys(service.calendarDays)
+      if (keys.length === 0) return
+      calendarCursor = keys[0]
+      event = cursoredEvent()
+      if (!event) return
+    }
+    service.showEvent(String(event.id))
+  }
+
+  // Joining is the one thing this window cannot do itself - a meeting is
+  // audio and video and this is a QML panel - so it hands the link to
+  // whatever handles Teams meetings on this machine.
+  function joinCursored() {
+    var event = service.openEvent || cursoredEvent()
+    if (event) service.joinMeeting(String(event.joinUrl || ""))
+  }
+
+  // ---- booking one --------------------------------------------------------
+
+  property bool composingMeeting: false
+  // One object rather than a field each, so that a half-written invitation
+  // survives a look at next Tuesday.
+  property var meetingDraft: ({})
+
+  function openNewMeeting(dayKey, hour) {
+    if (!service.canWriteCalendar) return
+    var day = String(dayKey || "") !== "" ? String(dayKey)
+              : (service.calendarAnchor || Model.keyOf(new Date()))
+    var at = Number(hour)
+    if (!isFinite(at) || at < 0) at = Math.min(23, new Date().getHours() + 1)
+    var pad2 = function(value) { return (value < 10 ? "0" : "") + value }
+    // Only a fresh form gets a fresh time: reopening one that is half written
+    // should come back to what was written, not to a new hour.
+    if (!meetingDraft || String(meetingDraft.subject || "") === "") {
+      meetingDraft = {
+        subject: "", date: day, from: pad2(at) + ":00",
+        to: pad2(Math.min(23, at + 1)) + ":00",
+        allDay: false, days: 1, online: true, where: "", text: "", attendees: []
+      }
+    } else if (String(dayKey || "") !== "") {
+      changeMeeting("date", day)
+    }
+    service.createEventError = ""
+    service.clearPeople()
+    composingMeeting = true
+  }
+
+  function changeMeeting(field, value) {
+    var next = {}
+    for (var k in meetingDraft) next[k] = meetingDraft[k]
+    next[String(field)] = value
+    meetingDraft = next
+  }
+
+  function closeNewMeeting() {
+    composingMeeting = false
+    service.clearPeople()
+    keyCatcher.forceActiveFocus()
+  }
+
+  function createMeeting() {
+    service.createEvent(meetingDraft)
+  }
+
+  // Which pane the demo opens on, for the showcase. There is no key an
+  // automated run can press - c is a keystroke aimed at a window that is not
+  // focused yet - and the pane cannot be picked before the fetch has said
+  // whether there is a calendar at all. Ignored unless `demo` is on, like
+  // demoOpen, so it can never touch a real account.
+  readonly property string demoPane: service.setting("demo", false) === true
+    ? String(service.setting("demoPane", "")).trim() : ""
+
+  Connections {
+    target: service
+
+    function onHasCalendarChanged() {
+      if (service.hasCalendar && root.demoPane === "calendar") root.showPane("calendar")
+    }
+
+    // Emptied only once it has landed, so a refusal keeps what was typed.
+    function onCreatedEventIdChanged() {
+      if (service.createdEventId === "") return
+      root.meetingDraft = ({})
+      root.composingMeeting = false
+      root.showPane("calendar")
+      service.showEvent(service.createdEventId)
+    }
+  }
+
   // ---- the coding agent ---------------------------------------------------
   //
   // Omarchy's own handover, pointed at a conversation: omarchy-agent starts
@@ -486,10 +646,15 @@ Item {
     if (showHelp) { showHelp = false; return }
     if (pickingPresence) { pickingPresence = false; return }
     if (composingNew) { closeNewChat(); return }
+    if (composingMeeting) { closeNewMeeting(); return }
+    if (service.readingEvent) { service.closeEvent(); return }
     if (showSettings) { showSettings = false; return }
     if (pickingMessageId !== "") { pickingMessageId = ""; return }
     if (composer.activeFocus) { leaveComposer(); return }
     if (listDrawerOpen) { listDrawerOpen = false; focusPane = "list"; return }
+    // The calendar is a pane rather than a layer, so Escape leaves it the way
+    // it leaves a conversation: back one step, to the chats.
+    if (pane === "calendar") { showPane("chats"); return }
     // Back to the list with the conversation still open, which is the step
     // that was missing: Escape used to close the conversation outright.
     if (focusPane === "conversation") { focusPane = "list"; return }
@@ -561,9 +726,10 @@ Item {
 
   FloatingWindow {
     id: window
-    title: service.openConversation
-      ? ("Teams — " + String(service.openConversation.title || ""))
-      : "Teams"
+    title: root.pane === "calendar" ? "Teams — Calendar"
+           : (service.openConversation
+              ? ("Teams — " + String(service.openConversation.title || ""))
+              : "Teams")
     color: Color.background
     implicitWidth: 1080
     implicitHeight: 720
@@ -657,7 +823,20 @@ Item {
       Keys.onPressed: function(event) {
         // While a field has focus these belong to the text in it.
         if (composer.activeFocus || codeField.activeFocus) return
-        if (root.composingNew) return
+        if (root.composingNew || root.composingMeeting) return
+        // The calendar scrolls itself: what is under the pointer there is a
+        // clock face inside the pane rather than one of the window's own
+        // ScrollViews.
+        if (root.onCalendar && !service.readingEvent) {
+          var screenful = Math.max(Style.space(80), calendar.height * 0.9)
+          if (event.key === Qt.Key_PageDown) calendar.scrollBy(screenful)
+          else if (event.key === Qt.Key_PageUp) calendar.scrollBy(-screenful)
+          else if (event.key === Qt.Key_Home) calendar.scrollBy(-100000)
+          else if (event.key === Qt.Key_End) calendar.scrollBy(100000)
+          else return
+          event.accepted = true
+          return
+        }
         var view = root.listDrawerOpen ? drawerScroll : root.scrollTarget()
         if (!view) return
         var page = Math.max(Style.space(80), view.height * 0.9)
@@ -790,6 +969,7 @@ Item {
             fontFamily: Style.font.family
             agentHandover: service.agentHandover
             canSetPresence: service.canSetPresence
+            hasCalendar: service.hasCalendar
           }
         }
       }
@@ -1007,6 +1187,143 @@ Item {
         }
       }
 
+      // One meeting, over the calendar it was picked from. A layer rather
+      // than a third column: this window is as often a third of a screen as
+      // it is a whole one, and an agenda beside a week of columns would leave
+      // neither of them readable.
+      Item {
+        id: meetingLayer
+        anchors.fill: parent
+        visible: service.readingEvent
+        z: 92
+
+        // Escape belongs to the comment field's ancestors, which is this:
+        // the key catcher stands down while that field has focus, so without
+        // a handler here there would be no way back out of it.
+        Keys.onPressed: function(event) {
+          if (event.key !== Qt.Key_Escape) return
+          service.closeEvent()
+          event.accepted = true
+        }
+
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.75)
+
+          MouseArea { anchors.fill: parent; onClicked: service.closeEvent() }
+        }
+
+        Rectangle {
+          id: meetingCard
+          anchors.centerIn: parent
+          width: Math.min(Style.space(560), meetingLayer.width - root.padPanel * 2)
+          height: Math.min(eventDetail.implicitHeight + Style.spacing.lg * 2,
+                           meetingLayer.height - root.padPanel * 2)
+          radius: Style.cornerRadius
+          color: Color.background
+          border.width: Style.space(1)
+          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+
+          // Swallows the clicks that would otherwise reach the scrim on their
+          // way to a button.
+          MouseArea { anchors.fill: parent }
+
+          Spinner {
+            anchors.centerIn: parent
+            visible: service.eventLoading && !service.openEvent
+            color: Color.accent
+            dotSize: Style.space(5)
+          }
+
+          Text {
+            anchors.centerIn: parent
+            width: parent.width - Style.spacing.xxl
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+            visible: !service.openEvent && service.eventError !== ""
+            text: service.eventError
+            textFormat: Text.PlainText
+            color: Color.urgent
+            font.family: Style.font.family
+            font.pixelSize: Style.font.body
+          }
+
+          ScrollView {
+            anchors.fill: parent
+            anchors.margins: Style.spacing.lg
+            clip: true
+            visible: !!service.openEvent
+
+            EventDetail {
+              id: eventDetail
+              width: meetingCard.width - Style.spacing.lg * 2 - Style.spacing.xl
+              service: service
+              event: service.openEvent
+              palette: service.themeColors
+              fg: Color.foreground
+              accent: Color.accent
+              fontFamily: Style.font.family
+              onCloseRequested: service.closeEvent()
+            }
+          }
+        }
+      }
+
+      // Booking one. The same shape as the New chat card, because it is the
+      // same kind of thing: a form over the window that Escape backs out of.
+      Item {
+        id: meetingFormLayer
+        anchors.fill: parent
+        visible: root.composingMeeting
+        z: 94
+
+        Keys.onPressed: function(event) {
+          if (event.key !== Qt.Key_Escape) return
+          root.closeNewMeeting()
+          event.accepted = true
+        }
+
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.96)
+
+          MouseArea { anchors.fill: parent; onClicked: root.closeNewMeeting() }
+        }
+
+        Rectangle {
+          id: meetingFormCard
+          anchors.centerIn: parent
+          width: Math.min(Style.space(520), meetingFormLayer.width - root.padPanel * 2)
+          height: Math.min(meetingForm.implicitHeight + Style.spacing.lg * 2,
+                           meetingFormLayer.height - root.padPanel * 2)
+          radius: Style.cornerRadius
+          color: Color.background
+          border.width: Style.space(1)
+          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+
+          MouseArea { anchors.fill: parent }
+
+          ScrollView {
+            anchors.fill: parent
+            anchors.margins: Style.spacing.lg
+            clip: true
+
+            NewMeetingForm {
+              id: meetingForm
+              width: meetingFormCard.width - Style.spacing.lg * 2 - Style.spacing.xl
+              service: service
+              draft: root.meetingDraft
+              fg: Color.foreground
+              accent: Color.accent
+              fontFamily: Style.font.family
+              onChanged: function(field, value) { root.changeMeeting(field, value) }
+              onCreateRequested: root.createMeeting()
+              onCloseRequested: root.closeNewMeeting()
+            }
+          }
+        }
+      }
+
       PanelKeyCatcher {
         id: keyCatcher
         anchors.fill: parent
@@ -1014,7 +1331,19 @@ Item {
         // drive the cursor, which would eat them out of a message.
         blocked: composer.activeFocus || codeField.activeFocus
                  || peopleField.activeFocus || root.composingNew
+                 // The meeting form is all fields, and the meeting card has
+                 // one - the line for the organiser - which only takes the
+                 // letters while it has focus.
+                 || root.composingMeeting || eventDetail.typing
         onMoveRequested: function(dx, dy) {
+          // On the calendar, down and up walk the meetings and left and right
+          // are the week before and the week after - which is what the two
+          // arrows in the toolbar do, and what every calendar's arrows do.
+          if (root.onCalendar && !service.readingEvent) {
+            if (dy !== 0) root.moveEventCursor(dy)
+            else if (dx !== 0) service.moveCalendar(dx > 0 ? 1 : -1)
+            return
+          }
           if (dy !== 0) {
             // Down and up in whatever has focus: the list's cursor, or the
             // transcript's. The transcript used to be scrolled rather than
@@ -1032,7 +1361,13 @@ Item {
             else root.focusComposer()
           }
         }
-        onActivateRequested: root.activeList().activateCursor()
+        onActivateRequested: {
+          if (root.onCalendar) { root.openCursoredEvent(); return }
+          root.activeList().activateCursor()
+        }
+        // x is the kit's delete key. On a meeting that is calling it off,
+        // which is asked twice for the same reason the button is.
+        onDeleteRequested: if (root.onCalendar && service.readingEvent) eventDetail.armCancel()
         onCloseRequested: root.dismiss()
         // Tab is how most people expect to reach the box they type in; l and
         // the right arrow already do it, but only for those who knew.
@@ -1060,7 +1395,30 @@ Item {
             else if (text === "e" || text === "+") root.pickingMessageId = ""
             return
           }
-          if (text === "e" || text === "+") root.startPicking()
+          // The calendar's own vocabulary, and only while it is the pane on
+          // screen: n means a new meeting there and a new chat here, and the
+          // digits mean a view rather than a reaction.
+          if (root.onCalendar) {
+            if (service.readingEvent) {
+              if (text >= "1" && text <= "3") { eventDetail.answerAt(Number(text) - 1); return }
+              if (text === "J") { root.joinCursored(); return }
+              if (text === "r") { service.fetchEvent(); return }
+            } else {
+              if (text >= "1" && text <= "4") {
+                service.setCalendarMode(Model.calendarViewNames()[Number(text) - 1])
+                return
+              }
+              if (text === "t") { service.calendarToday(); return }
+              if (text === "[") { service.moveCalendar(-1); return }
+              if (text === "]") { service.moveCalendar(1); return }
+              if (text === "v") { service.cycleCalendarMode(1); return }
+              if (text === "n") { root.openNewMeeting("", -1); return }
+              if (text === "J") { root.joinCursored(); return }
+              if (text === "r") { service.reloadCalendar(); return }
+            }
+          }
+          if (text === "c") root.toggleCalendar()
+          else if (text === "e" || text === "+") root.startPicking()
           else if (text === "a") root.askAgent()
           else if (text === "r") service.reloadConversation()
           else if (text === "u") service.unreadOnly = !service.unreadOnly
@@ -1132,7 +1490,12 @@ Item {
                 // to give way.
                 width: Math.max(0, heading.width - status.width
                                    - (status.width > 0 ? heading.spacing : 0))
-                text: service.openConversation ? String(service.openConversation.title || "") : "Teams"
+                // The calendar is what the window is showing, so it is what
+                // the window is called - the conversation is still open
+                // behind it and would otherwise be the only thing named.
+                text: root.onCalendar ? "Calendar"
+                      : (service.openConversation
+                         ? String(service.openConversation.title || "") : "Teams")
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
                 color: Color.foreground
@@ -1203,12 +1566,28 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               spacing: Style.spacing.sm
 
+              // Where the two halves of Teams are. Named for where it goes
+              // rather than for where you are: a button labelled with the
+              // pane you are already looking at is a button nobody presses.
+              Button {
+                visible: service.signedIn && service.hasCalendar && !root.showSettings
+                text: root.onCalendar ? "\u{F02BB}  Chats" : "\u{F00ED}  Calendar"
+                tooltipText: root.onCalendar
+                  ? "Back to the conversations  (c)" : "Your calendar  (c)"
+                selected: root.onCalendar
+                bordered: true
+                foreground: root.onCalendar ? Color.accent : Color.foreground
+                fontFamily: Style.font.family
+                fontSize: Style.font.caption
+                onClicked: root.toggleCalendar()
+              }
+
               // Only when the list has nowhere else to be: wide enough and it
               // is already on screen, and a button that shows what is already
               // shown is a button that teaches people to ignore buttons.
               Button {
                 visible: service.signedIn && !columns.roomForBoth && service.reading
-                          && !root.showSettings
+                          && !root.showSettings && !root.onCalendar
                 text: "Conversations"
                 bordered: true
                 foreground: Color.foreground
@@ -1253,7 +1632,7 @@ Item {
                 // Named because the icon buttons measure themselves against
                 // it; height is computed even while this one is hidden.
                 id: unreadButton
-                visible: service.signedIn && !root.showSettings
+                visible: service.signedIn && !root.showSettings && !root.onCalendar
                 // The count belongs on the button that filters by it: "Unread"
                 // alone made you turn the filter on to find out whether it was
                 // worth turning on.
@@ -1270,6 +1649,7 @@ Item {
 
               Button {
                 visible: service.signedIn && service.canStartChat && !root.showSettings
+                         && !root.onCalendar
                 text: "New chat"
                 bordered: true
                 foreground: Color.accent
@@ -1447,6 +1827,31 @@ Item {
             }
           }
 
+          // ---------------- the calendar ----------------
+          CalendarPane {
+            id: calendar
+            width: parent.width
+            height: parent.height - y
+            visible: root.onCalendar && !root.showSettings && !service.loggingIn
+                     && root.settingsError === "" && service.configured
+                     && !service.needsSignIn
+            service: service
+            fg: Color.foreground
+            accent: Color.accent
+            fontFamily: Style.font.family
+            density: root.densityScale
+            cursorKey: root.calendarCursor
+            onEventPicked: function(dayKey, event) {
+              // Clicking is also where the keyboard now is, so that j and k
+              // carry on from whatever was last touched rather than from
+              // wherever they had got to.
+              root.calendarCursor = Model.eventCursorKey(dayKey, event.id)
+              if (service.openEventId !== String(event.id)) service.showEvent(String(event.id))
+            }
+            onSlotPicked: function(dayKey, hour) { root.openNewMeeting(dayKey, hour) }
+            onNewMeetingRequested: root.openNewMeeting("", -1)
+          }
+
           // ---------------- the two columns ----------------
           Row {
             id: columns
@@ -1462,7 +1867,7 @@ Item {
             // simply blank for the length of the fetch, which read as broken.
             visible: (service.signedIn || service.loading) && !service.loggingIn
                      && root.settingsError === "" && service.configured
-                     && !service.needsSignIn && !root.showSettings
+                     && !service.needsSignIn && !root.showSettings && !root.onCalendar
 
             // A tiling compositor hands this window whatever the layout has
             // left - 672px here - and Style.space() scales with the font, so a

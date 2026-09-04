@@ -83,6 +83,20 @@ SCOPES_FILES = " Files.ReadWrite"
 # offered until it is really there.
 SCOPES_PRESENCE = " Presence.ReadWrite"
 
+# The calendar is a fifth tier, and it is two of them. Reading your own
+# calendar and writing to it are both ordinary user consent - no administrator
+# anywhere - but a registration still declares which of the two it may ask
+# for, so a plugin that asked for the write scope uninvited would fail the
+# sign-in of everybody whose registration lists only the read one. Hence two
+# settings and two tiers: the calendar shows up with Calendars.Read, and
+# answering an invitation or booking a meeting needs Calendars.ReadWrite.
+#
+# ReadWrite is sent instead of Read rather than beside it - it contains it,
+# and Entra hands back the wider one either way, which is what
+# can_see_calendar reads.
+SCOPES_CALENDAR = " Calendars.Read"
+SCOPES_CALENDAR_WRITE = " Calendars.ReadWrite"
+
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
     "omarchy",
@@ -97,9 +111,16 @@ MESSAGE_CAP = 50
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
-def scopes_for(channels, files=False, presence=False):
+def scopes_for(channels, files=False, presence=False, calendar=False, calendar_write=False):
     scopes = SCOPES_CHANNELS if channels else SCOPES_CHATS
-    return scopes + (SCOPES_FILES if files else "") + (SCOPES_PRESENCE if presence else "")
+    if calendar_write:
+        calendar_scope = SCOPES_CALENDAR_WRITE
+    elif calendar:
+        calendar_scope = SCOPES_CALENDAR
+    else:
+        calendar_scope = ""
+    return (scopes + (SCOPES_FILES if files else "") + (SCOPES_PRESENCE if presence else "")
+            + calendar_scope)
 
 
 def scopes_held_by(account):
@@ -113,7 +134,8 @@ def scopes_held_by(account):
     that as what this sign-in can do. Either way the opt-in tiers would fall
     off an account at its first refresh, an hour after signing in.
     """
-    return scopes_for(has_channels(account), can_upload(account), can_set_presence(account))
+    return scopes_for(has_channels(account), can_upload(account), can_set_presence(account),
+                      can_see_calendar(account), can_write_calendar(account))
 
 
 # --------------------------------------------------------------------------
@@ -424,7 +446,9 @@ def cmd_login_start(args):
         authority_base(authority) + "/oauth2/v2.0/devicecode",
         method="POST",
         data={"client_id": client_id,
-              "scope": scopes_for(args.channels, args.files, args.presence)},
+              "scope": scopes_for(args.channels, args.files, args.presence,
+                                  args.calendar or args.calendar_write,
+                                  args.calendar_write)},
     )
     if status != 200 or "device_code" not in payload:
         fail("devicecode_failed",
@@ -1011,6 +1035,8 @@ def fetch_account(alias, args):
         "canStartChat": can_create_chat(account) and can_find_people(account),
         "presence": can_see_presence(account),
         "canSetPresence": can_set_presence(account),
+        "calendar": can_see_calendar(account),
+        "canWriteCalendar": can_write_calendar(account),
         "me": None,
         "chats": [],
         "teams": [],
@@ -1361,6 +1387,27 @@ def can_set_presence(account):
     does not.
     """
     return "presence.readwrite" in str((account or {}).get("scopes", "")).lower()
+
+
+def can_see_calendar(account):
+    """Whether this sign-in may read the user's calendar.
+
+    True for either calendar tier, and that is not a coincidence:
+    "Calendars.ReadWrite" starts with the string being looked for, so the
+    wider grant answers the narrower question without a second test.
+    """
+    return "calendars.read" in str((account or {}).get("scopes", "")).lower()
+
+
+def can_write_calendar(account):
+    """Whether this sign-in may answer an invitation or book a meeting.
+
+    Read back off the granted scopes rather than off the setting: a
+    registration that gained the permission after the fact starts working at
+    the next sign-in, and until then the window shows a calendar it cannot
+    change instead of buttons that 403.
+    """
+    return "calendars.readwrite" in str((account or {}).get("scopes", "")).lower()
 
 
 # Graph's availability values, grouped down to the four states worth drawing.
@@ -1820,6 +1867,577 @@ def cmd_mark_read(args):
 
 
 # --------------------------------------------------------------------------
+# the calendar
+#
+# /me/calendarView rather than /me/events, and the difference matters: events
+# hands back a recurring meeting once, as the series master with its rule
+# attached, and leaves the expanding to whoever asked. calendarView expands
+# it - one row per occurrence inside the window asked for - which is what a
+# calendar draws and what nothing here would get right by hand.
+#
+# Times come back in UTC and every consumer of them wants local, so the
+# conversion happens here rather than in the QML - the same division as the
+# markup flattening: it is the helper's business to hand the window something
+# it can draw without arithmetic. Each row carries an ISO timestamp with this
+# machine's offset on it and the local date it belongs to, which is what the
+# day columns group by. No timezone maths happens above this file at all.
+# --------------------------------------------------------------------------
+
+# A month of a busy calendar, which is the widest view there is. Past this the
+# window is drawing rows nobody scrolls to and Graph is being asked to page.
+CALENDAR_CAP = 250
+CALENDAR_DAYS_CAP = 62
+# A meeting invitation carries the whole agenda, and Teams shows all of it.
+# "Open it elsewhere to read the rest" is not a feature - see the README.
+EVENT_BODY_CHARS = 20000
+ATTENDEE_CAP = 60
+
+# What a row in a day column needs. Deliberately without `attendees` and
+# `body`: an invitation to forty people carries forty addresses and its whole
+# agenda, and a month view would fetch two hundred of those to draw a line of
+# text each. Both arrive with `event`, when one is opened.
+EVENT_LIST_FIELDS = (
+    "id,subject,bodyPreview,start,end,isAllDay,isCancelled,isOrganizer,"
+    "location,organizer,responseStatus,responseRequested,showAs,type,"
+    "seriesMasterId,isOnlineMeeting,onlineMeeting,importance,sensitivity,"
+    "categories,hasAttachments"
+)
+EVENT_DETAIL_FIELDS = EVENT_LIST_FIELDS + ",body,attendees,allowNewTimeProposals"
+
+# Graph's own words for how an invitation stands, in ours. The two it does not
+# distinguish are worth distinguishing: `none` is "nobody was invited to this"
+# and `notResponded` is "you have not answered yet", and only the second one
+# is a question the window can offer to answer.
+RESPONSES = {
+    "none": "none",
+    "organizer": "organizer",
+    "accepted": "accepted",
+    "tentativelyaccepted": "tentative",
+    "declined": "declined",
+    "notresponded": "pending",
+}
+
+# What may be sent back, and the Graph action each one is. The names are ours
+# and the actions are Microsoft's, which is why this is a table rather than a
+# string built out of the answer.
+RSVP_ACTIONS = {
+    "accept": "accept",
+    "tentative": "tentativelyAccept",
+    "decline": "decline",
+}
+
+SHOW_AS = ("free", "tentative", "busy", "oof", "workingelsewhere", "unknown")
+
+
+def zone_of(name):
+    """The timezone Graph named, or UTC.
+
+    Graph answers in UTC unless it is asked otherwise, which this plugin never
+    does, so this is a fallback rather than the normal path. A Windows zone
+    name ("W. Europe Standard Time") is not an IANA one and has no entry in
+    the system database; reading it as UTC is wrong by an hour or two, which
+    beats failing to draw the day at all.
+    """
+    label = str(name or "").strip()
+    if not label or label.lower() in ("utc", "gmt", "z"):
+        return timezone.utc
+    try:
+        import zoneinfo
+
+        return zoneinfo.ZoneInfo(label)
+    except Exception:
+        return timezone.utc
+
+
+def local_zone_name():
+    """This machine's IANA timezone name, or "" when it cannot be told.
+
+    Only writing needs it: an all-day event has to be filed as midnight in a
+    named zone, because midnight UTC is the previous evening in half the world
+    and Graph would put the day one out. Reading needs none of this - the
+    system's own offset is enough to turn an instant into a local one.
+    """
+    named = str(os.environ.get("TZ") or "").strip().lstrip(":")
+    if "/" in named:
+        return named
+    try:
+        link = os.readlink("/etc/localtime")
+    except OSError:
+        return ""
+    parts = link.split("zoneinfo/")
+    return parts[1] if len(parts) == 2 else ""
+
+
+def graph_moment(field):
+    """A Graph dateTimeTimeZone as a local aware datetime, or None.
+
+    Graph writes seven fractional digits, which `fromisoformat` refuses on the
+    Pythons this has to run on, so the fraction is trimmed to six.
+    """
+    raw = str((field or {}).get("dateTime") or "").strip()
+    if not raw:
+        return None
+    if "." in raw:
+        head, _, fraction = raw.partition(".")
+        digits = "".join(ch for ch in fraction if ch.isdigit())[:6]
+        raw = head + ("." + digits if digits else "")
+    try:
+        when = datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=zone_of((field or {}).get("timeZone")))
+    return when.astimezone()
+
+
+def day_key(when):
+    """The local date a moment belongs to, as the window's own day key."""
+    return when.strftime("%Y-%m-%d") if when else ""
+
+
+def local_iso(when):
+    """A local moment as ISO 8601 with its offset, which JavaScript parses."""
+    return when.replace(microsecond=0).isoformat() if when else ""
+
+
+def event_location(event):
+    """Where it is, in one line.
+
+    `location` is the one Outlook shows and the one a room booking fills in.
+    `locations` is the same thing as a list, and is only richer when several
+    rooms are booked - which is not worth a second line in a window this size.
+    """
+    place = str(((event.get("location") or {}).get("displayName") or "")).strip()
+    if place:
+        return place
+    for entry in event.get("locations") or []:
+        name = str((entry or {}).get("displayName") or "").strip()
+        if name:
+            return name
+    return ""
+
+
+def join_url(event):
+    """The link that joins this meeting, if it is one.
+
+    https only, and nothing else is looked at: this URL is handed to xdg-open,
+    and xdg-open opens whatever it is handed.
+    """
+    url = str(((event.get("onlineMeeting") or {}).get("joinUrl") or "")).strip()
+    return url if url.lower().startswith("https://") else ""
+
+
+def attendee_rows(event):
+    """Who was invited, and what each of them said."""
+    rows = []
+    for attendee in (event.get("attendees") or [])[:ATTENDEE_CAP]:
+        address = (attendee.get("emailAddress") or {})
+        rows.append({
+            "name": str(address.get("name") or address.get("address") or "").strip(),
+            "address": str(address.get("address") or "").strip(),
+            "kind": str(attendee.get("type") or "required").lower(),
+            "response": RESPONSES.get(
+                str(((attendee.get("status") or {}).get("response") or "")).lower(), "none"),
+        })
+    return rows
+
+
+def event_row(event, detailed=False):
+    """One event, shaped for a day column.
+
+    The two dates are what the columns group by: `startDate` is the day it
+    begins on and `endDate` the last day it touches, both local. `endDate` is
+    computed from the last moment the event covers rather than from its end,
+    because an end is exclusive - an all-day Friday ends at Saturday midnight
+    and a 23:00 call ends at midnight on the next date, and both would
+    otherwise be drawn on a day they are not in.
+    """
+    start = graph_moment(event.get("start"))
+    end = graph_moment(event.get("end"))
+    if start and not end:
+        end = start
+    last = (end - timedelta(microseconds=1)) if (start and end and end > start) else start
+    all_day = event.get("isAllDay") is True
+    minutes = int(round((end - start).total_seconds() / 60.0)) if (start and end) else 0
+    organizer = ((event.get("organizer") or {}).get("emailAddress") or {})
+    kind = str(event.get("type") or "singleInstance")
+    shown = str(event.get("showAs") or "unknown").lower()
+
+    row = {
+        "id": str(event.get("id") or ""),
+        "subject": str(event.get("subject") or "").strip() or "(no subject)",
+        "preview": plain_text(event.get("bodyPreview"))[:200],
+        "when": local_iso(start),
+        "until": local_iso(end),
+        "startDate": day_key(start),
+        "endDate": day_key(last),
+        "allDay": all_day,
+        "minutes": minutes,
+        "where": event_location(event),
+        "online": event.get("isOnlineMeeting") is True or join_url(event) != "",
+        "joinUrl": join_url(event),
+        "organizer": {
+            "name": str(organizer.get("name") or organizer.get("address") or "").strip(),
+            "address": str(organizer.get("address") or "").strip(),
+        },
+        "isOrganizer": event.get("isOrganizer") is True,
+        # Whether this is an invitation at all, and what was said to it. The
+        # window offers an answer only where there is a question.
+        "response": RESPONSES.get(
+            str(((event.get("responseStatus") or {}).get("response") or "")).lower(), "none"),
+        "responseRequested": event.get("responseRequested") is not False,
+        "showAs": shown if shown in SHOW_AS else "unknown",
+        "cancelled": event.get("isCancelled") is True,
+        # An occurrence, an edited occurrence, or the series itself - drawn as
+        # a mark on the row, the way every calendar marks a repeat.
+        "recurring": kind != "singleInstance",
+        "seriesId": str(event.get("seriesMasterId") or ""),
+        "important": str(event.get("importance") or "").lower() == "high",
+        "private": str(event.get("sensitivity") or "normal").lower() in ("private", "confidential"),
+        "categories": [str(name) for name in (event.get("categories") or [])][:6],
+        "attachments": event.get("hasAttachments") is True,
+    }
+    if not detailed:
+        return row
+
+    text, links = text_and_links((event.get("body") or {}).get("content"))
+    row["text"] = text[:EVENT_BODY_CHARS]
+    # The same offsets a message carries, and for the same reason: the window
+    # builds every tag it draws, and an invitation is HTML somebody else wrote.
+    row["links"] = [span for span in links if span["end"] <= EVENT_BODY_CHARS]
+    row["truncated"] = len(text) > EVENT_BODY_CHARS
+    row["attendees"] = attendee_rows(event)
+    row["newTimeProposals"] = event.get("allowNewTimeProposals") is True
+    return row
+
+
+def calendar_window(from_date, days):
+    """The range to ask Graph for: the two UTC instants bounding local days.
+
+    Local, and that is the point - a day column starts at midnight where the
+    user is, not at midnight UTC. Asking for the UTC day would put an early
+    meeting in yesterday's column for anybody east of London.
+    """
+    try:
+        start = datetime.fromisoformat(str(from_date) + "T00:00:00").astimezone()
+    except ValueError:
+        raise AccountError("bad_date", "A date has to be written as YYYY-MM-DD")
+    span = max(1, min(int(days or 1), CALENDAR_DAYS_CAP))
+    return start, start + timedelta(days=span), span
+
+
+def utc_param(when):
+    """A local instant as the naive UTC string Graph's query takes."""
+    return when.astimezone(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat()
+
+
+def cmd_calendar(args):
+    """Every event touching a range of local days, occurrences expanded."""
+    try:
+        start, end, span = calendar_window(args.since, args.days)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    if args.demo:
+        out({"ok": True, "from": day_key(start), "days": span, "canWrite": True,
+             "capped": False, "events": demo_events(start, end)})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_see_calendar(account):
+        fail("calendar_permission_required",
+             "This sign-in cannot read your calendar. Add Calendars.Read to your app "
+             "registration, turn on \"Calendar\" in this widget's settings, and sign in "
+             "again - see the plugin's README.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    status, payload = graph_get(token, "/me/calendarView", {
+        "startDateTime": utc_param(start),
+        "endDateTime": utc_param(end),
+        "$select": EVENT_LIST_FIELDS,
+        "$orderby": "start/dateTime",
+        "$top": str(CALENDAR_CAP),
+    })
+    if status == 403:
+        fail("calendar_permission_required",
+             friendly(graph_error(payload, "This sign-in may not read your calendar")))
+    if status != 200:
+        fail("calendar_failed", friendly(graph_error(payload, "Could not read your calendar")))
+
+    found = payload.get("value") or []
+    rows = [event_row(event) for event in found[:CALENDAR_CAP]]
+    # By when they start, with an all-day event above the morning's first
+    # meeting rather than wherever its UTC midnight happened to sort.
+    rows.sort(key=lambda row: (row["startDate"], not row["allDay"], row["when"]))
+    out({"ok": True, "from": day_key(start), "days": span, "events": rows,
+         "canWrite": can_write_calendar(account),
+         # There is no paging here on purpose - a month nobody can scroll past
+         # is not worth a second request - so a range that hits the cap says
+         # so rather than quietly ending early.
+         "capped": len(found) > CALENDAR_CAP})
+
+
+def cmd_event(args):
+    """One event in full: who was invited, what they said, and the agenda."""
+    if args.demo:
+        out({"ok": True, "canWrite": True, "event": demo_event_detail(args.event)})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_see_calendar(account):
+        fail("calendar_permission_required", "This sign-in cannot read your calendar")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    status, payload = graph_get(
+        token, "/me/events/%s" % urllib.parse.quote(args.event, safe=""),
+        {"$select": EVENT_DETAIL_FIELDS})
+    if status == 404:
+        fail("event_gone", "That meeting is no longer on your calendar")
+    if status != 200:
+        fail("event_failed", friendly(graph_error(payload, "Could not read that meeting")))
+    out({"ok": True, "event": event_row(payload, detailed=True),
+         "canWrite": can_write_calendar(account)})
+
+
+def cmd_rsvp(args):
+    """Accept, tentatively accept, or decline an invitation.
+
+    The comment arrives on stdin like a message, because that is what it is:
+    something the user wrote, which everybody on the invitation will read.
+    """
+    answer = str(args.response or "").strip().lower()
+    action = RSVP_ACTIONS.get(answer)
+    if not action:
+        fail("bad_response", "An invitation can be accepted, tentative or declined")
+    comment = str(args.comment or "")
+    if args.stdin:
+        comment = str(read_stdin_json().get("comment") or comment)
+
+    if args.demo:
+        out({"ok": True, "response": answer, "event": args.event, "replied": not args.silent})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_write_calendar(account):
+        fail("calendar_write_permission_required",
+             "This sign-in can read your calendar but not answer invitations. It needs "
+             "Calendars.ReadWrite - turn on \"Answer and create meetings\" in this "
+             "widget's settings and sign in again.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    body = {"sendResponse": not args.silent}
+    if comment.strip():
+        body["comment"] = comment.strip()
+    status, payload = http(
+        "%s/me/events/%s/%s" % (GRAPH, urllib.parse.quote(args.event, safe=""), action),
+        method="POST", json_body=body,
+        headers={"Authorization": "Bearer " + token})
+    if status == 403:
+        fail("calendar_write_permission_required",
+             friendly(graph_error(payload, "This sign-in may not answer invitations")))
+    if status == 404:
+        fail("event_gone", "That invitation is no longer on your calendar")
+    if status not in (200, 201, 202, 204):
+        fail("rsvp_failed", friendly(graph_error(payload, "Could not send that answer")))
+    out({"ok": True, "response": answer, "event": args.event, "replied": not args.silent})
+
+
+def meeting_time(value, all_day, zone):
+    """One end of a new meeting, written the way Graph wants it.
+
+    The window sends wall-clock time with no zone on it, which is what
+    somebody typing "14:00" means, so this is where it acquires one. With a
+    zone name to hand it goes as that zone's wall clock - the only way an
+    all-day event lands on the right day, and the only way a meeting booked
+    across a daylight-saving change keeps the time it was typed at. Without
+    one it becomes a UTC instant, which is exact for a meeting and not good
+    enough for a whole day.
+    """
+    text = str(value or "").strip()
+    if not text:
+        raise AccountError("bad_time", "A meeting needs a start and an end")
+    if all_day:
+        text = text[:10] + "T00:00:00"
+    try:
+        when = datetime.fromisoformat(text)
+    except ValueError:
+        raise AccountError("bad_time", "A time has to be written as YYYY-MM-DDTHH:MM")
+    if when.tzinfo is not None:
+        when = when.astimezone()
+    if zone:
+        return {"dateTime": when.replace(tzinfo=None).isoformat(), "timeZone": zone}
+    if all_day:
+        raise AccountError(
+            "no_timezone",
+            "An all-day event has to be filed in a named timezone, and this machine's "
+            "could not be read from TZ or /etc/localtime")
+    return {"dateTime": when.astimezone(timezone.utc).replace(tzinfo=None).isoformat(),
+            "timeZone": "UTC"}
+
+
+def new_event_body(payload, zone):
+    """The event to POST, out of what the window sent. Raises on nonsense."""
+    subject = str(payload.get("subject") or "").strip()
+    if not subject:
+        raise AccountError("no_subject", "A meeting needs a subject")
+
+    all_day = payload.get("allDay") is True
+    start = meeting_time(payload.get("start"), all_day, zone)
+    end = meeting_time(payload.get("end"), all_day, zone)
+    if start["dateTime"] >= end["dateTime"]:
+        raise AccountError("bad_range", "A meeting has to end after it starts")
+
+    attendees = []
+    for guest in (payload.get("attendees") or [])[:ATTENDEE_CAP]:
+        address = str((guest or {}).get("address") or "").strip()
+        if not address:
+            continue
+        attendees.append({
+            "emailAddress": {"address": address,
+                             "name": str(guest.get("name") or "").strip() or address},
+            "type": "optional" if str(guest.get("kind") or "") == "optional" else "required",
+        })
+
+    body = {
+        "subject": subject,
+        "isAllDay": all_day,
+        "start": start,
+        "end": end,
+        # Text, not HTML: what somebody typed is what the invitation should
+        # say, and a stray < in an agenda should not become markup on
+        # everyone else's screen. The same rule sending a message follows.
+        "body": {"contentType": "text", "content": str(payload.get("text") or "")},
+        "attendees": attendees,
+    }
+    where = str(payload.get("where") or "").strip()
+    if where:
+        body["location"] = {"displayName": where}
+    if payload.get("online") is True:
+        # This is what makes it a Teams meeting rather than an appointment:
+        # Graph books the meeting and fills the join link in, and no separate
+        # OnlineMeetings permission is involved.
+        body["isOnlineMeeting"] = True
+        body["onlineMeetingProvider"] = "teamsForBusiness"
+    shown = str(payload.get("showAs") or "").lower()
+    if shown in SHOW_AS and shown != "unknown":
+        body["showAs"] = {"oof": "oof", "workingelsewhere": "workingElsewhere"}.get(shown, shown)
+    reminder = payload.get("reminderMinutes")
+    if isinstance(reminder, (int, float)) and 0 <= int(reminder) <= 40320:
+        body["reminderMinutesBeforeStart"] = int(reminder)
+        body["isReminderOn"] = True
+    return body
+
+
+def cmd_new_event(args):
+    """Put a meeting on the calendar, and invite people to it.
+
+    Everything comes in on stdin. A subject, an agenda and a guest list are
+    all somebody's words and other people's addresses, and none of that
+    belongs on a command line anyone on this machine can read.
+    """
+    payload = read_stdin_json() if args.stdin else {}
+    try:
+        body = new_event_body(payload, local_zone_name())
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    # Everything that does not need the network is settled above, so demo
+    # refuses exactly what the real thing refuses.
+    if args.demo:
+        out({"ok": True, "event": dict(demo_event_detail("demo-event-1"),
+                                       id="demo-event-new", subject=body["subject"])})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_write_calendar(account):
+        fail("calendar_write_permission_required",
+             "This sign-in can read your calendar but not add to it. It needs "
+             "Calendars.ReadWrite - turn on \"Answer and create meetings\" in this "
+             "widget's settings and sign in again.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    status, created = http(GRAPH + "/me/events", method="POST", json_body=body,
+                           headers={"Authorization": "Bearer " + token})
+    if status == 403:
+        fail("calendar_write_permission_required",
+             friendly(graph_error(created, "This sign-in may not add to your calendar")))
+    if status not in (200, 201):
+        fail("new_event_failed", friendly(graph_error(created, "Could not create that meeting")))
+    out({"ok": True, "event": event_row(created, detailed=True)})
+
+
+def cmd_cancel_event(args):
+    """Call off a meeting you organised, or take one off your own calendar.
+
+    Two different things, and which one this is depends on whose meeting it
+    is: an organiser cancelling sends everybody a cancellation, an attendee
+    deleting removes only their own copy. Graph has an endpoint for each, so
+    the event is read first to find out which - guessing would either mail a
+    cancellation to forty people or quietly fail to.
+    """
+    comment = str(args.comment or "")
+    if args.stdin:
+        comment = str(read_stdin_json().get("comment") or comment)
+
+    if args.demo:
+        out({"ok": True, "event": args.event, "action": "cancelled"})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_write_calendar(account):
+        fail("calendar_write_permission_required",
+             "This sign-in can read your calendar but not change it. It needs "
+             "Calendars.ReadWrite - turn on \"Answer and create meetings\" in this "
+             "widget's settings and sign in again.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    path = "/me/events/%s" % urllib.parse.quote(args.event, safe="")
+    headers = {"Authorization": "Bearer " + token}
+    status, event = graph_get(token, path, {"$select": "isOrganizer,attendees,subject"})
+    if status == 404:
+        fail("event_gone", "That meeting is no longer on your calendar")
+    if status != 200:
+        fail("cancel_failed", friendly(graph_error(event, "Could not read that meeting")))
+
+    if event.get("isOrganizer") is True and (event.get("attendees") or []):
+        body = {}
+        if comment.strip():
+            body["comment"] = comment.strip()
+        status, payload = http(GRAPH + path + "/cancel", method="POST", json_body=body,
+                               headers=headers)
+        action = "cancelled"
+    else:
+        status, payload = http(GRAPH + path, method="DELETE", headers=headers)
+        action = "removed"
+    if status == 403:
+        fail("calendar_write_permission_required",
+             friendly(graph_error(payload, "This sign-in may not change your calendar")))
+    if status not in (200, 202, 204):
+        fail("cancel_failed", friendly(graph_error(payload, "Could not call that meeting off")))
+    out({"ok": True, "event": args.event, "action": action})
+
+
+# --------------------------------------------------------------------------
 # sending a file
 #
 # Graph has no "post a file to a chat". A file lives in a drive and a message
@@ -2154,6 +2772,8 @@ def demo_account(alias):
         "canUpload": True,
         "canStartChat": True,
         "canSetPresence": True,
+        "calendar": True,
+        "canWriteCalendar": True,
         "me": {"state": "available", "availability": "Available", "activity": "Available"},
         "chats": chats, "teams": teams,
         "unreadCount": sum(1 for row in chats if row["unread"]), "warnings": [],
@@ -2225,6 +2845,178 @@ def demo_messages(target):
     return {"ok": True, "messages": messages}
 
 
+# A week of a plausible calendar, so the day, week and month views can all be
+# built and photographed without anybody's real meetings being on screen.
+# Anchored to today rather than to fixed dates: a screenshot taken next month
+# should still show a working day, and the harness should never open on an
+# empty grid.
+#
+# Two of them overlap on purpose - the 11:00 planning and the 11:30 one-to-one
+# - because side-by-side columns are the part of a day view that is wrong most
+# often and there has to be something to look at while getting them right.
+#
+# [days from today, start, minutes, subject, where, online, response, showAs, repeats]
+DEMO_EVENTS = [
+    (0, "09:00", 15, "Daily standup", "", True, "accepted", "busy", True),
+    (0, "11:00", 60, "Sprint 24 planning", "", True, "pending", "busy", False),
+    (0, "11:30", 30, "1:1 with Priya", "", True, "accepted", "busy", True),
+    (0, "14:00", 90, "Release 14.02 go/no-go", "Room 3.14", False, "tentative", "busy", False),
+    (0, "16:30", 30, "Retro", "", True, "organizer", "busy", True),
+    (1, "09:00", 15, "Daily standup", "", True, "accepted", "busy", True),
+    (1, "10:00", 60, "Design review", "", True, "declined", "busy", False),
+    (1, "13:00", 45, "Platform sync", "Room 2.02", False, "accepted", "busy", True),
+    (2, "09:00", 15, "Daily standup", "", True, "accepted", "busy", True),
+    (2, "15:00", 120, "Architecture workshop", "Room 4.01", False, "pending", "busy", False),
+    (3, "09:00", 15, "Daily standup", "", True, "accepted", "busy", True),
+    (4, "11:00", 30, "Coffee with Dana", "The kitchen", False, "accepted", "free", False),
+    (7, "10:00", 60, "Quarterly review", "", True, "pending", "busy", False),
+]
+
+# All-day rows, which have their own strip above the grid and their own way of
+# going wrong: an end is exclusive, so a one-day event ends at the next
+# midnight and a naive reading draws it over two days.
+# [days from today, days long, subject, showAs]
+DEMO_ALL_DAY = [
+    (0, 1, "Dana on leave", "oof"),
+    (2, 3, "Accessibility week", "free"),
+]
+
+DEMO_ORGANISERS = {
+    "Daily standup": ("Tomás Lindqvist", "tomas@example.com"),
+    "Sprint 24 planning": ("Ana Beltrán", "ana@example.com"),
+    "1:1 with Priya": ("Priya Raman", "priya@example.com"),
+    "Release 14.02 go/no-go": ("Ana Beltrán", "ana@example.com"),
+    "Design review": ("Yuki Tanaka", "yuki@example.com"),
+    "Architecture workshop": ("Mikael Sørensen", "mikael@example.com"),
+    "Quarterly review": ("Ana Beltrán", "ana@example.com"),
+}
+
+DEMO_AGENDA = (
+    "Agenda\n\n"
+    "1. What went out on Friday, and what it broke\n"
+    "2. The migration that ran twice - see "
+    '<a href="https://example.com/releases/14-02">the release notes</a>\n'
+    "3. Anything for the retro\n\n"
+    "Dial in a couple of minutes early if you can."
+)
+
+
+def demo_midnight():
+    return datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def demo_graph_time(when):
+    """A local moment written the way Graph writes one: UTC, seven digits."""
+    return {"dateTime": when.astimezone(timezone.utc)
+                            .strftime("%Y-%m-%dT%H:%M:%S.0000000"),
+            "timeZone": "UTC"}
+
+
+def demo_event(index, start, end, subject, where, online, response, shown,
+               repeats, all_day=False):
+    """One fixture, in the shape Graph sends, so it goes through event_row().
+
+    Built as Graph's own shape rather than as a finished row: the UTC-to-local
+    conversion and the exclusive end are exactly the parts worth exercising,
+    and a fixture that skipped them would prove the layout works on data the
+    real thing never sends.
+    """
+    who, address = DEMO_ORGANISERS.get(subject, ("Ana Beltrán", "ana@example.com"))
+    return {
+        "id": "demo-event-%d" % index,
+        "subject": subject,
+        "bodyPreview": "Agenda 1. What went out on Friday, and what it broke",
+        "start": demo_graph_time(start),
+        "end": demo_graph_time(end),
+        "isAllDay": all_day,
+        "isCancelled": False,
+        "isOrganizer": response == "organizer",
+        "location": {"displayName": where},
+        "organizer": {"emailAddress": {"name": who, "address": address}},
+        "responseStatus": {"response": {"accepted": "accepted", "pending": "notResponded",
+                                        "tentative": "tentativelyAccepted",
+                                        "declined": "declined", "organizer": "organizer",
+                                        "none": "none"}.get(response, "none")},
+        "responseRequested": response != "none",
+        "showAs": shown,
+        "type": "occurrence" if repeats else "singleInstance",
+        "seriesMasterId": "demo-series-%s" % index if repeats else "",
+        "isOnlineMeeting": online,
+        "onlineMeeting": ({"joinUrl": "https://teams.microsoft.com/l/meetup-join/demo"}
+                          if online else None),
+        "importance": "normal",
+        "sensitivity": "normal",
+        "categories": [],
+        "hasAttachments": False,
+    }
+
+
+def demo_graph_events():
+    """Every fixture, in Graph's shape, keyed by nothing - order is the id."""
+    midnight = demo_midnight()
+    events = []
+    for index, row in enumerate(DEMO_EVENTS):
+        day, at, minutes, subject, where, online, response, shown, repeats = row
+        hour, minute = (int(part) for part in at.split(":"))
+        start = midnight + timedelta(days=day, hours=hour, minutes=minute)
+        events.append(demo_event(index, start, start + timedelta(minutes=minutes),
+                                 subject, where, online, response, shown, repeats))
+    for offset, row in enumerate(DEMO_ALL_DAY):
+        day, length, subject, shown = row
+        start = midnight + timedelta(days=day)
+        events.append(demo_event(len(DEMO_EVENTS) + offset, start,
+                                 start + timedelta(days=length), subject, "", False,
+                                 "none", shown, False, all_day=True))
+    return events
+
+
+def demo_events(start, end):
+    """The fixtures touching a range, shaped and sorted as the real ones are."""
+    rows = []
+    for event in demo_graph_events():
+        began = graph_moment(event["start"])
+        ended = graph_moment(event["end"])
+        if not began or ended <= start or began >= end:
+            continue
+        rows.append(event_row(event))
+    rows.sort(key=lambda row: (row["startDate"], not row["allDay"], row["when"]))
+    return rows
+
+
+def demo_event_detail(event_id):
+    """One fixture in full, with an agenda and a guest list to lay out."""
+    wanted = str(event_id or "")
+    events = demo_graph_events()
+    found = None
+    for event in events:
+        if event["id"] == wanted:
+            found = event
+            break
+    if not found:
+        # Keyed by the id that was asked for, so that a meeting the demo has
+        # just "created" opens as itself rather than as whichever fixture
+        # happened to stand in for it.
+        found = dict(events[1], id=wanted or events[1]["id"])
+    return event_row(dict(found, **{
+        "body": {"contentType": "html", "content": DEMO_AGENDA},
+        "allowNewTimeProposals": True,
+        "attendees": [
+            {"emailAddress": {"name": "Ana Beltrán", "address": "ana@example.com"},
+             "type": "required", "status": {"response": "organizer"}},
+            {"emailAddress": {"name": "You", "address": "you@example.com"},
+             "type": "required", "status": {"response": "notResponded"}},
+            {"emailAddress": {"name": "Priya Raman", "address": "priya@example.com"},
+             "type": "required", "status": {"response": "accepted"}},
+            {"emailAddress": {"name": "Tomás Lindqvist", "address": "tomas@example.com"},
+             "type": "required", "status": {"response": "tentativelyAccepted"}},
+            {"emailAddress": {"name": "Yuki Tanaka", "address": "yuki@example.com"},
+             "type": "optional", "status": {"response": "declined"}},
+            {"emailAddress": {"name": "Room 3.14", "address": "room314@example.com"},
+             "type": "resource", "status": {"response": "accepted"}},
+        ],
+    }), detailed=True)
+
+
 # --------------------------------------------------------------------------
 
 
@@ -2247,6 +3039,11 @@ def main():
     start.add_argument("--presence", action="store_true",
                        help="also ask for Presence.ReadWrite, for setting your own presence "
                             "(admin consent)")
+    start.add_argument("--calendar", action="store_true",
+                       help="also ask for Calendars.Read, for the calendar")
+    start.add_argument("--calendar-write", action="store_true",
+                       help="ask for Calendars.ReadWrite instead, for answering invitations "
+                            "and booking meetings")
     start.set_defaults(func=cmd_login_start)
 
     with_account("login-poll", "poll a pending sign-in").set_defaults(func=cmd_login_poll)
@@ -2346,6 +3143,46 @@ def main():
                         help='read {"file": "...", "comment": "..."} from stdin')
     upload.add_argument("--demo", action="store_true")
     upload.set_defaults(func=cmd_upload)
+
+    calendar = with_account("calendar", "the events in a range of days")
+    calendar.add_argument("--from", dest="since", required=True,
+                          help="the first local day, as YYYY-MM-DD")
+    calendar.add_argument("--days", type=int, default=1,
+                          help="how many days from there (1-%d)" % CALENDAR_DAYS_CAP)
+    calendar.add_argument("--demo", action="store_true")
+    calendar.set_defaults(func=cmd_calendar)
+
+    event = with_account("event", "one event in full, with its guest list")
+    event.add_argument("--event", required=True, help="event id from `calendar`")
+    event.add_argument("--demo", action="store_true")
+    event.set_defaults(func=cmd_event)
+
+    rsvp = with_account("rsvp", "answer an invitation")
+    rsvp.add_argument("--event", required=True, help="event id from `calendar`")
+    rsvp.add_argument("--response", required=True, help="accept, tentative or decline")
+    rsvp.add_argument("--comment", default="", help="a line for the organiser; --stdin is "
+                                                    "what the window uses")
+    rsvp.add_argument("--stdin", action="store_true",
+                      help='read {"comment": "..."} from stdin, keeping it out of argv')
+    rsvp.add_argument("--silent", action="store_true",
+                      help="answer without sending the organiser a reply")
+    rsvp.add_argument("--demo", action="store_true")
+    rsvp.set_defaults(func=cmd_rsvp)
+
+    new_event = with_account("new-event", "put a meeting on the calendar")
+    new_event.add_argument("--stdin", action="store_true",
+                           help='read {"subject", "start", "end", "allDay", "attendees", '
+                                '"text", "where", "online", "showAs"} from stdin')
+    new_event.add_argument("--demo", action="store_true")
+    new_event.set_defaults(func=cmd_new_event)
+
+    cancel = with_account("cancel-event", "call off a meeting, or take it off your calendar")
+    cancel.add_argument("--event", required=True, help="event id from `calendar`")
+    cancel.add_argument("--comment", default="", help="what to tell the people invited")
+    cancel.add_argument("--stdin", action="store_true",
+                        help='read {"comment": "..."} from stdin')
+    cancel.add_argument("--demo", action="store_true")
+    cancel.set_defaults(func=cmd_cancel_event)
 
     sub.add_parser("palette", help="the active theme's named colours").set_defaults(func=cmd_palette)
 

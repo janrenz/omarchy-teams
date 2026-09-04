@@ -1,7 +1,7 @@
 # AGENTS.md
 
-An Omarchy shell plugin: Microsoft Teams chats and channels in the bar and in a
-window of their own. Quickshell/QML on top of one Python helper. Read
+An Omarchy shell plugin: Microsoft Teams chats, channels and your calendar in
+the bar and in a window of their own. Quickshell/QML on top of one Python helper. Read
 `README.md` for what it does and how it is set up — this file is about changing
 it.
 
@@ -31,10 +31,25 @@ src/PresenceChip.qml    The circle plus the word, and the click that opens the
                         picker. In the window's header and the dropdown's.
 src/PresenceMenu.qml    The picker itself, numbered. Both surfaces show this
                         one; it is also what knows row 0 is Automatic.
-src/TeamsWindow.qml     The window. Sidebar, transcript, message box. ~1.7k lines.
-                        Also the file chooser and the window-wide DropArea, which
-                        both end at sendFile() - the one place a file:// URL
-                        becomes a path.
+src/TeamsWindow.qml     The window. Sidebar, transcript, message box, and the
+                        calendar beside them - `pane` says which of the two is
+                        on screen. Also the file chooser and the window-wide
+                        DropArea, which both end at sendFile() - the one place
+                        a file:// URL becomes a path.
+src/CalendarPane.qml    The calendar's toolbar, and which body goes under it:
+                        the month is always a grid, and a day, work week or
+                        week is a clock face unless the window is too narrow
+                        for one, in which case it is an agenda.
+src/CalendarGrid.qml    The clock face. A column per day, blocks positioned by
+                        the minute, the all-day strip, the line across today.
+src/CalendarMonth.qml   Six rows of seven days: as many chips as a cell holds
+                        and a count of the rest.
+src/EventChip.qml       One meeting, in all three of those. It takes its height
+                        from whoever placed it, because in a day column that
+                        height is how long the meeting is.
+src/EventDetail.qml     One meeting opened: who is coming, the agenda, Join,
+                        the three answers, and calling it off.
+src/NewMeetingForm.qml  Booking one. The window owns the draft; this edits it.
 src/Notifier.qml        omarchy-notification-send, the prime-then-announce rule,
                         and the click that opens the chat.
 src/PollGate.qml        Whether it is worth polling at all: idle, network, battery.
@@ -95,16 +110,27 @@ Nothing goes back the other way except a command line and a stdin payload.
 5. **Every helper command prints one JSON object** and exits 0 even on failure —
    `{"ok": false, "error": {...}}` — so the window always has something to
    render. Exit non-zero only when the arguments themselves were unusable.
-6. **There is no default client id, and there cannot be one.** An Azure app
+6. **A calendar is drawn in local days, and only `teams.py` knows what those
+   are.** Graph answers in UTC. The helper converts every timestamp and gives
+   each event the local date it belongs to (`startDate`, `endDate`) plus an ISO
+   string with this machine's offset on it; `Model.js` groups by string
+   comparison and never builds a date out of a timestamp. Two traps live in
+   that conversion and both have tests: an **end is exclusive** - an all-day
+   Friday ends at Saturday midnight and a 23:00 call ends on the next date, so
+   the last day covered is computed from the last moment covered - and a
+   **whole day has to be written in a named zone**, because midnight UTC is the
+   previous evening in half the world. Anything that starts doing date
+   arithmetic in QML is putting the bug back.
+7. **There is no default client id, and there cannot be one.** An Azure app
    registration declares which delegated permissions it may request, so a
    registration made for mail cannot ask for `Chat.Read`. Anything needing a new
    Graph permission needs a README change telling the user what to add to their
    own registration, and a graceful path for when consent is refused — the way
    `channels: false` still leaves chats working.
-7. **No symlinks anywhere in this repo.** `omarchy plugin validate` refuses a
+8. **No symlinks anywhere in this repo.** `omarchy plugin validate` refuses a
    plugin folder that contains one. That is why the dev harness is assembled
    outside the repo — see below.
-8. **Colors and spacing come from `qs.Commons`** (`Color`, `Style`, `Border`).
+9. **Colors and spacing come from `qs.Commons`** (`Color`, `Style`, `Border`).
    No hardcoded hex, no hardcoded pixel gaps; use `Style.space()` and the
    density scale so the window follows the theme's font size.
 
@@ -114,6 +140,7 @@ Nothing goes back the other way except a command line and a stdin payload.
 node   dev/test-model.js                          # the shaping the window binds to
 python3 dev/test-teams.py                         # parsing, permission, host checks
 python3 src/teams.py fetch --account work --demo   # synthetic data, no sign-in
+python3 src/teams.py calendar --account work --from 2026-09-04 --days 7 --demo
 
 dev/run.sh                                        # the real window, offscreen
 dev/shot.sh /tmp/teams.png [demo-chat-0]          # photograph what it is drawing
@@ -183,7 +210,14 @@ widget and puts it back on the way out (including on failure or Ctrl-C).
 there is no screen to grab. `qs -p $STAGE/shell.qml ipc call dev state` prints
 what the service thinks is going on, which is the first thing to ask when the
 window comes up empty; `dev open`, `dev spacing`, `dev pane` and `dev account`
-are the other knobs.
+are the other knobs. The calendar has its own, because offscreen means no
+keyboard reaches the window and every one of its controls is a key: `dev
+calendar <view> <anchor>` switches and reports, `dev meeting <id>` opens one,
+`dev answer <accept|tentative|decline>` answers it, and `dev book <subject>
+<date> <from> <to>` fills the form in and sends it. `dev size` is there for the
+layouts that only appear when there is no room - the list drawer and the
+calendar's agenda - though the offscreen platform ignores a resize, so those
+are checked against the real shell or by forcing the branch.
 
 The harness applies its fixture settings from `onSettingsLoadedChanged`, through
 a `Qt.callLater`, and both halves of that matter. The window sets
@@ -318,6 +352,22 @@ fatal QML error makes it exit instead.
   `agentHandover` gates the `a` key, the button, the help entry and the inbound
   draft. A feature that reaches other people's messages has to be refusable, so
   check the gate rather than assuming it.
+- **A ScrollView takes its size from its child's *implicit* size.** An Item
+  that sets only `height` scrolls nowhere at all: `contentHeight` stays at the
+  viewport's, every position clamps to the top, and the clock face opens at
+  midnight however carefully the hour was worked out. `CalendarGrid`'s
+  `faceContent` sets `implicitHeight` instead, and an Item's height follows
+  that anyway. It is also why the grid is scrolled into place by a short timer
+  rather than a `Qt.callLater`: what is being waited for is the ScrollView
+  knowing how tall its content is, and that is not the next tick.
+- **`service.clock` ticks every minute, and almost nothing may bind to it.**
+  The line across today and "starts in four minutes" want it; the day columns
+  must not, or every delegate in the grid is rebuilt once a minute. So
+  `Model.calendarDays` takes `todayKey` - a string that changes at midnight -
+  and the clock reaches only the two things that need the minute.
+- **The calendar's layers close when the pane does.** A meeting card left open
+  behind the conversations is a layer nobody can see that Escape is still
+  unwinding, so `showPane("chats")` closes the meeting and the booking form.
 - **There is no `cursoredMessage()` here.** The Slack plugin has one; this
   window inlines "the cursor, or the newest if it is nowhere yet" in
   `startPicking` and in `agentArgv`. Copying code across from that repo without

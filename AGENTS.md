@@ -134,6 +134,31 @@ Nothing goes back the other way except a command line and a stdin payload.
    No hardcoded hex, no hardcoded pixel gaps; use `Style.space()` and the
    density scale so the window follows the theme's font size.
 
+## Branches, while a marketplace review is open
+
+`main` is what the marketplace validates and what a listing review binds to, by
+exact commit. The bot records a SHA, and a reviewer will not approve a tree that
+is no longer the repository's default HEAD - so every push to `main` while a
+submission is open invalidates the snapshot that was reviewed, and the round
+starts again. That has already cost two rounds on
+[#3928](https://github.com/omacom/omarchy-plugin-marketplace/issues/3928).
+
+So while a submission is open:
+
+- **`main` is frozen** at the submitted commit. Nothing lands on it, docs and
+  version bumps included - a docs-only commit moves HEAD exactly as far as a
+  feature does.
+- **Everything goes to `dev`**, which is where work accumulates in the meantime.
+- **When the listing is approved,** merge `dev` into `main` in one go, then
+  either re-point the still-open submission at the new HEAD or submit the next
+  version normally.
+- **When no submission is open,** `main` is fine to commit to directly. This is
+  a rule about review windows, not about the repository forever.
+
+Editing the issue body is what re-triggers validation and the security baseline
+against current HEAD. The bot edits its two existing comments in place rather
+than posting new ones, so watch `updated_at`, not `created_at`.
+
 ## The dev loop
 
 ```bash

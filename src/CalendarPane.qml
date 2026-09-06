@@ -152,6 +152,17 @@ Item {
       text: {
         if (!root.service) return ""
         if (root.service.calendarError !== "") return root.service.calendarError
+        // A calendar that was ticked and would not answer. Said out loud,
+        // because the alternative is a column that is short by a day's worth
+        // of somebody's meetings and no reason given.
+        var missing = root.service.calendarMissing || []
+        if (missing.length > 0) {
+          var names = []
+          for (var i = 0; i < missing.length; i++)
+            names.push(String(missing[i].name || "") || "a calendar that is no longer there")
+          return names.join(", ") + " could not be read. Untick it in settings, "
+               + "or ask for it to be shared again."
+        }
         if (root.service.calendarCapped)
           return "There are more meetings in this range than this window will draw. "
                + "A shorter range shows all of them."
@@ -159,7 +170,8 @@ Item {
       }
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: (root.service && root.service.calendarError !== "")
+      color: (root.service && (root.service.calendarError !== ""
+                               || (root.service.calendarMissing || []).length > 0))
         ? Color.urgent : Qt.darker(root.fg, 1.4)
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption

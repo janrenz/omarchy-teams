@@ -121,7 +121,20 @@ Nothing goes back the other way except a command line and a stdin payload.
    **whole day has to be written in a named zone**, because midnight UTC is the
    previous evening in half the world. Anything that starts doing date
    arithmetic in QML is putting the bug back.
-7. **A new Graph permission is a release, not an edit.** An Azure app
+7. **Somebody else's calendar is read-only, and the row says so, not the
+   detail.** A mailbox serves every calendar in it - including the ones
+   colleagues shared and the user added - from `/me/calendars`, so
+   `Calendars.Read` reaches all of them and `Calendars.Read.Shared` is not
+   involved (that is for `/users/{who}`, which nothing here calls). What *is*
+   involved is who owns each one: `calendar_row` compares the owner's address
+   against the **default calendar's** owner - not against the signed-in name,
+   which is a UPN and need not match the mailbox - and every row from a
+   calendar that is not the user's carries `readOnly: true`. `Model.answerable`
+   and `Service.openEventReadOnly` are the two places that turn that into a
+   window with no RSVP buttons on it. The detail fetch cannot help: it asks for
+   one event by id and is told nothing about the calendar around it, which is
+   why `showEvent` carries the flag over from the row.
+8. **A new Graph permission is a release, not an edit.** An Azure app
    registration declares which delegated permissions it may request, so a
    registration made for mail cannot ask for `Chat.Read` — which is why the
    plugin publishes its own, `DEFAULT_CLIENT_ID` in `src/teams.py`. Asking for
@@ -130,12 +143,12 @@ Nothing goes back the other way except a command line and a stdin payload.
    the version asking for it ships, and to the README table for everyone
    running a registration of their own. It also needs a graceful path for when
    consent is refused — the way `channels: false` still leaves chats working.
-8. **No symlinks anywhere in this repo.** `omarchy plugin validate` refuses a
+9. **No symlinks anywhere in this repo.** `omarchy plugin validate` refuses a
    plugin folder that contains one. That is why the dev harness is assembled
    outside the repo — see below.
-9. **Colors and spacing come from `qs.Commons`** (`Color`, `Style`, `Border`).
-   No hardcoded hex, no hardcoded pixel gaps; use `Style.space()` and the
-   density scale so the window follows the theme's font size.
+10. **Colors and spacing come from `qs.Commons`** (`Color`, `Style`, `Border`).
+    No hardcoded hex, no hardcoded pixel gaps; use `Style.space()` and the
+    density scale so the window follows the theme's font size.
 
 ## The dev loop
 
@@ -144,6 +157,7 @@ node   dev/test-model.js                          # the shaping the window binds
 python3 dev/test-teams.py                         # parsing, permission, host checks
 python3 src/teams.py fetch --account work --demo   # synthetic data, no sign-in
 python3 src/teams.py calendar --account work --from 2026-09-04 --days 7 --demo
+python3 src/teams.py calendars --account work --demo    # what the picker lists
 
 dev/run.sh                                        # the real window, offscreen
 dev/shot.sh /tmp/teams.png [demo-chat-0]          # photograph what it is drawing

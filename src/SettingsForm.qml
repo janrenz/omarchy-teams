@@ -47,6 +47,22 @@ Column {
     root.closeRequested()
   }
 
+  // Which calendars are ticked, pending edits included.
+  function pickedCalendars() {
+    return Model.stringList(root.current("calendarIds", []))
+  }
+
+  function togglePickedCalendar(calendarId) {
+    var picked = root.pickedCalendars()
+    var at = picked.indexOf(calendarId)
+    if (at === -1) picked.push(calendarId)
+    else picked.splice(at, 1)
+    // Nothing ticked is written as nothing at all: an empty list and an
+    // absent key mean the same thing - the default calendar - and leaving the
+    // key out keeps shell.json the size it was before anybody had a choice.
+    root.change("calendarIds", picked.length === 0 ? "" : picked)
+  }
+
   function save() {
     if (!service || !dirty) { root.closeRequested(); return }
     service.saveSettings(pending)
@@ -306,6 +322,95 @@ Column {
     value: parseInt(String(root.current("reminderMinutes", 5)), 10) || 5
     onValueChanged: if (value !== parseInt(String(root.current("reminderMinutes", 5)), 10))
       root.change("reminderMinutes", value)
+  }
+
+  // ---------------- which calendars ----------------
+  //
+  // A mailbox holds more than one: the user's own extra calendars, the
+  // holiday feeds Outlook subscribes to, and every calendar somebody else
+  // shared and they added. Nothing here needs a new permission - Graph serves
+  // all of them out of the same mailbox - so this is a list to tick, not
+  // another sign-in.
+  Column {
+    width: parent.width
+    spacing: Style.spacing.xs
+    visible: !!root.service && root.service.hasCalendar
+
+    // Asked for when the form opens rather than held for the life of the
+    // window, so a calendar shared this morning is in the list this afternoon.
+    onVisibleChanged: if (visible && root.service) root.service.loadMailboxCalendars()
+
+    Text {
+      width: parent.width
+      text: "Calendars to show"
+      textFormat: Text.PlainText
+      color: Color.foreground
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+
+    Text {
+      width: parent.width
+      text: "Everything in your mailbox, including calendars other people shared with "
+            + "you. Tick none and the pane draws your calendar alone, the way it always "
+            + "has. A meeting in somebody else's calendar can be read and joined but not "
+            + "answered - it is their invitation, not yours."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Qt.darker(Color.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    Text {
+      width: parent.width
+      visible: !!root.service && root.service.mailboxCalendarsLoading
+      text: "Reading your calendars…"
+      textFormat: Text.PlainText
+      color: Qt.darker(Color.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    Text {
+      width: parent.width
+      visible: !!root.service && root.service.mailboxCalendarsError !== ""
+      text: root.service ? root.service.mailboxCalendarsError : ""
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Color.urgent
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    Repeater {
+      model: root.service ? root.service.mailboxCalendars : []
+
+      Toggle {
+        required property var modelData
+        width: root.width
+        label: String(modelData.name || "")
+              + (modelData.shared === true
+                 ? "  ·  " + String((modelData.owner || {}).address || "shared") : "")
+              + (modelData["default"] === true ? "  ·  your calendar" : "")
+        checked: root.pickedCalendars().indexOf(String(modelData.id)) !== -1
+        onClicked: root.togglePickedCalendar(String(modelData.id))
+      }
+    }
+
+    Text {
+      width: parent.width
+      visible: root.pickedCalendars().length > Model.calendarSourceCap()
+      text: "Only the first " + Model.calendarSourceCap() + " are drawn - each one is a "
+            + "request of its own, and a week that takes a dozen round trips to appear "
+            + "is not a week anybody waits for."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Color.urgent
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
   }
 
   Text {

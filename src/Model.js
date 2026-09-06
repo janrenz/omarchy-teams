@@ -824,8 +824,51 @@ function showAsLabel(showAs) {
 function answerable(event) {
   if (!event) return false
   if (event.cancelled === true) return false
+  // A row from somebody else's calendar. The invitation in it was addressed
+  // to them, not to whoever is reading it here, so there is nothing for this
+  // user to answer - Graph refuses, and the window should not have asked.
+  if (event.readOnly === true) return false
   if (event.isOrganizer === true) return false
   return String(event.response || "none") !== "none"
+}
+
+// Which calendar a row came from, when that is worth saying. Rows from the
+// one calendar the pane used to draw carry nothing, so this is empty for
+// them and the chip stays as it was.
+function eventCalendarLabel(event) {
+  if (!event) return ""
+  return String(event.calendarName || "")
+}
+
+// Whether the event with this id, as the pane last drew it, belongs to
+// somebody else. The detail fetched for one meeting says nothing about the
+// calendar it sits in - it is one event, asked for by id - so the answer has
+// to come from the row it was opened from.
+function eventIsReadOnly(events, eventId) {
+  var wanted = String(eventId || "")
+  var rows = events || []
+  for (var i = 0; i < rows.length; i++)
+    if (String(rows[i].id) === wanted) return rows[i].readOnly === true
+  return false
+}
+
+// How many calendars may be drawn at once. Mirrors CALENDAR_SOURCE_CAP in
+// teams.py, which is where it is enforced - this copy is only so the settings
+// form can say so before the helper silently draws the first eight.
+function calendarSourceCap() { return 8 }
+
+// A settings value that should be a list of ids, whatever is actually in the
+// file. Hand-edited JSON is the reason: a string where a list belongs, a null
+// in the middle, a number - none of which should cost the user their calendar.
+function stringList(value) {
+  var out = []
+  if (typeof value === "string") return String(value).trim() === "" ? [] : [String(value).trim()]
+  if (!value || value.length === undefined) return out
+  for (var i = 0; i < value.length; i++) {
+    var one = String(value[i] === undefined || value[i] === null ? "" : value[i]).trim()
+    if (one !== "" && out.indexOf(one) === -1) out.push(one)
+  }
+  return out
 }
 
 // The colour an event wears: what it does to your availability, which is what

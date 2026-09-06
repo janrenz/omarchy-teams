@@ -1107,6 +1107,13 @@ Item {
   readonly property bool wantCalendarWrite: wantCalendar && setting("calendarWrite", false) === true
   readonly property bool hasCalendar: view.calendar === true
   readonly property bool canWriteCalendar: view.canWriteCalendar === true
+  // Which calendars the pane draws. A mailbox holds more than one - a project
+  // calendar of the user's own, a holidays feed, and every calendar somebody
+  // else shared and they added - and Graph serves all of them from the same
+  // mailbox. Empty means the default calendar alone, which is what this
+  // widget drew before there was a choice, so an existing configuration keeps
+  // exactly the calendar it had.
+  readonly property var calendarIds: Model.stringList(setting("calendarIds", []))
   // Which day a week starts on is a local convention and Graph has no opinion
   // about it, so it is a setting rather than a guess.
   readonly property bool sundayFirst: String(setting("weekStart", "monday")) === "sunday"
@@ -1144,6 +1151,10 @@ Item {
   property bool calendarLoading: false
   property string calendarError: ""
   property bool calendarCapped: false
+  // Which calendars the events on screen came from, and which picked ones
+  // could not be read. Both are answers from the last fetch, not settings.
+  property var calendarSources: []
+  property var calendarMissing: []
 
   function validCalendarMode(name) {
     var wanted = String(name || "").toLowerCase()
@@ -1181,9 +1192,16 @@ Item {
 
   // A range nobody has fetched yet, as one string, so that changing the view
   // or stepping a week is one comparison rather than two properties racing.
+  // The picked calendars are part of what makes a fetch stale, not just the
+  // range: ticking one in settings has to redraw the week already on screen.
   readonly property string calendarWanted: (configured && hasCalendar)
-    ? (calendarSpan.from + "+" + calendarSpan.days) : ""
+    ? (calendarSpan.from + "+" + calendarSpan.days + "+" + calendarIds.join(",")) : ""
   property string calendarLoaded: ""
+  // What the request in flight is for. The answer cannot be matched against
+  // the range on its own any more - two picks of the same week differ only by
+  // which calendars were asked for - so the key is remembered rather than
+  // rebuilt from the reply.
+  property string calendarInFlight: ""
 
   onCalendarWantedChanged: if (calendarWanted !== "") loadCalendar()
 
@@ -1195,7 +1213,10 @@ Item {
     calendarLoading = true
     var command = ["python3", helper(), "calendar", "--account", alias,
                    "--from", String(calendarSpan.from), "--days", String(calendarSpan.days)]
+    for (var i = 0; i < calendarIds.length; i++)
+      command.push("--calendar", calendarIds[i])
     if (setting("demo", false) === true) command.push("--demo")
+    calendarInFlight = calendarWanted
     calendarProc.command = command
     calendarProc.running = true
   }
@@ -1224,12 +1245,56 @@ Item {
       root.calendarError = ""
       root.calendarEvents = parsed.events || []
       root.calendarCapped = parsed.capped === true
-      root.calendarLoaded = String(parsed.from || "") + "+" + String(parsed.days || 0)
+      root.calendarSources = parsed.sources || []
+      // Calendars that were picked and could not be read - unshared since,
+      // or gone. Named in the pane rather than dropped in silence, so an
+      // empty column is explained instead of just being empty.
+      root.calendarMissing = parsed.missing || []
+      root.calendarLoaded = root.calendarInFlight
       root.announceMeetings()
       // The range moved while the last fetch was in flight - somebody holding
       // the next-week key down - so the answer that just landed is about a
       // week nobody is looking at any more.
       if (root.calendarLoaded !== root.calendarWanted) Qt.callLater(root.loadCalendar)
+    }
+  }
+
+  // ---- the calendars there are to pick from -------------------------------
+  //
+  // Only the settings form asks for this, and only while it is open: the
+  // pane draws what was picked and has no use for the rest of the mailbox.
+
+  property var mailboxCalendars: []
+  property bool mailboxCalendarsLoading: false
+  property string mailboxCalendarsError: ""
+
+  function loadMailboxCalendars() {
+    if (!configured || pluginDir === "" || !hasCalendar) return
+    if (calendarListProc.running) return
+    mailboxCalendarsLoading = true
+    mailboxCalendarsError = ""
+    var command = ["python3", helper(), "calendars", "--account", alias]
+    if (setting("demo", false) === true) command.push("--demo")
+    calendarListProc.command = command
+    calendarListProc.running = true
+  }
+
+  Process {
+    id: calendarListProc
+    running: false
+    stdout: StdioCollector { id: calendarListOut; waitForEnd: true }
+    stderr: StdioCollector { id: calendarListErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.mailboxCalendarsLoading = false
+      var parsed = Model.parseJson(calendarListOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.mailboxCalendarsError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(calendarListErrOut.text || "Could not list your calendars", 160)
+        return
+      }
+      root.mailboxCalendarsError = ""
+      root.mailboxCalendars = parsed.calendars || []
     }
   }
 
@@ -1239,13 +1304,21 @@ Item {
   property var openEvent: null
   property bool eventLoading: false
   property string eventError: ""
+  // Whether the meeting on screen sits in somebody else's calendar. The
+  // detail fetch cannot say - it asks for one event by id and gets an event -
+  // so this is carried over from the row it was opened from.
+  property bool openEventReadOnly: false
 
   readonly property bool readingEvent: openEventId !== ""
 
-  function showEvent(eventId) {
+  function showEvent(eventId, readOnly) {
     var id = String(eventId || "")
     if (id === "") return
     if (openEventId === id) { closeEvent(); return }
+    // Told by the caller where it knows, looked up in the rows on screen
+    // where it does not - a reminder is clicked without a row in hand.
+    openEventReadOnly = readOnly === undefined
+      ? Model.eventIsReadOnly(calendarEvents, id) : readOnly === true
     openEventId = id
     openEvent = null
     eventError = ""
@@ -1309,6 +1382,14 @@ Item {
     if (!canWriteCalendar) {
       rsvpError = "This sign-in can read your calendar but not answer invitations. "
                 + "Turn on \"Answer and create meetings\" in settings and sign in again."
+      return
+    }
+    // The buttons are already hidden on a row from somebody else's calendar.
+    // This is the other way in - a key, a reminder - and Graph would refuse
+    // it, which reads as a failure rather than as an answer.
+    if (openEventReadOnly) {
+      rsvpError = "This meeting is in a calendar somebody shared with you. "
+                + "It is theirs to answer, not yours."
       return
     }
     rsvpSending = true
@@ -1420,6 +1501,11 @@ Item {
     if (id === "" || cancelling || pluginDir === "") return
     if (!canWriteCalendar) {
       cancelError = "This sign-in can read your calendar but not change it."
+      return
+    }
+    if (openEventReadOnly) {
+      cancelError = "This meeting is in a calendar somebody shared with you, "
+                  + "so it is not yours to call off."
       return
     }
     cancelling = true

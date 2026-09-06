@@ -2141,6 +2141,109 @@ def utc_param(when):
     return when.astimezone(timezone.utc).replace(tzinfo=None, microsecond=0).isoformat()
 
 
+# --------------------------------------------------------------------------
+# the calendars in the mailbox
+#
+# A mailbox holds more than one calendar. Some are the user's own - a project
+# calendar, the holidays feed Outlook subscribes to - and some belong to
+# somebody else and were added when they shared theirs. Graph serves all of
+# them from /me/calendars either way, and reading an added shared calendar
+# through /me/calendars/{id}/calendarView needs nothing beyond Calendars.Read:
+# it is in the user's own mailbox, so it is not the Calendars.Read.Shared
+# case. That scope is for the other route, /users/{who}/calendarView, which
+# reaches a calendar nobody has added. Nothing here uses it.
+#
+# Whose calendar a row came from decides what may be done with it: an
+# invitation sitting in a colleague's calendar is not one this user can answer,
+# so those rows are marked read-only and the window offers no buttons on them.
+# --------------------------------------------------------------------------
+
+# How many calendars one view may draw at once. Graph has no way to ask
+# several calendars for the same window in one request, so each one costs a
+# round trip and this is the ceiling on how long a week takes to appear.
+CALENDAR_SOURCE_CAP = 8
+
+CALENDAR_FIELDS = "id,name,owner,canEdit,isDefaultCalendar"
+
+
+def calendar_row(calendar, me):
+    """One calendar, shaped for the picker and for tagging its events."""
+    owner = (calendar.get("owner") or {})
+    address = str(owner.get("address") or "").strip()
+    return {
+        "id": str(calendar.get("id") or ""),
+        "name": str(calendar.get("name") or "").strip() or "(unnamed calendar)",
+        "owner": {"name": str(owner.get("name") or "").strip(), "address": address},
+        # Somebody else's calendar, added to this mailbox. Compared on the
+        # address rather than trusted from a flag, because Graph has none.
+        "shared": address != "" and me != "" and address.lower() != me,
+        "canEdit": calendar.get("canEdit") is True,
+        "default": calendar.get("isDefaultCalendar") is True,
+    }
+
+
+def mailbox_owner(entries, fallback):
+    """Which address counts as "mine" when deciding what is shared.
+
+    The default calendar's owner, because that one is the user's by
+    definition. The signed-in name is only the fallback: it is the user
+    principal name, and a mailbox whose primary address differs from its UPN
+    would otherwise have every calendar the user owns marked as somebody
+    else's - and every one of them go read-only.
+    """
+    for entry in entries:
+        if entry.get("isDefaultCalendar") is True:
+            address = str(((entry.get("owner") or {}).get("address") or "")).strip().lower()
+            if address:
+                return address
+    return fallback
+
+
+def mailbox_calendars(token, fallback_me):
+    """Every calendar in the mailbox, the default one first.
+
+    Ordered rather than left in Graph's order so the picker reads the way a
+    person thinks of them: the calendar, then the rest of the user's own, then
+    other people's.
+    """
+    status, payload = graph_get(token, "/me/calendars",
+                                {"$select": CALENDAR_FIELDS, "$top": "50"})
+    if status == 403:
+        fail("calendar_permission_required",
+             friendly(graph_error(payload, "This sign-in may not read your calendars")))
+    if status != 200:
+        fail("calendar_failed", friendly(graph_error(payload, "Could not list your calendars")))
+    entries = payload.get("value") or []
+    me = mailbox_owner(entries, fallback_me)
+    rows = [calendar_row(entry, me) for entry in entries]
+    rows.sort(key=lambda row: (not row["default"], row["shared"], row["name"].lower()))
+    return rows
+
+
+def cmd_calendars(args):
+    """The calendars this mailbox can draw, for the settings picker."""
+    if args.demo:
+        out({"ok": True, "calendars": demo_calendars()})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_see_calendar(account):
+        fail("calendar_permission_required",
+             "This sign-in cannot read your calendar. Turn on \"Calendar\" in this "
+             "widget's settings and sign in again.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+    out({"ok": True, "calendars": mailbox_calendars(token, account_address(account))})
+
+
+def account_address(account):
+    """The signed-in user's own address, lowercased, or "" if unknown."""
+    return str((account or {}).get("username", "")).strip().lower()
+
+
 def cmd_calendar(args):
     """Every event touching a range of local days, occurrences expanded."""
     try:
@@ -2150,7 +2253,8 @@ def cmd_calendar(args):
 
     if args.demo:
         out({"ok": True, "from": day_key(start), "days": span, "canWrite": True,
-             "capped": False, "events": demo_events(start, end)})
+             "capped": False, "sources": [], "missing": [],
+             "events": demo_events(start, end)})
 
     account = read_json(state_path(args.account))
     if not account:
@@ -2165,30 +2269,88 @@ def cmd_calendar(args):
     except AccountError as error:
         fail(error.code, error.message)
 
-    status, payload = graph_get(token, "/me/calendarView", {
+    window = {
         "startDateTime": utc_param(start),
         "endDateTime": utc_param(end),
         "$select": EVENT_LIST_FIELDS,
         "$orderby": "start/dateTime",
         "$top": str(CALENDAR_CAP),
-    })
-    if status == 403:
-        fail("calendar_permission_required",
-             friendly(graph_error(payload, "This sign-in may not read your calendar")))
-    if status != 200:
-        fail("calendar_failed", friendly(graph_error(payload, "Could not read your calendar")))
+    }
+    wanted = [str(one).strip() for one in (args.calendars or []) if str(one).strip()]
+    if wanted:
+        rows, total, sources, missing = calendar_sources_view(
+            token, account, wanted[:CALENDAR_SOURCE_CAP], window)
+    else:
+        # Nothing picked means the calendar, the way it has always been: one
+        # request against the default calendar, and no listing of the mailbox
+        # to pay for on every week the user steps through.
+        status, payload = graph_get(token, "/me/calendarView", window)
+        if status == 403:
+            fail("calendar_permission_required",
+                 friendly(graph_error(payload, "This sign-in may not read your calendar")))
+        if status != 200:
+            fail("calendar_failed",
+                 friendly(graph_error(payload, "Could not read your calendar")))
+        found = payload.get("value") or []
+        rows = [event_row(event) for event in found[:CALENDAR_CAP]]
+        total, sources, missing = len(found), [], []
 
-    found = payload.get("value") or []
-    rows = [event_row(event) for event in found[:CALENDAR_CAP]]
     # By when they start, with an all-day event above the morning's first
     # meeting rather than wherever its UTC midnight happened to sort.
     rows.sort(key=lambda row: (row["startDate"], not row["allDay"], row["when"]))
-    out({"ok": True, "from": day_key(start), "days": span, "events": rows,
+    out({"ok": True, "from": day_key(start), "days": span, "events": rows[:CALENDAR_CAP],
          "canWrite": can_write_calendar(account),
+         # Which calendars these events came from, and which of the picked
+         # ones could not be read - a calendar somebody stopped sharing is
+         # named rather than silently dropped.
+         "sources": sources,
+         "missing": missing,
          # There is no paging here on purpose - a month nobody can scroll past
          # is not worth a second request - so a range that hits the cap says
          # so rather than quietly ending early.
-         "capped": len(found) > CALENDAR_CAP})
+         "capped": total > CALENDAR_CAP})
+
+
+def calendar_sources_view(token, account, wanted, window):
+    """The picked calendars' events, merged and tagged with where they came from.
+
+    One request per calendar, because Graph has no way to ask several for the
+    same window. A calendar that will not answer - unshared since it was
+    picked, deleted, renamed out from under the id - is dropped and named in
+    `missing` rather than failing the whole view: one stale pick should not
+    cost the user the calendar they actually look at.
+    """
+    known = {entry["id"]: entry for entry in
+             mailbox_calendars(token, account_address(account))}
+    rows, total, sources, missing = [], 0, [], []
+    for calendar_id in wanted:
+        source = known.get(calendar_id)
+        if source is None:
+            missing.append({"id": calendar_id, "name": "", "why": "gone"})
+            continue
+        status, payload = graph_get(
+            token, "/me/calendars/%s/calendarView" % urllib.parse.quote(calendar_id, safe=""),
+            window)
+        if status != 200:
+            missing.append({"id": calendar_id, "name": source["name"],
+                            "why": "refused" if status in (401, 403) else "failed"})
+            continue
+        found = payload.get("value") or []
+        total += len(found)
+        for event in found[:CALENDAR_CAP]:
+            row = event_row(event)
+            row["calendarId"] = source["id"]
+            row["calendarName"] = source["name"]
+            row["calendarShared"] = source["shared"]
+            # An invitation in somebody else's calendar is not this user's to
+            # answer, and a meeting there is not theirs to call off. The
+            # window reads this rather than working it out again.
+            row["readOnly"] = source["shared"]
+            rows.append(row)
+        sources.append({"id": source["id"], "name": source["name"],
+                        "shared": source["shared"], "default": source["default"],
+                        "events": len(found)})
+    return rows, total, sources, missing
 
 
 def cmd_event(args):
@@ -2993,6 +3155,24 @@ def demo_events(start, end):
     return rows
 
 
+def demo_calendars():
+    """A mailbox's worth of calendars for the showcase: two owned, two not."""
+    return [
+        {"id": "demo-calendar-default", "name": "Calendar",
+         "owner": {"name": "Demo User", "address": "demo@example.com"},
+         "shared": False, "canEdit": True, "default": True},
+        {"id": "demo-calendar-project", "name": "Product",
+         "owner": {"name": "Demo User", "address": "demo@example.com"},
+         "shared": False, "canEdit": True, "default": False},
+        {"id": "demo-calendar-ines", "name": "Ines Baur",
+         "owner": {"name": "Ines Baur", "address": "ines.baur@example.com"},
+         "shared": True, "canEdit": False, "default": False},
+        {"id": "demo-calendar-office", "name": "office@example.com",
+         "owner": {"name": "Office", "address": "office@example.com"},
+         "shared": True, "canEdit": True, "default": False},
+    ]
+
+
 def demo_event_detail(event_id):
     """One fixture in full, with an agenda and a guest list to lay out."""
     wanted = str(event_id or "")
@@ -3159,8 +3339,16 @@ def main():
                           help="the first local day, as YYYY-MM-DD")
     calendar.add_argument("--days", type=int, default=1,
                           help="how many days from there (1-%d)" % CALENDAR_DAYS_CAP)
+    calendar.add_argument("--calendar", dest="calendars", action="append", metavar="ID",
+                          help="a calendar id from `calendars`; repeat for more, up to %d. "
+                               "Left out, this is the default calendar alone"
+                               % CALENDAR_SOURCE_CAP)
     calendar.add_argument("--demo", action="store_true")
     calendar.set_defaults(func=cmd_calendar)
+
+    calendars = with_account("calendars", "the calendars in the mailbox, shared ones included")
+    calendars.add_argument("--demo", action="store_true")
+    calendars.set_defaults(func=cmd_calendars)
 
     event = with_account("event", "one event in full, with its guest list")
     event.add_argument("--event", required=True, help="event id from `calendar`")

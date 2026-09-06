@@ -456,7 +456,7 @@ Item {
       event = cursoredEvent()
       if (!event) return
     }
-    service.showEvent(String(event.id))
+    service.showEvent(String(event.id), event.readOnly === true)
   }
 
   // Joining is the one thing this window cannot do itself - a meeting is
@@ -1896,7 +1896,8 @@ Item {
               // carry on from whatever was last touched rather than from
               // wherever they had got to.
               root.calendarCursor = Model.eventCursorKey(dayKey, event.id)
-              if (service.openEventId !== String(event.id)) service.showEvent(String(event.id))
+              if (service.openEventId !== String(event.id))
+                service.showEvent(String(event.id), event.readOnly === true)
             }
             onSlotPicked: function(dayKey, hour) { root.openNewMeeting(dayKey, hour) }
             onNewMeetingRequested: root.openNewMeeting("", -1)

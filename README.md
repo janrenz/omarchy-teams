@@ -190,6 +190,14 @@ An Azure app registration declares up front which delegated permissions it is al
    meetings** for the second. `Calendars.ReadWrite` is sent *in place of*
    `Calendars.Read`, not beside it — it contains it.
 
+   **`Calendars.Read.Shared` is not on this list on purpose.** Calendars other
+   people shared with you are drawn without it — see [More than one calendar,
+   shared ones included](#more-than-one-calendar-shared-ones-included) — because
+   a shared calendar you have added lives in your own mailbox, and reading your
+   own mailbox is what `Calendars.Read` is. The `.Shared` scopes are for
+   reaching a calendar nobody added, through `/users/{someone}`, and this plugin
+   never asks for that. Declaring it does no harm; it just does nothing.
+
    `Presence.ReadWrite` is opt-in for that reason *and* because of consent. It
    is the only permission besides the channel ones that needs an administrator:
    reading the whole organisation's presence is ordinary user consent, and
@@ -234,6 +242,7 @@ own.
 | `holdPresence` | `false` | Whether to hold a presence session open for this machine, so a presence you set has something to show against. Needs `setPresence`. |
 | `calendar` | `false` | Whether to ask for `Calendars.Read` at sign-in, which is what the calendar pane needs. |
 | `calendarWrite` | `false` | Whether to ask for `Calendars.ReadWrite` instead, which is what answering an invitation, booking a meeting and calling one off need. Needs `calendar`. |
+| `calendarIds` | — | Which calendars the pane draws, as Graph's ids — tick them in the window's settings rather than writing them here. Empty means your calendar alone. At most 8 are drawn. Needs no permission beyond `calendar`. |
 | `calendarView` | `week` | Which view the calendar opens on: `day`, `work week`, `week`, `month`. |
 | `weekStart` | `monday` | Which day a week begins with: `monday` or `sunday`. |
 | `meetingReminders` | `true` | A notification a few minutes before each meeting. Needs `calendar` and `notify`. |
@@ -467,6 +476,41 @@ an app registration declares the two separately, so they are two settings and
 two tiers. With only the read one, the calendar is there and the buttons that
 would change it are not.
 
+### More than one calendar, shared ones included
+
+A mailbox holds more than the one calendar. There are the user's own extras — a
+project calendar, whatever Outlook was pointed at — the holiday and birthday
+feeds it subscribes to, and every calendar a colleague shared and you added.
+**Calendars to show** in the widget's settings lists all of them, ticked one by
+one, and the pane draws what is ticked, merged into the same day columns.
+
+Tick nothing and it draws your calendar alone, which is what it did before
+there was a choice — an existing configuration keeps exactly the calendar it
+had.
+
+**This needs no new permission.** Graph serves every calendar in a mailbox from
+that mailbox, added shared ones included, so `Calendars.Read` reaches all of
+them. `Calendars.Read.Shared` is for the other route — `/users/{someone}` —
+which reaches a colleague's calendar nobody has added, and nothing here uses
+it. If a calendar you want is not in the list, add it in Outlook first and it
+will be.
+
+A meeting in somebody else's calendar is **read-only**, whatever your own
+sign-in is allowed to do:
+
+- It carries a `` mark on its row and says whose calendar it came from.
+- Accept, tentative, decline and *call it off* are not offered. The invitation
+  was addressed to the calendar's owner; Graph refuses an answer sent on their
+  behalf, and a button that always fails is worse than no button.
+- **Join** still works. A link is a link, and being invited is not what makes
+  it openable.
+
+Each calendar is a request of its own — Graph has no way to ask several for the
+same window — so at most eight are drawn, and the settings form says so if more
+are ticked. A calendar that will not answer, because it was unshared or
+deleted since it was ticked, is named in the pane and costs only itself: the
+rest of the week still draws.
+
 ### Joining hands off, and that is deliberate
 
 **Join** opens the meeting's link in whatever handles Teams meetings on this
@@ -545,6 +589,37 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.8.0 — 2026-09-06
+
+- **Every calendar in the mailbox, not just the one.** The pane asked Graph for
+  `/me/calendarView`, which is the default calendar and nothing else — so a
+  project calendar of your own, the holiday feed Outlook subscribes to, and
+  every calendar a colleague shared with you were all invisible here, however
+  plainly they sit in Outlook. **Calendars to show** in the widget's settings
+  now lists what the mailbox actually holds, ticked one by one, and the pane
+  merges what is ticked into the same day columns. Tick nothing and it draws
+  your calendar alone, exactly as before.
+
+  This needed no new permission and asks for none. A shared calendar you have
+  added lives in *your* mailbox, and Graph serves it from there — `Calendars.Read`
+  reaches it. The `.Shared` scopes are for reaching a calendar nobody added,
+  through `/users/{someone}`, which this plugin does not do.
+
+- **A meeting in somebody else's calendar is read-only, and says so.** It
+  carries a mark on its row, names the calendar it came from, and offers no
+  Accept, Tentative, Decline or *call it off* — the invitation was addressed to
+  the calendar's owner, Graph refuses an answer sent on their behalf, and a
+  button that always fails is worse than no button. **Join** still works: a
+  link is a link. Which calendar owns a row is decided against the *default
+  calendar's* owner rather than the signed-in name, because that name is a user
+  principal name and a mailbox whose primary address differs from it would
+  otherwise have had every calendar the user owns turn read-only.
+
+- **One stale pick costs only itself.** Each calendar is a request of its own,
+  so at most eight are drawn and the settings form says so if more are ticked.
+  A calendar that was unshared or deleted since it was ticked is named in the
+  pane instead of failing the week around it.
 
 ### 0.7.0 — 2026-09-06
 

@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "author": "Jan Renz",
   "license": "MIT",
-  "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and an Azure app registration of yours - see the README. Talks to Microsoft Graph and nothing else.",
+  "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and nothing else to set up: it signs in through its own Azure app registration. Talks to Microsoft Graph and nothing else.",
   "kinds": [
     "bar-widget",
     "panel"
@@ -108,6 +108,13 @@
         "label": "Answer and create meetings",
         "description": "Accept, tentative and decline, booking a meeting, and calling one off. Asks for Calendars.ReadWrite instead of Calendars.Read - also ordinary user consent, but separately declared, so your registration has to list it. Needs the setting above, and takes effect at the next sign-in.",
         "defaultValue": false
+      },
+      {
+        "key": "calendarIds",
+        "type": "array",
+        "label": "Calendars to show",
+        "description": "Which calendars the pane draws, as the ids Graph gives them - tick them in the window's settings rather than writing them here. A mailbox holds more than one: your own extra calendars, holiday feeds, and every calendar somebody shared with you and you added in Outlook. All of them are served from your own mailbox, so none of this needs a permission beyond the Calendars.Read you already have. Empty means your calendar alone. At most 8 are drawn.",
+        "defaultValue": []
       },
       {
         "key": "calendarView",

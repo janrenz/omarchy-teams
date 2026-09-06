@@ -153,9 +153,13 @@ Rectangle {
       Text {
         anchors.verticalCenter: parent.verticalCenter
         visible: text !== ""
+        // The shared mark earns its place on every row rather than waiting
+        // for a third line: whose calendar a meeting is in changes what the
+        // row means, and most rows in a week are too short for prose.
         text: (root.event.recurring === true ? "\u{F0456} " : "")   // nf-md-repeat
               + (root.event.online === true ? "\u{F0567} " : "")     // nf-md-video
               + (root.event.private === true ? "\u{F033E} " : "")    // nf-md-lock
+              + (root.event.calendarShared === true ? "\u{F0004} " : "")  // nf-md-account
         textFormat: Text.PlainText
         color: Qt.darker(root.fg, 1.5)
         font.family: root.fontFamily
@@ -190,11 +194,14 @@ Rectangle {
 
     // Only where there is room for a third line, which in practice means a
     // meeting of an hour or more - and those are the ones whose organiser is
-    // worth knowing before opening it.
+    // worth knowing before opening it. Which calendar it came from goes here
+    // too, where the mark above only says that it came from somebody's.
     Text {
       width: parent.width
       visible: !root.dense && root.height >= Style.font.caption * 4 && text !== ""
-      text: String((root.event.organizer || {}).name || "")
+      text: [String((root.event.organizer || {}).name || ""),
+             Model.eventCalendarLabel(root.event)]
+            .filter(function(part) { return part !== "" }).join("  ·  ")
       textFormat: Text.PlainText
       elide: Text.ElideRight
       color: Qt.darker(root.fg, 1.6)

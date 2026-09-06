@@ -24,6 +24,7 @@ const Model = new Function(
     "eventTimeLabel, durationLabel, responseLabel, showAsLabel, answerable, " +
     "eventTint, attendeeSummary, attendeeTally, minutesUntil, isNow, nextUp, " +
     "startingSoon, firstBusyHour, nowMinutes, newMeetingProblem, newMeetingPayload, " +
+    "stringList, eventIsReadOnly, eventCalendarLabel, calendarSourceCap, " +
     "keyOf, dateOf, addDays, addMonths, weekStart, todayKey, clockLabel }"
 )()
 
@@ -919,6 +920,43 @@ test("a whole day ends at the next midnight, which is what Graph means by it", (
   eq(payload.start, "2026-09-04T00:00:00")
   eq(payload.end, "2026-09-07T00:00:00")
   eq(payload.showAs, "free")
+})
+
+// ---------------------------------------------------------------------------
+// more than one calendar
+
+test("an invitation in somebody else's calendar is not this user's to answer", () => {
+  ok(Model.answerable({ response: "pending" }), "an ordinary invitation still is")
+  ok(!Model.answerable({ response: "pending", readOnly: true }),
+     "a row from a shared calendar offers nothing to answer")
+})
+
+test("a row says which calendar it came from, and the old rows say nothing", () => {
+  eq(Model.eventCalendarLabel({ calendarName: "Thomas Staubitz" }), "Thomas Staubitz")
+  eq(Model.eventCalendarLabel({}), "")
+  eq(Model.eventCalendarLabel(null), "")
+})
+
+test("whether an opened meeting is read-only comes from the row it was opened from", () => {
+  // The detail fetch asks for one event by id and is told nothing about the
+  // calendar around it, so the rows on screen are the only source there is.
+  const rows = [{ id: "a" }, { id: "b", readOnly: true }]
+  ok(!Model.eventIsReadOnly(rows, "a"))
+  ok(Model.eventIsReadOnly(rows, "b"))
+  ok(!Model.eventIsReadOnly(rows, "gone"), "an id nobody drew is not read-only by default")
+  ok(!Model.eventIsReadOnly(null, "a"))
+})
+
+test("a picked-calendars setting survives whatever is actually in the file", () => {
+  eq(Model.stringList(["a", "b"]), ["a", "b"])
+  eq(Model.stringList([]), [])
+  eq(Model.stringList(undefined), [])
+  eq(Model.stringList(null), [])
+  // Hand-edited shell.json: one id where a list belongs, blanks, repeats.
+  eq(Model.stringList("only-one"), ["only-one"])
+  eq(Model.stringList(""), [])
+  eq(Model.stringList(["a", "", null, "a", " b "]), ["a", "b"])
+  eq(Model.stringList(42), [])
 })
 
 // ---------------------------------------------------------------------------

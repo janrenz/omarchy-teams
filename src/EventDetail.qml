@@ -28,8 +28,12 @@ Column {
 
   signal closeRequested()
 
-  readonly property bool canWrite: !!service && service.canWriteCalendar === true
-  readonly property bool answerable: Model.answerable(root.event)
+  // A meeting in a calendar somebody shared is read-only however the sign-in
+  // is scoped: the invitation was addressed to its owner, and Graph refuses
+  // an answer sent on their behalf. So the buttons are not offered at all.
+  readonly property bool readOnly: !!service && service.openEventReadOnly === true
+  readonly property bool canWrite: !!service && service.canWriteCalendar === true && !readOnly
+  readonly property bool answerable: Model.answerable(root.event) && !readOnly
   readonly property bool mine: !!root.event && root.event.isOrganizer === true
   readonly property string joinUrl: root.event ? String(root.event.joinUrl || "") : ""
   readonly property var attendees: (root.event && root.event.attendees) || []
@@ -170,11 +174,27 @@ Column {
     font.pixelSize: Style.font.caption
   }
 
+  // Why there is nothing to answer here. Without it a shared calendar's
+  // meeting reads as one the window has quietly given up on.
+  Text {
+    width: parent.width
+    visible: root.readOnly
+    text: "In a calendar shared with you. Reading it is all this can do - the "
+          + "invitation belongs to whoever owns the calendar."
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Qt.darker(root.fg, 1.4)
+    font.family: root.fontFamily
+    font.pixelSize: Style.font.caption
+  }
+
   // ---------------- joining ----------------
 
   Row {
     width: parent.width
     spacing: Style.spacing.sm
+    // Joining is still on offer on a shared calendar's meeting: a link is a
+    // link, and being invited is not what makes it openable.
     visible: root.joinUrl !== "" || root.answerable
 
     Button {

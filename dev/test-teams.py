@@ -46,6 +46,9 @@ def capture(function, *args, **kwargs):
 class Args:
     account = "work"
     demo = False
+    # No calendar picked, which is what every command that is not `calendar`
+    # sees and what `calendar` itself means by "the default calendar alone".
+    calendars = None
 
 
 # --------------------------------------------------------------------------
@@ -1756,6 +1759,173 @@ class CalendarFixtures(unittest.TestCase):
     def test_an_opened_fixture_keeps_the_id_it_was_asked_for(self):
         self.assertEqual(teams.demo_event_detail("demo-event-new")["id"], "demo-event-new")
         self.assertIn("attendees", teams.demo_event_detail("demo-event-1"))
+
+
+def calendar_entry(name, address, default=False, can_edit=False):
+    """A calendar the way Graph hands one back."""
+    return {"id": "id-" + name.replace(" ", "-"), "name": name,
+            "owner": {"name": name, "address": address},
+            "isDefaultCalendar": default, "canEdit": can_edit}
+
+
+class WhoseCalendarIsIt(unittest.TestCase):
+    """Which calendars in a mailbox belong to somebody else."""
+
+    def test_a_calendar_owned_by_someone_else_is_shared(self):
+        row = teams.calendar_row(calendar_entry("Thomas", "thomas@x.de"), "jan@x.de")
+        self.assertTrue(row["shared"])
+        self.assertEqual(row["owner"]["address"], "thomas@x.de")
+
+    def test_the_users_own_second_calendar_is_not(self):
+        row = teams.calendar_row(calendar_entry("Project", "jan@x.de"), "jan@x.de")
+        self.assertFalse(row["shared"])
+
+    def test_the_comparison_ignores_case(self):
+        row = teams.calendar_row(calendar_entry("Project", "Jan@X.de"), "jan@x.de")
+        self.assertFalse(row["shared"])
+
+    def test_a_calendar_with_no_owner_is_not_called_somebody_elses(self):
+        row = teams.calendar_row({"id": "x", "name": "Holidays"}, "jan@x.de")
+        self.assertFalse(row["shared"])
+
+    def test_a_nameless_calendar_still_has_something_to_draw(self):
+        self.assertEqual(teams.calendar_row({"id": "x"}, "jan@x.de")["name"],
+                         "(unnamed calendar)")
+
+    def test_who_is_me_comes_from_the_default_calendar_not_the_sign_in_name(self):
+        # The mailbox's primary address, which is not always the name signed
+        # in with. Trusting the sign-in name here would mark every calendar
+        # the user owns as somebody else's, and turn them all read-only.
+        entries = [calendar_entry("Calendar", "jan.renz@x.de", default=True),
+                   calendar_entry("Project", "jan.renz@x.de")]
+        self.assertEqual(teams.mailbox_owner(entries, "j.renz@x.onmicrosoft.com"),
+                         "jan.renz@x.de")
+
+    def test_without_a_default_calendar_the_sign_in_name_is_all_there_is(self):
+        entries = [calendar_entry("Project", "jan@x.de")]
+        self.assertEqual(teams.mailbox_owner(entries, "jan@x.de"), "jan@x.de")
+
+
+class PickedCalendars(unittest.TestCase):
+    """Drawing more than one calendar, and what happens when one will not."""
+
+    LISTING = (200, {"value": [
+        calendar_entry("Calendar", "jan@x.de", default=True, can_edit=True),
+        calendar_entry("Project", "jan@x.de", can_edit=True),
+        calendar_entry("Thomas", "thomas@x.de"),
+    ]})
+
+    def event(self, event_id):
+        return {"id": event_id, "subject": event_id,
+                "start": {"dateTime": "2026-09-04T09:00:00", "timeZone": "UTC"},
+                "end": {"dateTime": "2026-09-04T10:00:00", "timeZone": "UTC"}}
+
+    def run_calendar(self, picked, responses, scopes="Calendars.ReadWrite"):
+        self.calls = []
+        queue = list(responses)
+
+        def http(url, method="GET", data=None, json_body=None, raw=None,
+                 headers=None, timeout=20):
+            self.calls.append(url)
+            return queue.pop(0) if queue else (200, {"value": []})
+
+        args = Args()
+        args.since = "2026-09-04"
+        args.days = 1
+        args.calendars = picked
+
+        patched = {"read_json": lambda *a, **k: {"scopes": scopes, "username": "jan@x.de"},
+                   "access_token": lambda alias, account: ("token", account),
+                   "http": http}
+        original = {name: getattr(teams, name) for name in patched}
+        for name, stub in patched.items():
+            setattr(teams, name, stub)
+        try:
+            return capture(teams.cmd_calendar, args)
+        finally:
+            for name, value in original.items():
+                setattr(teams, name, value)
+
+    def test_nothing_picked_asks_the_default_calendar_and_nothing_else(self):
+        result = self.run_calendar(None, [(200, {"value": [self.event("a")]})])
+        self.assertEqual(len(self.calls), 1)
+        self.assertIn("/me/calendarView", self.calls[0])
+        self.assertNotIn("/me/calendars/", self.calls[0])
+        self.assertEqual(result["sources"], [])
+
+    def test_each_picked_calendar_is_asked_for_the_same_window(self):
+        result = self.run_calendar(["id-Calendar", "id-Thomas"], [
+            self.LISTING,
+            (200, {"value": [self.event("mine")]}),
+            (200, {"value": [self.event("theirs")]}),
+        ])
+        self.assertEqual(len(self.calls), 3, "one listing and one view per calendar")
+        self.assertIn("/me/calendars/id-Calendar/calendarView", self.calls[1])
+        self.assertIn("/me/calendars/id-Thomas/calendarView", self.calls[2])
+        self.assertIn("startDateTime=", self.calls[1])
+        self.assertEqual([source["name"] for source in result["sources"]],
+                         ["Calendar", "Thomas"])
+
+    def test_every_row_says_which_calendar_it_came_from(self):
+        result = self.run_calendar(["id-Calendar", "id-Thomas"], [
+            self.LISTING,
+            (200, {"value": [self.event("mine")]}),
+            (200, {"value": [self.event("theirs")]}),
+        ])
+        by_id = {row["id"]: row for row in result["events"]}
+        self.assertEqual(by_id["mine"]["calendarName"], "Calendar")
+        self.assertEqual(by_id["theirs"]["calendarName"], "Thomas")
+
+    def test_a_row_from_somebody_elses_calendar_is_read_only(self):
+        # Nobody answers an invitation on another person's behalf, so the
+        # window must not offer to. This flag is what stops it.
+        result = self.run_calendar(["id-Calendar", "id-Thomas"], [
+            self.LISTING,
+            (200, {"value": [self.event("mine")]}),
+            (200, {"value": [self.event("theirs")]}),
+        ])
+        by_id = {row["id"]: row for row in result["events"]}
+        self.assertFalse(by_id["mine"]["readOnly"])
+        self.assertTrue(by_id["theirs"]["readOnly"])
+        self.assertTrue(by_id["theirs"]["calendarShared"])
+
+    def test_a_calendar_that_refuses_costs_only_itself(self):
+        result = self.run_calendar(["id-Thomas", "id-Calendar"], [
+            self.LISTING,
+            (403, {"error": {"code": "ErrorAccessDenied", "message": "no"}}),
+            (200, {"value": [self.event("mine")]}),
+        ])
+        self.assertTrue(result["ok"])
+        self.assertEqual([row["id"] for row in result["events"]], ["mine"])
+        self.assertEqual(result["missing"],
+                         [{"id": "id-Thomas", "name": "Thomas", "why": "refused"}])
+
+    def test_an_id_no_longer_in_the_mailbox_is_named_rather_than_fetched(self):
+        result = self.run_calendar(["id-gone", "id-Calendar"], [
+            self.LISTING,
+            (200, {"value": [self.event("mine")]}),
+        ])
+        self.assertEqual(result["missing"], [{"id": "id-gone", "name": "", "why": "gone"}])
+        self.assertEqual(len(self.calls), 2, "the missing id was still asked for")
+
+    def test_no_more_calendars_are_asked_for_than_the_cap_allows(self):
+        picked = ["id-Calendar"] * (teams.CALENDAR_SOURCE_CAP + 3)
+        self.run_calendar(picked, [self.LISTING] + [(200, {"value": []})] * 20)
+        self.assertEqual(len(self.calls), teams.CALENDAR_SOURCE_CAP + 1)
+
+    def test_the_merged_view_is_still_capped_and_says_so(self):
+        many = [self.event(str(n)) for n in range(teams.CALENDAR_CAP + 5)]
+        result = self.run_calendar(["id-Calendar", "id-Thomas"], [
+            self.LISTING, (200, {"value": many}), (200, {"value": [self.event("theirs")]}),
+        ])
+        self.assertTrue(result["capped"])
+        self.assertEqual(len(result["events"]), teams.CALENDAR_CAP)
+
+    def test_without_the_calendar_scope_not_even_the_listing_is_asked_for(self):
+        result = self.run_calendar(["id-Calendar"], [self.LISTING], scopes="Chat.ReadWrite")
+        self.assertEqual(result["error"]["code"], "calendar_permission_required")
+        self.assertEqual(self.calls, [])
+
 
 class Aliases(unittest.TestCase):
     """An account name becomes a filename, so it is checked."""

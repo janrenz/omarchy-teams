@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "author": "Jan Renz",
   "license": "MIT",
   "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and an Azure app registration of yours - see the README. Talks to Microsoft Graph and nothing else.",
@@ -59,7 +59,7 @@
         "key": "clientId",
         "type": "string",
         "label": "Azure client id",
-        "description": "Required. Your own app registration's Application (client) ID. Teams cannot reuse a registration made for mail: a registration declares which permissions it may request. See the plugin README for the exact setup."
+        "description": "Optional. Leave empty to sign in through the plugin's own app registration. Fill in your own registration's Application (client) ID if your organisation will not consent to a foreign app - see the plugin README for the permissions it has to declare."
       },
       {
         "key": "authority",

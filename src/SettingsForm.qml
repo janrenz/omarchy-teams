@@ -78,8 +78,8 @@ Column {
   LabeledField {
     width: parent.width
     label: "Azure client id"
-    placeholder: "00000000-0000-0000-0000-000000000000"
-    hint: "Required. Your own app registration - Teams cannot reuse one made for mail. See the plugin's README."
+    placeholder: "the plugin's own registration"
+    hint: "Optional. Leave empty and the sign-in uses the plugin's own app registration. Fill it in with your own if your organisation will not consent to that one - see the plugin's README."
     value: String(root.current("clientId", ""))
     onEdited: function(value) { root.change("clientId", value) }
   }

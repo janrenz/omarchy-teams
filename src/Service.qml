@@ -57,11 +57,12 @@ Item {
   // out from each other.
   function pad(px) { return Math.max(1, Math.round(px * densityScale)) }
 
-  // Configured enough to try. The client id is not optional the way the mail
-  // plugin's is: an app registration declares which permissions it may ask
-  // for, so there is no shared registration that could stand in for one set up
-  // for Teams.
-  readonly property bool configured: alias !== "" && clientId !== ""
+  // Configured enough to try. An account name is all that is asked for: an
+  // empty client id means the plugin's own app registration, which teams.py
+  // fills in. A registration cannot be borrowed from the mail plugin - it
+  // declares which permissions it may ask for - so this plugin publishes one,
+  // and the setting is for tenants that will not consent to it.
+  readonly property bool configured: alias !== ""
 
   property var snapshot: null
   property bool loading: false

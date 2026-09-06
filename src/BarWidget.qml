@@ -127,7 +127,7 @@ BarWidget {
 
     tooltipText: {
       if (!service.configured)
-        return "Teams: add an account name and client id in settings"
+        return "Teams: add an account name in settings"
       if (service.needsSignIn) return "Teams: sign in"
       if (!service.signedIn) return "Teams: loading…"
       var lines = [Model.plainText(service.view.username || service.alias)]

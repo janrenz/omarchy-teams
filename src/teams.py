@@ -8,11 +8,13 @@ content should not also be the thing holding credentials.
 
 Standard library only.
 
-There is no default client id, unlike the mail plugin. An Azure app
-registration declares which delegated permissions it may ask for, so a
-registration set up for Mail cannot request Chat.Read - the consent screen
-refuses before the user sees it. Teams therefore needs a registration of its
-own, and only the person who owns the tenant can make one. See README.md.
+The mail plugin borrows Thunderbird's public client id. Teams cannot: an Azure
+app registration declares up front which delegated permissions it may ask for,
+so a registration set up for Mail cannot request Chat.Read - the consent screen
+refuses before the user sees it. So this plugin publishes a registration of its
+own instead, and DEFAULT_CLIENT_ID below is it. Anyone can still name their own
+in the widget's settings, and a tenant that will not consent to an app
+registered somewhere else has to. See README.md.
 """
 
 import argparse
@@ -34,6 +36,19 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 # the image host check further down, which is where it is explained.
 GRAPH_HOST_NAME = "graph.microsoft.com"
 USER_AGENT = "omarchy-teams-plugin/1.0"
+
+# The plugin's own app registration, so that installing the plugin is enough to
+# sign in. A client id is not a secret: this is a public client, it holds no
+# secret, and the device-code flow proves nothing except that the person at the
+# browser is who they say they are. Thunderbird, the Azure CLI and every other
+# desktop client publish theirs for the same reason.
+#
+# It is registered for accounts in any organizational directory, so the sign-in
+# lands in the user's own tenant and the token that comes back is theirs. What
+# their tenant will consent to remains their tenant's business - an
+# organisation that refuses consent to an app registered elsewhere needs a
+# registration of its own, which is what the clientId setting is for.
+DEFAULT_CLIENT_ID = "b4221167-67e0-44ba-b111-9f9d31db87f9"
 
 # "common" accepts work/school and personal accounts alike. Teams chats only
 # exist on work/school accounts in practice, but the authority is left open so
@@ -432,15 +447,10 @@ def graph_get(token, path, params=None, extra_headers=None):
 
 
 def cmd_login_start(args):
-    client_id = str(args.client_id or "").strip()
-    if not client_id:
-        fail(
-            "client_id_required",
-            "Teams needs its own Azure app registration - an app registered for mail cannot "
-            "ask for Chat.Read. Create a public-client registration with device-code flow "
-            "enabled, add the Graph delegated permissions, and put its client id in this "
-            "widget's settings. See the plugin's README.",
-        )
+    # Empty means the plugin's own registration. The setting stays for the
+    # tenant that will not consent to an app registered somewhere else, and for
+    # anyone who would rather the consent screen named their own.
+    client_id = str(args.client_id or "").strip() or DEFAULT_CLIENT_ID
     authority = str(args.authority or "").strip() or DEFAULT_AUTHORITY
     status, payload = http(
         authority_base(authority) + "/oauth2/v2.0/devicecode",

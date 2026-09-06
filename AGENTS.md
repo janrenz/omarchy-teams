@@ -121,12 +121,15 @@ Nothing goes back the other way except a command line and a stdin payload.
    **whole day has to be written in a named zone**, because midnight UTC is the
    previous evening in half the world. Anything that starts doing date
    arithmetic in QML is putting the bug back.
-7. **There is no default client id, and there cannot be one.** An Azure app
+7. **A new Graph permission is a release, not an edit.** An Azure app
    registration declares which delegated permissions it may request, so a
-   registration made for mail cannot ask for `Chat.Read`. Anything needing a new
-   Graph permission needs a README change telling the user what to add to their
-   own registration, and a graceful path for when consent is refused — the way
-   `channels: false` still leaves chats working.
+   registration made for mail cannot ask for `Chat.Read` — which is why the
+   plugin publishes its own, `DEFAULT_CLIENT_ID` in `src/teams.py`. Asking for
+   a scope the registration does not declare fails the *whole* sign-in, so a
+   new permission has to be added to that registration in the portal **before**
+   the version asking for it ships, and to the README table for everyone
+   running a registration of their own. It also needs a graceful path for when
+   consent is refused — the way `channels: false` still leaves chats working.
 8. **No symlinks anywhere in this repo.** `omarchy plugin validate` refuses a
    plugin folder that contains one. That is why the dev harness is assembled
    outside the repo — see below.

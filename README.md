@@ -26,10 +26,12 @@ Python 3 standard library only. It talks to Microsoft Graph and nothing else. No
 
 ```
 omarchy plugin add https://github.com/janrenz/omarchy-teams.git --enable
-omarchy bar set janrenz.omarchy.teams clientId <your-application-client-id>
+omarchy bar set janrenz.omarchy.teams account work
 ```
 
-The client id is not optional, and no default could stand in for it: the sign-in goes against an app registration of yours, described below. Reload the shell afterwards and the icon is in the bar.
+That is the whole setup. The account name is just a short label for the sign-in; the sign-in itself goes through the plugin's own Azure app registration, so there is nothing to register in a portal first. Reload the shell afterwards and the icon is in the bar — open the window with `SUPER+G` and press **Sign in**.
+
+If your organisation will not consent to an app registered elsewhere, [bring your own registration](#bringing-your-own-app-registration) and the rest works the same.
 
 Nothing outside the plugin's own directory is written on install, and no configuration of yours is overwritten — the settings live in the widget's own entry in `~/.config/omarchy/shell.json`, alongside whatever else is already in there.
 
@@ -47,7 +49,7 @@ That takes the plugin off the disk. Three things of yours live outside it and ar
 | `~/.local/state/omarchy/teams/` | The tokens. Delete this to sign out. |
 | `~/.cache/omarchy/teams/images/` | Images already fetched from Graph. |
 
-The app registration in Azure is yours and is untouched either way; delete it in the portal if you are done with it.
+Removing the plugin does not withdraw the consent you gave. That lives in your own tenant: open <https://myapplications.microsoft.com>, find the app, and revoke its permissions there — or ask an administrator, who sees the same grant under *Enterprise applications* in the portal. If you registered an app of your own, it is untouched either way; delete it in the portal if you are done with it.
 
 ## Keyboard
 
@@ -128,11 +130,22 @@ reading, which is the step that used to be missing.
 
 Opening the window itself is `SUPER+G`, or *Teams* in the Omarchy menu.
 
-## You need your own Azure app registration
+## Signing in
 
-This is the one part nobody can do for you, and it is not optional.
+Give the widget an account name — a short label such as `work`, which is what the tokens are filed under — open the window with `SUPER+G`, and press **Sign in**. It shows a code and a URL; enter the code there, and the consent screen names the permissions below. That is all of it.
 
-An Azure app registration declares up front which delegated permissions it is allowed to request. A registration set up for mail therefore *cannot* ask for `Chat.Read` — the consent screen refuses before you ever see it. So unlike the Office 365 mail plugin, this one ships no default client id.
+The sign-in goes through this plugin's own app registration, published for accounts in any organizational directory, so the token that comes back belongs to your tenant and never leaves your machine. The client id is in `src/teams.py` in plain sight, which is where a desktop client's client id belongs: it is a public client, it holds no secret, and the device-code flow proves nothing except that the person at the browser is who they say they are. Thunderbird and the Azure CLI publish theirs for the same reason.
+
+Two things your organisation still decides for itself:
+
+- **Whether it will consent to an app registered elsewhere at all.** Some tenants only let users consent to apps their own administrator has approved or that carry a verified publisher. If the sign-in comes back saying an administrator has to approve it, either ask yours to — the app id is `b4221167-67e0-44ba-b111-9f9d31db87f9` — or [register your own](#bringing-your-own-app-registration), which nobody has to approve because it is already theirs.
+- **The two admin-consent permissions**, `ChannelMessage.Read.All` and `Presence.ReadWrite`. Those need an administrator whichever registration you sign in with — see [If channels are refused](#if-channels-are-refused).
+
+## Bringing your own app registration
+
+Optional, and worth it only if your tenant will not consent to the plugin's registration or you would rather the consent screen named one of yours.
+
+An Azure app registration declares up front which delegated permissions it is allowed to request. A registration set up for mail therefore *cannot* ask for `Chat.Read` — the consent screen refuses before you ever see it. So a registration for this plugin has to declare the whole list, and the optional rows have to be there before the settings that ask for them can be turned on.
 
 1. Go to **Azure Portal → Microsoft Entra ID → App registrations → New registration**.
 2. Name it whatever you like. Under *Supported account types* pick **Accounts in this organizational directory only** unless you know you need otherwise. Leave the redirect URI empty.
@@ -185,8 +198,8 @@ An Azure app registration declares up front which delegated permissions it is al
    on. Everything else is unaffected either way.
 
 5. Copy the **Application (client) ID**.
-6. In Omarchy, open the Teams widget's settings and fill in **Account name** (a short label such as `work`) and **Azure client id**.
-7. Open the window (`SUPER+G`) and press **Sign in**. Enter the code it shows at the URL it gives you.
+6. In Omarchy, open the Teams widget's settings and put it in **Azure client id**. A single-tenant registration also needs its tenant id in **Authority**; `common` is for multi-tenant ones.
+7. Sign in as above. If you were already signed in through the plugin's registration, sign in again — the token is tied to the registration that issued it.
 
 ### If channels are refused
 
@@ -213,11 +226,11 @@ own.
 | Key | Default | What it does |
 |---|---|---|
 | `account` | — | Short name for this sign-in. Letters, numbers, dot, dash, underscore. |
-| `clientId` | — | **Required.** Your app registration's Application (client) ID. |
+| `clientId` | the plugin's own registration | An app registration's Application (client) ID. Empty signs in through the plugin's; fill it in to use one of yours. |
 | `authority` | `common` | `common`, `organizations`, or your tenant id. |
 | `channels` | `true` | Whether to ask for team and channel access at sign-in. |
-| `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. Your app registration has to declare it first. |
-| `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p` and the status chip need. Your registration has to declare it and an administrator has to consent to it. |
+| `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. The plugin's registration declares it; a registration of your own has to as well. |
+| `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p` and the status chip need. An administrator has to consent to it whichever registration you use. |
 | `holdPresence` | `false` | Whether to hold a presence session open for this machine, so a presence you set has something to show against. Needs `setPresence`. |
 | `calendar` | `false` | Whether to ask for `Calendars.Read` at sign-in, which is what the calendar pane needs. |
 | `calendarWrite` | `false` | Whether to ask for `Calendars.ReadWrite` instead, which is what answering an invitation, booking a meeting and calling one off need. Needs `calendar`. |
@@ -532,6 +545,29 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.7.0 — 2026-09-06
+
+- **Signing in no longer starts with an Azure portal.** Until now the plugin
+  shipped no client id and refused to do anything without one, so installing it
+  meant registering an application first — a step most people cannot take at
+  all, because creating app registrations is something plenty of tenants only
+  let administrators do. Anyone who could not do it got a widget that said
+  *add an account name and client id* and never said anything else. The plugin
+  now publishes an app registration of its own, registered for accounts in any
+  organizational directory, and an empty `clientId` falls through to it: an
+  account name and **Sign in** is the whole setup.
+
+  Nothing about who holds what has changed. The registration only decides which
+  permissions the consent screen may *ask* for; the consent, the token and every
+  message it fetches belong to your tenant and stay on your machine. The client
+  id is in `src/teams.py` in plain sight because a public client's id is not a
+  secret — Thunderbird and the Azure CLI publish theirs too.
+
+  `clientId` stays as a setting, and it is still the answer for a tenant that
+  will not consent to an application registered somewhere else. What was
+  *required* is now *optional*, and the README's registration walkthrough is
+  still there for anyone who wants one of their own.
 
 ### 0.6.1 — 2026-09-04
 

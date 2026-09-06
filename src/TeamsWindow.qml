@@ -166,7 +166,7 @@ Item {
       }
       var widgets = parsed.widgets || []
       if (widgets.length === 0) {
-        root.settingsError = "No Teams widget in the bar. Add one and give it an account name and client id."
+        root.settingsError = "No Teams widget in the bar. Add one and give it an account name."
         return
       }
       root.settingsError = ""
@@ -1767,16 +1767,18 @@ Item {
               font.pixelSize: Style.font.body
             }
 
-            // The client id is the one thing nobody can do for the user: an
-            // Azure app registration declares which permissions it may request,
-            // so a registration made for mail cannot ask for Chat.Read.
+            // All that is missing at this point is a name to file the sign-in
+            // under. The Azure app registration is the plugin's own, so nobody
+            // has to make one before they can start - and the client id
+            // setting stays for the tenant that will not consent to it.
             Text {
               width: parent.width
               visible: root.settingsError === "" && !service.configured && root.settingsLoaded
-              text: "Teams needs its own Azure app registration. Create a public-client "
-                    + "registration with device-code flow enabled, add the Microsoft Graph "
-                    + "delegated permissions listed in the plugin's README, then put its "
-                    + "client id and an account name into this widget's settings."
+              text: "Give this widget an account name in its settings - a short label such as "
+                    + "work - and press Sign in. The sign-in goes through the plugin's own app "
+                    + "registration, so there is nothing to set up in Azure first. If your "
+                    + "organisation will not consent to it, put your own registration's client "
+                    + "id in the settings too; the plugin's README has the permissions it needs."
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
               color: Qt.darker(Color.foreground, 1.4)

@@ -232,7 +232,7 @@ Panel {
               width: parent.width
               text: {
                 if (!root.service) return ""
-                if (!root.service.configured) return "add an account name and client id in settings"
+                if (!root.service.configured) return "add an account name in settings"
                 if (root.service.needsSignIn) return "sign in — opens the window"
                 if (!root.service.signedIn) return "loading…"
                 var parts = []

@@ -165,15 +165,33 @@ So while a submission is open:
   version bumps included - a docs-only commit moves HEAD exactly as far as a
   feature does.
 - **Everything goes to `dev`**, which is where work accumulates in the meantime.
-- **When the listing is approved,** merge `dev` into `main` in one go, then
-  either re-point the still-open submission at the new HEAD or submit the next
-  version normally.
+- **When the listing is approved,** merge `dev` into `main` in one go, and only
+  then open the update request - it binds a SHA the same way, so the merge has
+  to be in it.
 - **When no submission is open,** `main` is fine to commit to directly. This is
   a rule about review windows, not about the repository forever.
 
 Editing the issue body is what re-triggers validation and the security baseline
 against current HEAD. The bot edits its two existing comments in place rather
 than posting new ones, so watch `updated_at`, not `created_at`.
+
+### Getting a *published* listing onto a newer commit
+
+Not by editing the original submission - that route is for a submission still
+being decided. Once a plugin is listed, the marketplace's documented flow
+(`SUBMISSION.md`, "Update an existing listing") is the **Plugin verification**
+issue form, `verify-plugin.yml`, with **Verify and publish a newer upstream
+commit**, giving the plugin id, the repository root URL, and the full
+40-character SHA of current HEAD. The existing snapshot stays up while the
+update is pending, and a successful update replaces it atomically.
+
+Between a push and that update landing, the catalog's scheduled refresh sees a
+HEAD it has no evidence for and shows **Update unverified**. That is the
+expected state in the gap, not a failure.
+
+Setup labels such as `manual-setup` are applied by a human reviewer and are
+finalised during that review, so a release that removes the reason for one has
+to say so in the request - nothing takes the label off on its own.
 
 ## The dev loop
 

@@ -36,6 +36,7 @@
       "setPresence": false,
       "holdPresence": false,
       "readPlaces": false,
+      "buildingNames": [],
       "wifiLocations": [],
       "calendar": false,
       "calendarWrite": false,
@@ -101,14 +102,21 @@
         "key": "readPlaces",
         "type": "boolean",
         "label": "List your buildings",
-        "description": "Lets the work-location picker name a building rather than just \"In the office\", and lets the wifi rules point at one. Needs Place.Read.All, which an administrator has to consent to - setting a building needs nothing beyond Presence.ReadWrite, because a placeId is only a string to that call, but learning which buildings exist and what they are called needs the Places directory. Refused, everything still works and the picker simply offers the office with no building in it. Needs the presence setting above, and changing this means signing in again.",
+        "description": "Fetches your tenant's buildings so the picker and the wifi rules can name one rather than just \"In the office\". Needs Place.Read.All on an app registration of your own: the plugin's shared registration does not ask for it, because it is admin consent and declaring it there would put it in front of every other organisation signing in through the same app. Setting a building needs no permission at all - a placeId is only a string to the presence call - so without this you name a building in buildingNames instead and everything works. Needs the presence setting and your own client id, and changing this means signing in again.",
         "defaultValue": false
+      },
+      {
+        "key": "buildingNames",
+        "type": "array",
+        "label": "Which buildings you know",
+        "description": "One per line, `<place id> = what you call it`. This is how a building gets a name on a sign-in that may not list the tenant's buildings, which is every sign-in through the plugin's shared registration. Name them in the window's settings rather than writing them here - it shows the place id Graph already reports for you, which is where the id comes from if any Teams client has ever put you in a building. A bare place id also works directly in a wifi rule, with no name and no permission.",
+        "defaultValue": []
       },
       {
         "key": "wifiLocations",
         "type": "array",
         "label": "Which wifi means where",
-        "description": "One rule per line, `ssid = where`, where `where` is a building's name, `office`, `remote`, `timeoff`, or `none` to report nothing on that network. `*` as the ssid is any other network. Tick them in the window's settings rather than writing them here - it offers the network you are on and the buildings to point it at, which beats copying GUIDs. When a rule matches, the plugin reports it to Graph as an automatic location, which a location you pick by hand still overrides; a network with no rule leaves your work location alone. Teams on Windows reads the equivalent list out of the tenant's own Places configuration, which no Graph endpoint exposes - hence this.",
+        "description": "One rule per line, `ssid = where`, where `where` is a building's name, a bare place id, `office`, `remote`, `timeoff`, or `none` to report nothing on that network. `*` as the ssid is any other network. Tick them in the window's settings rather than writing them here - it offers the network you are on and the buildings to point it at, which beats copying GUIDs. When a rule matches, the plugin reports it to Graph as an automatic location, which a location you pick by hand still overrides; a network with no rule leaves your work location alone. Teams on Windows reads the equivalent list out of the tenant's own Places configuration, which no Graph endpoint exposes - hence this.",
         "defaultValue": []
       },
       {

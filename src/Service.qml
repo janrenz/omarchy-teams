@@ -39,6 +39,10 @@ Item {
   // Exchange and no Graph endpoint hands it over, so this is the user's copy
   // of the part of it that concerns them.
   readonly property var wifiRules: Model.stringList(setting("wifiLocations", []))
+  // `<place id> = what you call it`, one per line. The list from Graph is
+  // behind a permission the shared registration will not ask for, so this is
+  // how a building gets a name without one - see SCOPES_PLACES in teams.py.
+  readonly property var namedBuildingRules: Model.stringList(setting("buildingNames", []))
   // The bar only ever draws an unread count, and the team tree costs one Graph
   // request per team - 29 of them on this tenant. So the widget turns it off
   // and the window turns it on; nothing draws a channel list nobody asked for.
@@ -849,7 +853,13 @@ Item {
   // just a string to that call - but *learning* which buildings exist and what
   // they are called needs the Places directory. Refused, the picker is the one
   // it was before: "In the office" and no building under it.
-  property var buildings: []
+  // What Graph answered, which is empty on any sign-in without the scope.
+  property var fetchedBuildings: []
+  // What the plugin can name, which is that plus whatever the user named
+  // locally. Everything drawing a building binds to this: the picker, the
+  // chips, the rules. `fetchedBuildings` is only the half that came from Graph.
+  readonly property var buildings: Model.knownBuildings(
+    fetchedBuildings, Model.namedBuildings(namedBuildingRules))
   property bool buildingsLoading: false
   property string buildingsError: ""
   // Places hides buildings until an administrator makes them visible, and
@@ -883,7 +893,7 @@ Item {
         return
       }
       root.buildingsError = ""
-      root.buildings = parsed.buildings || []
+      root.fetchedBuildings = parsed.buildings || []
       root.buildingsNote = String(parsed.note || "")
     }
   }

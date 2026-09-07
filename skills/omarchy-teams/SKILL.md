@@ -155,11 +155,15 @@ Places directory:
 
     python3 $HELPER buildings       --account work
 
-Which needs `Place.Read.All` and the `readPlaces` setting; without them the
-helper says so, and "In the office" with no building is the honest answer
-rather than a guess. Pass the id on as `location --state office --place <id>`.
-An empty list with `ok: true` is a tenant that has not made its buildings
-visible - the `note` says so, and it is not a failure to report as one.
+Which needs `Place.Read.All` **and a registration of the user's own** - the
+plugin's shared app id refuses that scope, because it is admin consent and
+shared with other tenants. So this command failing is the ordinary case, not a
+problem to solve: `location --state office --place <id>` works on any sign-in,
+because setting a building needs no permission at all. The ids a user has are
+in the `buildingNames` setting, and `me.location.placeId` from a fetch is
+another. An empty list with `ok: true` is a tenant that has not made its
+buildings visible - the `note` says so, and it is not a failure to report as
+one.
 
 `auto-location` is the automatic layer - this machine saying where it thinks it
 is, driven by the plugin's wifi rules and its own timer. **Leave it alone**,

@@ -410,17 +410,37 @@ fatal QML error makes it exit instead.
   **not** on a rule existing: the settings form's whole flow is "you are on
   cloudhouse-internet, what is that?", and it cannot ask until something has
   looked. Reporting is what waits for a rule.
-- **Buildings cost a permission for their *names*, not for being set.** A
-  `placeId` is a string as far as `setManualLocation` is concerned, so setting
-  a building needs nothing beyond `Presence.ReadWrite`. Listing the buildings
-  is `Place.Read.All` - admin consent, and a new tier, so invariant 8 applies:
-  it went on the registration before the version asking for it shipped. Its
-  graceful path is the picker the plugin already had, which is also what Teams
-  falls back to when a tenant configures SSIDs and no building mapping. One
-  more trap: Places answers `200` with an empty list until an administrator
-  runs `Set-PlacesSettings -EnableBuildings 'Default:true'`, which from the
-  outside looks exactly like a bug - hence the `note` the helper prints and the
-  form shows.
+- **Buildings cost a permission for their *names*, not for being set - and
+  `DEFAULT_CLIENT_ID` will not pay it.** A `placeId` is a string as far as
+  `setManualLocation` is concerned, so setting a building needs nothing beyond
+  `Presence.ReadWrite`. Listing them is `Place.Read.All`, which is admin
+  consent *and* a read of the whole tenant's estate.
+
+  That combination is why this is the one tier the shared registration refuses.
+  Invariant 8 says a new permission is a release rather than an edit; the
+  sharper point here is that the registration is **multi-tenant**, so a
+  permission declared on it is one every other organisation's administrator is
+  shown. `Presence.ReadWrite` is admin consent too and is declared, because it
+  writes one field of the signed-in user's own presence - this reads
+  everybody's buildings, which is not a bill to hand strangers for a name in a
+  dropdown. `require_own_registration` refuses `--places` on
+  `DEFAULT_CLIENT_ID` **before the devicecode request**, because the failure it
+  is preventing is the whole sign-in: an undeclared scope fails all of them.
+  The settings toggle is disabled without a client id for the same reason.
+
+  So the capability has to work without the scope, and it does: a place id is
+  recognised on its shape (`Model.looksLikePlaceId`), `buildingNames` gives one
+  a local name, and `Service.buildings` is the union of what Graph answered and
+  what the user named - `fetchedBuildings` is only the Graph half, and nothing
+  should bind to it except the "is this id already known" check. The id itself
+  comes from the read-back: `me.location.placeId` is populated whenever any
+  Teams client has put the user in a building, so the settings form offers it
+  rather than sending somebody to PowerShell.
+
+  One more trap on the fetch path: Places answers `200` with an empty list
+  until an administrator runs `Set-PlacesSettings -EnableBuildings
+  'Default:true'`, which from the outside looks exactly like a bug - hence the
+  `note` the helper prints and the form shows.
 - **A work location is three answers, and Graph says which one it used.**
   `presence.workLocation` is an *aggregate* of a manual choice, a client's
   detection and the working-hours schedule, in that order, and `source` names

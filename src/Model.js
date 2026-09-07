@@ -275,9 +275,62 @@ function ssidOf(text) {
   return ""
 }
 
+// A place id as Graph writes them. Recognised rather than guessed at: this is
+// a format, and matching it is how a building can be used by somebody whose
+// sign-in may not list the tenant's buildings at all - which is everybody on
+// the plugin's shared app registration. Anything that is not this shape has to
+// match a building we know of, because "a name nobody answers to" and "an id"
+// must not be confused for one another.
+var PLACE_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function looksLikePlaceId(text) {
+  return PLACE_ID_PATTERN.test(String(text || "").trim())
+}
+
+// Buildings the user has named locally, out of the `buildingNames` setting -
+// `<place id> = what you call it`, one per line.
+//
+// This exists because the list from Graph is behind a permission the shared
+// registration will not ask for. A place id is usable without it; what is
+// missing is something to call the building, and that is a thing the person
+// who works there can supply in one line.
+function namedBuildings(rules) {
+  var out = []
+  var lines = stringList(rules)
+  for (var i = 0; i < lines.length; i++) {
+    var at = lines[i].indexOf("=")
+    if (at === -1) continue
+    var id = lines[i].slice(0, at).trim()
+    var name = lines[i].slice(at + 1).trim()
+    if (id === "" || name === "") continue
+    out.push({ id: id, name: name, label: "", local: true })
+  }
+  return out
+}
+
+// Every building this plugin can name: the tenant's, then the ones named
+// locally. Deduplicated on the id, first one winning, so a tenant that does
+// list its buildings does not end up with two rows for one of them.
+function knownBuildings(fetched, named) {
+  var out = []
+  var lists = [fetched || [], named || []]
+  for (var l = 0; l < lists.length; l++) {
+    for (var i = 0; i < lists[l].length; i++) {
+      var row = lists[l][i]
+      var id = String(row.id || "")
+      if (id === "") continue
+      var seen = false
+      for (var k = 0; k < out.length; k++) if (out[k].id === id) seen = true
+      if (!seen) out.push(row)
+    }
+  }
+  return out
+}
+
 // One building, by whatever the user is likely to have written: its name, the
-// label the tenant gave it, or the id itself for anybody who had the id
-// already. Case and surrounding space are ignored, because this is typed.
+// label the tenant gave it, or the id itself. A bare place id resolves even
+// when nothing is known about it - there is nothing to look up, and Graph will
+// take it - and then has only the id to be called.
 function buildingNamed(wanted, buildings) {
   var rows = buildings || []
   var needle = String(wanted || "").trim().toLowerCase()
@@ -290,6 +343,9 @@ function buildingNamed(wanted, buildings) {
             && String(row.label || "").trim().toLowerCase() === needle))
       return row
   }
+  if (looksLikePlaceId(needle))
+    return { id: String(wanted).trim(), name: String(wanted).trim(), label: "",
+             unnamed: true }
   return null
 }
 
@@ -325,9 +381,14 @@ function wifiRuleRows(rules, buildings) {
           // Named but unresolvable. Not downgraded to a bare "office": a
           // building that cannot be found is not the same as no building, and
           // claiming the second would put the user somewhere they did not say.
+          //
+          // A place id would have resolved on its shape alone, so anything
+          // reaching here is a name - and the two ways a name fails are worth
+          // telling apart, because only one of them is a typo.
           row.problem = (buildings && buildings.length > 0)
             ? "no building called that"
-            : "buildings have not been listed yet"
+            : "no building of that name is known - give it a place id, or name "
+              + "one in Which buildings you know"
         }
       }
     }

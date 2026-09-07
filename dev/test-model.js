@@ -27,7 +27,8 @@ const Model = new Function(
     "stringList, eventIsReadOnly, eventCalendarLabel, calendarSourceCap, " +
     "keyOf, dateOf, addDays, addMonths, weekStart, todayKey, clockLabel, " +
     "ssidOf, buildingNamed, wifiRuleRows, autoLocationFor, locationWord, " +
-    "buildingMenuCap, choiceLabel }"
+    "buildingMenuCap, choiceLabel, looksLikePlaceId, namedBuildings, " +
+    "knownBuildings }"
 )()
 
 let passed = 0
@@ -1012,12 +1013,66 @@ test("a rule says what it will do, or why it cannot", () => {
   eq(rows[5].problem, "no network named")
 })
 
-test("a rule pointing at a building is held back until the list has arrived", () => {
+test("a rule naming a building is held back until something knows the name", () => {
   // Otherwise the first poll after a shell start writes "the office" for a
-  // rule that will resolve to a building a second later.
+  // rule that will resolve to a building a second later - and on a sign-in
+  // that may not list buildings at all, it would write it for ever.
   const rows = Model.wifiRuleRows(["wifi = Hauptgebäude"], [])
-  eq(rows[0].problem, "buildings have not been listed yet")
+  eq(rows[0].state, "")
+  eq(rows[0].problem.startsWith("no building of that name is known"), true)
   eq(Model.autoLocationFor("wifi", ["wifi = Hauptgebäude"], []), null)
+})
+
+test("a place id needs nothing to know it, which is the point", () => {
+  // Place.Read.All is admin consent on a registration other tenants share, so
+  // the shared app never asks for it - and a building still has to be usable.
+  // An id is recognised on its shape: Graph will take it or not.
+  eq(Model.looksLikePlaceId("eb706f15-137e-4722-b4d1-b601481d9251"), true)
+  eq(Model.looksLikePlaceId("EB706F15-137E-4722-B4D1-B601481D9251"), true)
+  eq(Model.looksLikePlaceId("Hauptgebäude"), false)
+  eq(Model.looksLikePlaceId("demo-building-0"), false)
+  eq(Model.looksLikePlaceId(""), false)
+
+  const rows = Model.wifiRuleRows(
+    ["wifi = eb706f15-137e-4722-b4d1-b601481d9251"], [])
+  eq([rows[0].state, rows[0].placeId, rows[0].problem],
+     ["office", "eb706f15-137e-4722-b4d1-b601481d9251", ""])
+  // Nothing to call it but itself, and that is honest rather than invented.
+  eq(rows[0].label, "eb706f15-137e-4722-b4d1-b601481d9251")
+})
+
+test("a building can be named locally when Graph will not name it", () => {
+  const named = Model.namedBuildings([
+    "eb706f15-137e-4722-b4d1-b601481d9251 = Hauptgebäude",
+    "b-2 = Werkstatt",
+    "no-equals",
+    " = nameless",
+    "id-only = "
+  ])
+  eq(named.length, 2)
+  eq([named[0].id, named[0].name], ["eb706f15-137e-4722-b4d1-b601481d9251", "Hauptgebäude"])
+  eq([named[1].id, named[1].name], ["b-2", "Werkstatt"])
+
+  // And then a rule may use that name, with no permission anywhere.
+  const rows = Model.wifiRuleRows(["wifi = Hauptgebäude"], named)
+  eq([rows[0].state, rows[0].placeId, rows[0].label],
+     ["office", "eb706f15-137e-4722-b4d1-b601481d9251", "Hauptgebäude"])
+})
+
+test("the tenant's buildings and the local ones are one list, without doubles", () => {
+  const named = Model.namedBuildings(["b-1 = What I call it", "b-9 = Only mine"])
+  const all = Model.knownBuildings(BUILDINGS, named)
+  eq(all.map(row => row.id), ["b-1", "b-2", "b-9"])
+  // The tenant's name wins for a building that is in both: it is the one
+  // everybody else sees.
+  eq(all[0].name, "Hauptgebäude")
+  eq(all[2].name, "Only mine")
+  // Either side alone.
+  eq(Model.knownBuildings([], named).map(row => row.id), ["b-1", "b-9"])
+  eq(Model.knownBuildings(BUILDINGS, []).map(row => row.id), ["b-1", "b-2"])
+  eq(Model.knownBuildings(null, null), [])
+  // A row with no id is not a building.
+  eq(Model.knownBuildings([{ name: "nowhere" }], []), [])
 })
 
 test("the network on decides what is reported", () => {

@@ -99,6 +99,50 @@ Column {
     root.change("wifiLocations", kept.length === 0 ? "" : kept)
   }
 
+  // Buildings named locally: `<place id> = what you call it`.
+  function nameRules() {
+    return Model.stringList(root.current("buildingNames", []))
+  }
+
+  // The place id Graph reports for this user right now, when it is one nothing
+  // has a name for yet. That is the answer to "where do I get a building id" on
+  // a sign-in that may not list them: if any Teams client has ever put you in
+  // a building, Graph hands the id straight back on your own presence.
+  function unnamedPlaceHere() {
+    var mine = root.service ? root.service.myLocation : null
+    var place = mine ? String(mine.placeId || "") : ""
+    if (place === "") return ""
+    var known = Model.namedBuildings(root.nameRules())
+    for (var i = 0; i < known.length; i++)
+      if (String(known[i].id) === place) return ""
+    var fetched = root.service ? root.service.fetchedBuildings : []
+    for (var k = 0; k < fetched.length; k++)
+      if (String(fetched[k].id) === place) return ""
+    return place
+  }
+
+  function nameBuilding(placeId, name) {
+    if (String(placeId || "") === "") return
+    var kept = []
+    var rules = root.nameRules()
+    for (var i = 0; i < rules.length; i++) {
+      var at = rules[i].indexOf("=")
+      var id = (at === -1 ? rules[i] : rules[i].slice(0, at)).trim()
+      if (id !== String(placeId)) kept.push(rules[i])
+    }
+    if (String(name || "").trim() !== "")
+      kept.push(String(placeId) + " = " + String(name).trim())
+    root.change("buildingNames", kept.length === 0 ? "" : kept)
+  }
+
+  function dropName(rule) {
+    var kept = []
+    var rules = root.nameRules()
+    for (var i = 0; i < rules.length; i++)
+      if (rules[i] !== rule) kept.push(rules[i])
+    root.change("buildingNames", kept.length === 0 ? "" : kept)
+  }
+
   function dropRule(rule) {
     var kept = []
     var rules = root.wifiRules()
@@ -534,12 +578,30 @@ Column {
 
   Toggle {
     width: parent.width
+    // Needs a registration of your own, not only the presence setting. The
+    // plugin's shared registration does not ask for Place.Read.All and will
+    // not: it is admin consent, and it would be put to every other
+    // organisation signing in through the same app. Disabled rather than
+    // allowed and then refused, because the refusal costs the whole sign-in.
     enabled: root.current("setPresence", false) === true
+             && String(root.current("clientId", "")).trim() !== ""
     opacity: enabled ? 1.0 : 0.5
     label: "List your buildings"
-    description: "Lets the work-location picker name a building instead of just \"In the office\", and lets the network rules below point at one. Needs Place.Read.All, which an administrator has to consent to for the tenant - setting a building needs nothing beyond the presence permission, but learning which buildings exist and what they are called does. Without it everything here still works; the picker simply offers the office and no building in it. Takes effect at the next sign-in."
+    description: "Fetches your tenant's buildings so the picker and the rules below can name one instead of saying just \"In the office\". Needs Place.Read.All on an app registration of your own - the plugin's shared one does not ask for it, because it is admin consent and every other organisation signing in through the same app would be asked for it too. Everything else here works without this: a building's id can be used on any sign-in, and you can give it a name below. Takes effect at the next sign-in."
     checked: root.current("readPlaces", false) === true
     onClicked: root.change("readPlaces", !(root.current("readPlaces", false) === true))
+  }
+
+  Text {
+    width: parent.width
+    visible: root.current("setPresence", false) === true
+             && String(root.current("clientId", "")).trim() === ""
+    text: "Listing buildings needs your own Azure client id above, with Place.Read.All added to that registration. Naming a building by hand needs neither - see below."
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Qt.darker(Color.foreground, 1.4)
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
   }
 
   Text {
@@ -574,6 +636,89 @@ Column {
     color: Color.urgent
     font.family: Style.font.family
     font.pixelSize: Style.font.caption
+  }
+
+  // ---- buildings you know about, without asking Graph ----------------------
+
+  Column {
+    width: parent.width
+    spacing: Style.spacing.sm
+    visible: !!root.service && root.service.canSetLocation
+
+    Text {
+      width: parent.width
+      text: "Which buildings you know"
+      textFormat: Text.PlainText
+      color: Color.foreground
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+
+    Text {
+      width: parent.width
+      text: "A building is a place id, and setting one needs no permission at all - only listing them does. So a building can be named here instead, and then used by name in the rules below and in the picker."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Qt.darker(Color.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    // The one place an id turns up on its own: your own work location. If any
+    // Teams client has ever put you in a building - the Windows one does it
+    // from the wifi - Graph hands the id straight back on your presence, and
+    // this is that id, waiting to be given a name.
+    LabeledField {
+      width: parent.width
+      visible: root.unnamedPlaceHere() !== ""
+      label: "Graph puts you in place " + root.unnamedPlaceHere()
+      placeholder: "what you call it"
+      hint: "Teams has reported this building for you, so the id is right. Name it and the picker and the rules can use the name."
+      value: ""
+      onEdited: function(value) { root.nameBuilding(root.unnamedPlaceHere(), value) }
+    }
+
+    Text {
+      width: parent.width
+      visible: root.unnamedPlaceHere() === "" && root.nameRules().length === 0
+      text: "No building id has turned up yet. One appears here the first time any Teams client reports you in a building - or ask whoever runs Microsoft Places for the id, or add Place.Read.All to a registration of your own and let the list come from Graph."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Qt.darker(Color.foreground, 1.5)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    Repeater {
+      model: Model.namedBuildings(root.nameRules())
+
+      Row {
+        required property var modelData
+        width: root.width
+        spacing: Style.spacing.sm
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          width: root.width - forgetName.width - Style.spacing.sm * 2
+          text: String(modelData.name) + "  ·  " + String(modelData.id)
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: Qt.darker(Color.foreground, 1.3)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
+
+        PanelActionButton {
+          id: forgetName
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "\u{F0156}"   // nf-md-close
+          tooltipText: "Forget this name"
+          foreground: Color.foreground
+          onClicked: root.dropName(String(modelData.id) + " = " + String(modelData.name))
+        }
+      }
+    }
   }
 
   // ---- this network, and what it means -------------------------------------

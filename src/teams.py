@@ -112,16 +112,28 @@ SCOPES_PRESENCE = " Presence.ReadWrite"
 SCOPES_CALENDAR = " Calendars.Read"
 SCOPES_CALENDAR_WRITE = " Calendars.ReadWrite"
 
-# Your buildings are a sixth tier, and admin consent for the second time.
+# Your buildings are a sixth tier, and the only one this plugin's own
+# registration will not ask for.
+#
 # Setting a work location needs no more than Presence.ReadWrite, building and
-# all - a placeId is a string as far as that call is concerned. What needs a
-# permission is *learning* the buildings: their names and ids live in the
-# Places directory behind Place.Read.All, which an administrator has to
-# consent to and which a registration has to declare. So it is opt-in twice
-# over, and the graceful path when it is refused is the one the plugin had
-# before: the picker offers "In the office" with no building under it, which
-# is what Teams itself falls back to when only an SSID list is configured and
-# no building mapping.
+# all - a placeId is a string as far as that call is concerned, so nothing
+# here is gated on this. What needs a permission is *learning* the buildings:
+# their names and ids live in the Places directory behind Place.Read.All.
+#
+# Which is admin consent, and DEFAULT_CLIENT_ID is a multi-tenant registration
+# other organisations sign in through. A permission declared on it is a
+# permission every one of their administrators is asked to consent to, and
+# "read every place in the directory" is not a thing to put in front of
+# somebody who installed a chat widget. `Presence.ReadWrite` is admin consent
+# too, but it writes one field of the signed-in user's own presence; this
+# reads the whole tenant's estate. So the shared registration does not declare
+# it, `--places` is refused with it, and a building's *name* is a reason to
+# bring a registration of your own - see require_own_registration below.
+#
+# None of which stops a building being *used*: a place id in a wifi rule or on
+# `location --place` works on any sign-in, and buildingNames in the settings
+# gives it something to be called locally. The scope buys the list, not the
+# capability.
 SCOPES_PLACES = " Place.Read.All"
 
 STATE_DIR = os.path.join(
@@ -461,11 +473,31 @@ def graph_get(token, path, params=None, extra_headers=None):
 # --------------------------------------------------------------------------
 
 
+def require_own_registration(client_id, places):
+    """Refuse to ask the shared registration for Place.Read.All.
+
+    Two reasons, and the first is somebody else's: DEFAULT_CLIENT_ID is
+    multi-tenant, so a permission declared on it is one every other tenant's
+    administrator is shown. The second is this sign-in's - the registration
+    does not declare it, and asking for an undeclared scope fails the *whole*
+    sign-in rather than that one scope, so without this check turning the
+    setting on would lock the account out of chats as well.
+    """
+    if places and client_id == DEFAULT_CLIENT_ID:
+        fail("own_registration_required",
+             "Listing your buildings needs Place.Read.All, which this plugin's shared app "
+             "registration does not ask for - it is admin consent, and it would be put to "
+             "every other organisation signing in through the same app. Register your own "
+             "app, add the permission there, and put its id in Azure client id. Everything "
+             "else, this machine reporting a building included, works without it.")
+
+
 def cmd_login_start(args):
     # Empty means the plugin's own registration. The setting stays for the
     # tenant that will not consent to an app registered somewhere else, and for
     # anyone who would rather the consent screen named their own.
     client_id = str(args.client_id or "").strip() or DEFAULT_CLIENT_ID
+    require_own_registration(client_id, args.places)
     authority = str(args.authority or "").strip() or DEFAULT_AUTHORITY
     status, payload = http(
         authority_base(authority) + "/oauth2/v2.0/devicecode",

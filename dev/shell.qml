@@ -59,7 +59,11 @@ ShellRoot {
         // fixtures answer locally, and the reporting is refused by --demo.
         setPresence: true,
         readPlaces: true,
-        wifiLocations: ["demo-wifi = Hauptgebäude", "* = remote"],
+        // A building named locally as well as fetched, so the harness covers
+        // the path somebody on the shared app registration is on: an id, a
+        // name they gave it, and no Places permission anywhere.
+        buildingNames: ["eb706f15-137e-4722-b4d1-b601481d9251 = Altbau"],
+        wifiLocations: ["demo-wifi = Hauptgebäude", "gast = Altbau", "* = remote"],
         calendarView: dev.calendarView,
         weekStart: "monday",
         // A toast about an invented meeting on a real desktop is exactly what

@@ -1019,6 +1019,32 @@ class SayingWhereYouAreWorkingFrom(unittest.TestCase):
             self.assertIsNone(teams.work_location_row(payload), payload)
 
 
+class TheSharedRegistrationWillNotAskForPlaces(unittest.TestCase):
+    """Place.Read.All is the one tier the plugin's own app id refuses."""
+
+    def test_the_shared_registration_refuses_before_any_request(self):
+        # It is admin consent, and DEFAULT_CLIENT_ID is multi-tenant - so
+        # declaring it there would put "read every place in the directory" in
+        # front of every other organisation signing in through the same app.
+        with self.assertRaises(SystemExit):
+            teams.require_own_registration(teams.DEFAULT_CLIENT_ID, True)
+
+    def test_a_registration_of_your_own_may_ask(self):
+        teams.require_own_registration("someone-elses-app", True)
+
+    def test_without_places_the_shared_registration_is_fine(self):
+        # Which is the ordinary case, and nothing else here is gated on it.
+        teams.require_own_registration(teams.DEFAULT_CLIENT_ID, False)
+
+    def test_the_message_says_what_to_do_about_it(self):
+        # A refusal that only states the rule leaves somebody stuck, and this
+        # one is the difference between "no" and "here is how".
+        result = capture(lambda _a: teams.require_own_registration(
+            teams.DEFAULT_CLIENT_ID, True), Args())
+        self.assertEqual(result["error"]["code"], "own_registration_required")
+        self.assertIn("Register your own", result["error"]["message"])
+
+
 class ListingYourBuildings(unittest.TestCase):
     """The Places directory, which is what lets a location name a building."""
 

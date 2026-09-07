@@ -12,6 +12,7 @@ Teams chats, channels and your calendar in the Omarchy bar, and in a window of t
 - **Emoji, inline images and clickable links** in the transcript. Both kinds of link: an address somebody typed out in full, and one behind its own words — the composer's link button writes `<a href="…">the release notes</a>`, and the words are all a reader would otherwise get. They open in your browser, tinted from the running theme rather than in Qt's blue.
 - **Presence.** Beside each one-to-one chat: a filled circle for available, a filled circle for busy, a ring for away, a dim circle for offline — in the running theme's own colours. Group chats have none, because a group is not away. Told apart from unread by shape and place, not by hue: presence sits immediately in front of the name because it is about the person, unread is a bar down the leading edge because it is about the conversation, and a chat can show both. Needs `Presence.Read.All` — ordinary user consent.
 - **Your own presence, set from here.** `p`, or the dot in the header: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and *Automatic* to hand it back to Teams. It is the client's own status menu, written through Graph, and it sticks until you hand it back. This one needs `Presence.ReadWrite`, which an administrator has to consent to — writing your own presence is the dearer permission, not reading everybody's — so it is off until you turn it on. There is a second setting for the part nobody expects: a presence you set only shows while Teams believes you are signed in *somewhere*, so the plugin can be that somewhere. See [Your presence](#your-presence).
+- **Where you are working from, set from here too.** `w`, or the word beside the presence chip: *In the office*, *Remote*, *Time off*, and *Automatic* to hand it back. Teams keeps it beside your presence rather than inside it, and so does this: a presence says whether you can be interrupted, a location says where you are, and they are two different writes to Graph. Same permission, though — `Presence.ReadWrite` covers both — so there is no second setting and no second sign-in. Graph aggregates three layers behind it and says which one won, so the picker can tell "I chose this" from "my working hours say this". See [Where you are working from](#where-you-are-working-from).
 - **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. The pointer on a chip says who reacted, what Teams calls that reaction, and which of the two a click would do. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
 - **Your calendar**, in the same window: `c`, or **Calendar** in the header. Day, work week, week and month; a clock face with overlapping meetings side by side and a line across today; whole-day things in a strip of their own; a month grid that runs into the months either side; and an agenda instead when the window is too narrow for columns. Open a meeting for who is coming and what each of them said, **accept, tentative or decline** with a line for the organiser, **book one** with people from the directory in it, or **call one off**. **Join** hands the link to whatever handles Teams meetings here, which is the one thing a QML window cannot do itself. A notification a few minutes before each one. Needs `Calendars.Read`, and `Calendars.ReadWrite` for anything that changes something — both ordinary user consent. See [Your calendar](#your-calendar).
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
@@ -61,8 +62,10 @@ focus".
 
 The dropdown behind the bar icon has its own handful, because it holds its own
 few things: `p` opens the presence picker (`0`–`6` pick, `Escape` goes back),
-`m` marks every unread chat read, `o` opens the window, `r` refreshes, `j`/`k`
-and `Enter` walk what is unread, and `Escape` closes it.
+`w` the work location picker (`0`–`3`), `m` marks every unread chat read, `o`
+opens the window, `r` refreshes, `j`/`k` and `Enter` walk what is unread, and
+`Escape` closes it. Either picker closes the other: both take the digits, and
+one of them has to own the keyboard.
 
 `m` asks twice. Graph has no route back to unread, so the first press says how
 many chats it is about and the second does it — `Escape`, or any other key,
@@ -124,6 +127,7 @@ reading, which is the step that used to be missing.
 | `u` | Show only unread conversations |
 | `n` | Start a new chat |
 | `p` | Set your presence, or hand it back to Teams |
+| `w` | Say where you are working from, or hand that back |
 | `r` | Reload the open conversation |
 | `,` | Settings |
 | `?` | This list |
@@ -166,7 +170,7 @@ An Azure app registration declares up front which delegated permissions it is al
    | `ChannelMessage.Send` | posting in a channel | user |
    | `Presence.Read.All` | the presence dot beside a one-to-one chat | user |
    | `Files.ReadWrite` | sending a file into a chat — optional, see below | user |
-   | `Presence.ReadWrite` | setting your own presence — optional, see below | **admin** |
+   | `Presence.ReadWrite` | setting your own presence and work location — optional, see below | **admin** |
    | `Calendars.Read` | your calendar — optional, see below | user |
    | `Calendars.ReadWrite` | answering an invitation, booking a meeting, calling one off — optional, see below | user |
 
@@ -238,7 +242,7 @@ own.
 | `authority` | `common` | `common`, `organizations`, or your tenant id. |
 | `channels` | `true` | Whether to ask for team and channel access at sign-in. |
 | `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. The plugin's registration declares it; a registration of your own has to as well. |
-| `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p` and the status chip need. An administrator has to consent to it whichever registration you use. |
+| `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p`, `w` and the two status chips need. An administrator has to consent to it whichever registration you use. |
 | `holdPresence` | `false` | Whether to hold a presence session open for this machine, so a presence you set has something to show against. Needs `setPresence`. |
 | `calendar` | `false` | Whether to ask for `Calendars.Read` at sign-in, which is what the calendar pane needs. |
 | `calendarWrite` | `false` | Whether to ask for `Calendars.ReadWrite` instead, which is what answering an invitation, booking a meeting and calling one off need. Needs `calendar`. |
@@ -420,6 +424,46 @@ The session is named after the app registration rather than after the machine �
 Graph's requirement, not a shortcut — so two machines running this plugin renew
 one session between them instead of holding two.
 
+## Where you are working from
+
+The chip beside the presence one, and `w` from either surface. Teams keeps this
+next to your presence rather than inside it, and so does this plugin: a
+presence says whether you can be interrupted, a work location says where you
+are, and Graph writes them with two different calls.
+
+| | |
+|---|---|
+| `0` | **Automatic** — hand it back to whatever your working hours say |
+| `1`–`3` | In the office, Remote, Time off |
+
+Three, because those are the three `setManualLocation` takes. Graph's fourth
+value, `unspecified`, is what it *reports* when nothing has been said about
+today — a state to read and never one to send, so the picker does not offer it
+and row 0 does the job it would have done.
+
+No second permission and no second sign-in: `Presence.ReadWrite` covers both
+writes, so turning **Set your presence and work location** on turns both on
+together. If the picker is there, this is there.
+
+### Three layers, and which one won
+
+Graph does not keep one work location, it keeps three and aggregates them:
+what you chose by hand, what a Teams client noticed, and what your working
+hours expect — in that order of precedence. `w` writes the manual layer, which
+is why a *Remote* chosen this morning outlives a schedule that expected you in
+the building.
+
+And it reports which layer won, which the presence cannot do: the picker ticks
+the row that is true and says *from your working hours* or *noticed by a Teams
+client* when the answer is not one you gave. **Automatic** is ticked when no
+layer has anything to say, so a day nobody has decided about looks like one.
+
+Handing it back clears the manual layer **and** the automatic one for today —
+that is what Graph's `clearLocation` does, not an extra this plugin chose —
+leaving the schedule, and nothing at all if the schedule is silent. A tenant
+with Microsoft Places switched off has no layers to aggregate, and the chip
+then says *work location* rather than inventing a place.
+
 ## Your calendar
 
 `c`, or **Calendar** in the header. The same window, the other pane: day, work
@@ -555,6 +599,7 @@ Two places where the obvious reading is wrong, and both are covered by tests:
 - **No reminders inside the window**, and none for what is already running: the notification is the reminder, it comes from the poll rather than from a timer of its own, and what was under way when the shell started is not announced.
 - **No search, in a calendar or anywhere else.** Graph has one; this plugin does not use it. Step to the week.
 - **No status message.** Teams lets you write a line of text under your presence, and Graph will take one. The six states are what the picker offers; a text field with an expiry and an @-mention picker in it is a different feature, and it is not here yet.
+- **A work location, but not a desk.** *In the office* is as specific as the picker gets. Graph will take a `placeId` — a particular building out of the Microsoft Places directory — but reading that directory is another permission for another release, and a picker whose rows were GUIDs would be worse than one that says "the office". `location --place` on the helper passes one through for anybody who has the id already.
 - **No "in a call", and no reading back which presence you chose.** Both for the same reason: the plugin will not report something it does not know. See [Your presence](#your-presence).
 
 ## Development
@@ -589,6 +634,29 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.9.0 — 2026-09-07
+
+- **Where you are working from, set from the plugin.** `w`, or the word beside
+  the presence chip: *In the office*, *Remote*, *Time off*, and *Automatic* to
+  hand it back. Teams has had the control next to your presence for a while and
+  Graph had no way to write it; it does now — `setManualLocation` on the
+  presence resource — so the picker that already set one of the two can set
+  both. No new permission and no re-sign-in: `Presence.ReadWrite` covers both
+  writes, which is why this rides on the setting that was already there rather
+  than arriving as one of its own.
+- **The picker says which layer it is looking at.** Graph keeps three work
+  locations and aggregates them — what you chose, what a client noticed, what
+  your working hours expect — and unlike a presence it reports which one won.
+  So the row it ticks carries *from your working hours* or *noticed by a Teams
+  client* when the answer is not one you gave, and **Automatic** is ticked when
+  nobody has said anything about today. See
+  [Where you are working from](#where-you-are-working-from).
+- **`w` and `p` close each other.** Two overlays that both take the digits, in
+  both surfaces, and only one of them can own the keyboard.
+- The window's header now reads `available · in the office`, two chips with a
+  separator between them. Without it the two words ran together into one
+  sentence about the presence, which is one thing to click and not two.
 
 ### 0.8.0 — 2026-09-06
 

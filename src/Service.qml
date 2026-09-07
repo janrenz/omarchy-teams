@@ -277,7 +277,8 @@ Item {
   }
 
   onConfiguredChanged: if (configured) {
-    loadPalette(); loadReactionChoices(); loadPresenceChoices(); refresh()
+    loadPalette(); loadReactionChoices(); loadPresenceChoices()
+    loadLocationChoices(); refresh()
     flushQueuedMessages()
   }
   onPluginDirChanged: if (configured) { loadPalette(); refresh(); flushQueuedMessages() }
@@ -751,6 +752,79 @@ Item {
       // preferred presence with whatever sessions exist, and if none do the
       // answer is Offline however cheerful the request was - which the user
       // should see, not be told the opposite of.
+      root.refresh()
+    }
+  }
+
+  // ---- where you are working from ----------------------------------------
+  //
+  // Beside the presence rather than one of its states. Graph keeps them as two
+  // signals on the same resource, Teams shows them as two controls, and they
+  // are written by two different calls - so this is a second picker rather
+  // than four more rows in the first. What it is not is a second permission:
+  // Presence.ReadWrite covers both, which is why there is no setting of its
+  // own and no second sign-in to ask for.
+  readonly property bool canSetLocation: canSetPresence
+
+  // The user's own work location as Graph aggregates it, or null when no layer
+  // has anything to say. Null is an ordinary answer rather than a failure: a
+  // tenant with Microsoft Places switched off has none, and neither does a day
+  // nobody has said anything about.
+  readonly property var myLocation: (view.me && view.me.location) || null
+
+  property var locationChoices: []
+  property bool settingLocation: false
+  property string locationError: ""
+
+  function loadLocationChoices() {
+    if (locationChoicesProc.running || pluginDir === "" || locationChoices.length > 0) return
+    locationChoicesProc.command = ["python3", helper(), "location-states"]
+    locationChoicesProc.running = true
+  }
+
+  Process {
+    id: locationChoicesProc
+    running: false
+    stdout: StdioCollector { id: locationChoicesOut; waitForEnd: true }
+    onExited: function(_exitCode) {
+      var parsed = Model.parseJson(locationChoicesOut.text, null)
+      if (parsed && parsed.ok !== false) root.locationChoices = parsed.locations || []
+    }
+  }
+
+  // `auto` hands the location back to Teams. That drops the choice made by
+  // hand and the automatic layer for today with it - Graph's own clearLocation
+  // does both - leaving whatever the working hours expect.
+  function setLocation(state) {
+    var wanted = String(state || "")
+    if (wanted === "" || !canSetLocation || settingLocation || pluginDir === "") return
+    settingLocation = true
+    locationError = ""
+    var command = ["python3", helper(), "location", "--account", alias, "--state", wanted]
+    if (setting("demo", false) === true) command.push("--demo")
+    locationProc.command = command
+    locationProc.running = true
+  }
+
+  Process {
+    id: locationProc
+    running: false
+    stdout: StdioCollector { id: locationOut; waitForEnd: true }
+    stderr: StdioCollector { id: locationErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.settingLocation = false
+      var parsed = Model.parseJson(locationOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.locationError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(locationErrOut.text || "Could not set your work location", 160)
+        return
+      }
+      root.locationError = ""
+      // Read it back rather than draw what was asked for, the same as the
+      // presence: three layers are aggregated behind this, so what was set is
+      // not always what wins - and clearing leaves whatever the schedule
+      // says, which nobody here knows in advance.
       root.refresh()
     }
   }

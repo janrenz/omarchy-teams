@@ -926,6 +926,83 @@ class HoldingAPresenceSession(unittest.TestCase):
         self.assertTrue(result["alreadyGone"])
 
 
+class SayingWhereYouAreWorkingFrom(unittest.TestCase):
+    """The work location, which hangs off the same resource as the presence."""
+
+    def run_location(self, **kwargs):
+        helper = SettingYourPresence()
+        kwargs.setdefault("state", "office")
+        kwargs.setdefault("place", "")
+        result = helper.run_presence(command=teams.cmd_location, **kwargs)
+        self.calls = helper.calls
+        return result
+
+    def test_a_choice_is_written_to_the_manual_layer(self):
+        result = self.run_location(state="remote")
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.calls[0]["url"],
+                         teams.GRAPH + "/users/user-1/presence/setManualLocation")
+        self.assertEqual(self.calls[0]["body"], {"workLocationType": "remote"})
+
+    def test_graphs_own_spelling_is_sent_rather_than_ours(self):
+        # Our key is timeoff because it arrives from a command line and a
+        # picker; Graph's is timeOff, and it refuses anything else.
+        self.run_location(state="timeoff")
+        self.assertEqual(self.calls[0]["body"], {"workLocationType": "timeOff"})
+
+    def test_auto_clears_both_layers_rather_than_setting_one(self):
+        result = self.run_location(state="auto")
+        self.assertEqual(result["state"], "auto")
+        self.assertTrue(self.calls[0]["url"].endswith("/presence/clearLocation"))
+        self.assertEqual(self.calls[0]["body"], {})
+
+    def test_a_building_is_passed_on_only_when_one_was_given(self):
+        self.run_location(place="place-1")
+        self.assertEqual(self.calls[0]["body"].get("placeId"), "place-1")
+        self.run_location()
+        self.assertNotIn("placeId", self.calls[0]["body"])
+
+    def test_a_location_graph_would_refuse_is_refused_here_first(self):
+        # setManualLocation takes three of workLocationType's values, and
+        # unspecified - the one the aggregator reports - is not among them.
+        for state in ("lunch", "unspecified"):
+            result = self.run_location(state=state)
+            self.assertEqual(result["error"]["code"], "bad_location", state)
+            self.assertEqual(self.calls, [])
+
+    def test_it_needs_the_same_permission_as_setting_a_presence(self):
+        result = self.run_location(scopes="Chat.ReadWrite Presence.Read.All")
+        self.assertEqual(result["error"]["code"], "presence_permission_required")
+        self.assertIn("work location", result["error"]["message"],
+                      "the message named the wrong one of the two writes")
+        self.assertEqual(self.calls, [], "a request was made that was known to be refused")
+
+    def test_every_row_offered_is_one_graph_takes(self):
+        rows = capture(teams.cmd_location_states, Args())["locations"]
+        self.assertEqual([row["state"] for row in rows], ["office", "remote", "timeoff"])
+        for row in rows:
+            self.assertEqual(teams.location_kind(row["state"]), row["type"])
+            self.assertEqual(teams.location_state(row["type"]), row["state"])
+
+    def test_a_location_is_read_off_the_presence_it_arrives_with(self):
+        # Graph carries it on the presence object, so the batched request the
+        # sidebar's dots come out of already has it.
+        row = teams.work_location_row({
+            "workLocation": {"workLocationType": "office", "source": "scheduled",
+                             "placeId": "place-1"}})
+        self.assertEqual(row, {"state": "office", "type": "office",
+                               "source": "scheduled", "placeId": "place-1"})
+
+    def test_nothing_to_say_about_today_reads_as_nothing(self):
+        # A tenant without Microsoft Places answers with no workLocation at
+        # all, and the aggregator says unspecified when no layer won. Both are
+        # "we do not know", and neither may become a place.
+        for payload in ({}, {"workLocation": {}},
+                        {"workLocation": {"workLocationType": "unspecified"}},
+                        {"workLocation": {"workLocationType": "somewhere new"}}):
+            self.assertIsNone(teams.work_location_row(payload), payload)
+
+
 class PendingSignIn(unittest.TestCase):
     """A sign-in left in flight, and one that was overtaken."""
 

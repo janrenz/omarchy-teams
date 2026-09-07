@@ -31,6 +31,11 @@ src/PresenceChip.qml    The circle plus the word, and the click that opens the
                         picker. In the window's header and the dropdown's.
 src/PresenceMenu.qml    The picker itself, numbered. Both surfaces show this
                         one; it is also what knows row 0 is Automatic.
+src/LocationChip.qml    The other chip beside it: where you are working from.
+                        No circle - see its header for why.
+src/LocationMenu.qml    Its picker. A file of its own rather than four more
+                        rows in PresenceMenu, because Graph writes the two
+                        with different calls and ten rows outrun the digits.
 src/TeamsWindow.qml     The window. Sidebar, transcript, message box, and the
                         calendar beside them - `pane` says which of the two is
                         on screen. Also the file chooser and the window-wide
@@ -365,6 +370,27 @@ fatal QML error makes it exit instead.
   application, not the machine, so two machines renew one session - which is
   also why the heartbeat sits behind `notifies`, the same "one of the three
   Services does this" flag the notifications use.
+- **A work location is three answers, and Graph says which one it used.**
+  `presence.workLocation` is an *aggregate* of a manual choice, a client's
+  detection and the working-hours schedule, in that order, and `source` names
+  the winner. So this is the one thing here that can be read back honestly -
+  unlike a preferred presence, which Graph will not admit to - which is why
+  `LocationMenu` ticks a row and says where it came from, and why row 0 can be
+  ticked at all: `unspecified` from the aggregator really does mean "nobody
+  has said anything about today". Two traps. `setManualLocation` takes three of
+  `workLocationType`'s values and `unspecified` is not one of them, so it is a
+  value to parse and never one to send - `location_state` returns empty for it
+  rather than guessing. And `clearLocation` drops the automatic layer along
+  with the manual one for the current date; that is Graph's behaviour, not a
+  choice this plugin made, and the README says so because "Automatic" would
+  otherwise look like it only undid the last click.
+- **The work location needs no new scope, and that is why it is not a new
+  release in the sense invariant 8 means.** `Presence.ReadWrite` covers
+  `setManualLocation` and `clearLocation` as well as the presence writes, so it
+  rides on the `setPresence` setting rather than arriving with one of its own -
+  no registration change, no re-sign-in, and `can_set_presence` is the only
+  gate. `canSetLocation` in `Service.qml` is an alias of `canSetPresence` for
+  that reason: one place to change if Graph ever splits them.
 - **`Presence.ReadWrite` is the only opt-in scope whose cost is consent.**
   `Files.ReadWrite` is opt-in because a registration must declare what it
   requests; presence is opt-in for that *and* because an administrator has to

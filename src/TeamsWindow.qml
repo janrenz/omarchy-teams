@@ -201,13 +201,26 @@ Item {
   // Escape closes it before anything else.
   property bool pickingPresence: false
 
+  // Its neighbour: where you are working from, which Graph keeps beside the
+  // presence rather than inside it. Two overlays that both take the digits,
+  // so opening either closes the other - one of them has to own the keyboard.
+  property bool pickingLocation: false
+
   function togglePresencePicker() {
     if (!service.canSetPresence) return
     // Asked for lazily as well as at start-up: the window may have been built
     // before the account was configured, and a picker with no rows in it is
     // not worth opening.
     service.loadPresenceChoices()
+    pickingLocation = false
     pickingPresence = !pickingPresence
+  }
+
+  function toggleLocationPicker() {
+    if (!service.canSetLocation) return
+    service.loadLocationChoices()
+    pickingPresence = false
+    pickingLocation = !pickingLocation
   }
 
   // The digits, routed to the picker itself - which is where the row order
@@ -215,6 +228,10 @@ Item {
   // digits to its own copy the same way.
   function presenceAt(index) {
     menu.pickAt(index)
+  }
+
+  function locationAt(index) {
+    locationList.pickAt(index)
   }
 
   readonly property bool typing: composer.activeFocus
@@ -645,6 +662,7 @@ Item {
     if (viewingImage) { closeImage(); return }
     if (showHelp) { showHelp = false; return }
     if (pickingPresence) { pickingPresence = false; return }
+    if (pickingLocation) { pickingLocation = false; return }
     if (composingNew) { closeNewChat(); return }
     if (composingMeeting) { closeNewMeeting(); return }
     if (service.readingEvent) { service.closeEvent(); return }
@@ -1001,6 +1019,7 @@ Item {
                 fontFamily: Style.font.family
                 agentHandover: service.agentHandover
                 canSetPresence: service.canSetPresence
+                canSetLocation: service.canSetLocation
                 hasCalendar: service.hasCalendar
               }
             }
@@ -1051,6 +1070,52 @@ Item {
             fg: Color.foreground
             fontFamily: Style.font.family
             onChose: root.pickingPresence = false
+          }
+        }
+      }
+
+      // Where you are working from. Dropped from the same corner as the
+      // presence menu, because it belongs to the chip beside the one that
+      // opens that - and the two are never on screen together.
+      Item {
+        id: locationMenu
+        anchors.fill: parent
+        visible: root.pickingLocation
+        z: 95
+
+        Rectangle {
+          anchors.fill: parent
+          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.6)
+
+          MouseArea { anchors.fill: parent; onClicked: root.pickingLocation = false }
+        }
+
+        Rectangle {
+          anchors.top: parent.top
+          anchors.right: parent.right
+          anchors.topMargin: root.padPanel
+          anchors.rightMargin: root.padPanel
+          width: Math.min(Style.space(340), locationMenu.width - root.padPanel * 2)
+          height: locationList.implicitHeight + Style.spacing.md * 2
+          radius: Style.cornerRadius
+          color: Color.background
+          border.width: Style.space(1)
+          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+
+          // Swallows the clicks that would otherwise reach the scrim and shut
+          // the menu on the way to a row.
+          MouseArea { anchors.fill: parent }
+
+          LocationMenu {
+            id: locationList
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.margins: Style.spacing.md
+            service: service
+            fg: Color.foreground
+            fontFamily: Style.font.family
+            onChose: root.pickingLocation = false
           }
         }
       }
@@ -1436,6 +1501,11 @@ Item {
             else if (text === "p") root.pickingPresence = false
             return
           }
+          if (root.pickingLocation) {
+            if (text >= "0" && text <= "9") root.locationAt(Number(text))
+            else if (text === "w") root.pickingLocation = false
+            return
+          }
           // While the picker is open the digits are the choices, and nothing
           // else should be acting on the conversation behind it.
           if (root.pickingMessageId !== "") {
@@ -1477,6 +1547,7 @@ Item {
           else if (text === "i") root.focusComposer()
           else if (text === "n" && service.canStartChat) root.openNewChat()
           else if (text === "p") root.togglePresencePicker()
+          else if (text === "w") root.toggleLocationPicker()
           else if (text === "g") root.scrollToEnd(view, false)
           else if (text === "G") root.scrollToEnd(view, true)
         }
@@ -1604,6 +1675,32 @@ Item {
                   fg: Color.foreground
                   fontFamily: Style.font.family
                   onClicked: root.togglePresencePicker()
+                }
+
+                // Between the two, because "available" and "in the office"
+                // side by side read as one sentence about the presence - and
+                // they are two separate things to click.
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: service.signedIn && service.canSetPresence && !root.showSettings
+                  text: "·"
+                  textFormat: Text.PlainText
+                  color: Qt.darker(Color.foreground, 2.2)
+                  font.family: Style.font.family
+                  font.pixelSize: Style.font.caption
+                }
+
+                // And where you are working from, which the same permission
+                // covers - so it appears and disappears with its neighbour.
+                LocationChip {
+                  anchors.verticalCenter: parent.verticalCenter
+                  visible: service.signedIn && service.canSetLocation && !root.showSettings
+                  location: service.myLocation
+                  choices: service.locationChoices
+                  busy: service.settingLocation
+                  fg: Color.foreground
+                  fontFamily: Style.font.family
+                  onClicked: root.toggleLocationPicker()
                 }
               }
             }

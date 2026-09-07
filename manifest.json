@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "author": "Jan Renz",
   "license": "MIT",
   "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and nothing else to set up: it signs in through its own Azure app registration. Talks to Microsoft Graph and nothing else.",
@@ -84,8 +84,8 @@
       {
         "key": "setPresence",
         "type": "boolean",
-        "label": "Set your presence",
-        "description": "The p key and the status chip: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and Automatic to hand it back to Teams. Needs Presence.ReadWrite on your app registration - reading everybody's presence does not need an administrator, but writing your own does. Turn this on only once the registration declares it, because a scope it does not declare fails the whole sign-in. Changing this means signing in again.",
+        "label": "Set your presence and work location",
+        "description": "The p key and the status chip: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and Automatic to hand it back to Teams. And the w key beside it: In the office, Remote, Time off, and Automatic to hand that back to whatever your working hours say. One setting for both, because Graph covers both with one permission. Needs Presence.ReadWrite on your app registration - reading everybody's presence does not need an administrator, but writing your own does. Turn this on only once the registration declares it, because a scope it does not declare fails the whole sign-in. Changing this means signing in again.",
         "defaultValue": false
       },
       {

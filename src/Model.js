@@ -213,6 +213,22 @@ function presenceLabel(state, activity) {
   }
 }
 
+// The label a helper-supplied table gives one of its states.
+//
+// A lookup rather than a switch, because the tables belong to teams.py -
+// PREFERRED_PRESENCE and WORK_LOCATIONS - and a copy of one over here is a
+// copy that drifts the first time Graph's vocabulary moves. The fallback is
+// what to say before the table has arrived, which for a chip is nothing:
+// naming a state we have not been told is worse than naming none.
+function choiceLabel(choices, state, fallback) {
+  var rows = choices || []
+  var wanted = String(state || "")
+  if (wanted === "") return fallback === undefined ? "" : String(fallback)
+  for (var i = 0; i < rows.length; i++)
+    if (String(rows[i].state) === wanted) return String(rows[i].label || "")
+  return fallback === undefined ? "" : String(fallback)
+}
+
 // The one account, as a view the UI can bind to without null checks.
 function accountView(snapshot, alias) {
   var accounts = (snapshot && snapshot.accounts) || []

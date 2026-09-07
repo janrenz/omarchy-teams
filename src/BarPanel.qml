@@ -44,8 +44,13 @@ Panel {
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(fg, 1.5)
 
-  readonly property bool picking: pickingPresence && !!service && service.canSetPresence
-  property bool pickingPresence: false
+  // Either picker: both take the panel over, both take the digits, and the
+  // list behind them is hidden while one of them is up.
+  readonly property bool picking: pickingPresence || pickingLocation
+  readonly property bool pickingPresence: wantPresence && !!service && service.canSetPresence
+  readonly property bool pickingLocation: wantLocation && !!service && service.canSetLocation
+  property bool wantPresence: false
+  property bool wantLocation: false
 
   // Whether there is anything to mark, and whether this sign-in may. A mailbox
   // signed in before Chat.ReadWrite was asked for cannot - see can_mark_read
@@ -112,7 +117,16 @@ Panel {
     // before the account was configured, and a picker with no rows in it is
     // not worth opening.
     service.loadPresenceChoices()
-    pickingPresence = !pickingPresence
+    // One of them owns the digits, so the other one closes.
+    wantLocation = false
+    wantPresence = !wantPresence
+  }
+
+  function toggleLocationPicker() {
+    if (!service || !service.canSetLocation) return
+    service.loadLocationChoices()
+    wantPresence = false
+    wantLocation = !wantLocation
   }
 
   function open() {
@@ -120,7 +134,8 @@ Panel {
     // back to: every opening starts on what is waiting. So does an armed
     // "mark all read": coming back to a panel that is still holding a
     // question from last time is how the answer gets given by accident.
-    pickingPresence = false
+    wantPresence = false
+    wantLocation = false
     armingMarkAll = false
     list.cursorIndex = -1
     root.controller.show()
@@ -128,7 +143,8 @@ Panel {
   }
 
   function close() {
-    pickingPresence = false
+    wantPresence = false
+    wantLocation = false
     armingMarkAll = false
     root.controller.hide()
   }
@@ -176,21 +192,27 @@ Panel {
       onCloseRequested: {
         // One layer at a time: the question you were asked, or the picker you
         // opened, then the panel.
-        if (root.picking) root.pickingPresence = false
+        if (root.picking) { root.wantPresence = false; root.wantLocation = false }
         else if (root.armingMarkAll) root.armingMarkAll = false
         else root.close()
       }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(text) {
-        if (root.picking) {
+        if (root.pickingPresence) {
           if (text >= "0" && text <= "9") presenceMenu.pickAt(Number(text))
-          else if (text === "p") root.pickingPresence = false
+          else if (text === "p") root.wantPresence = false
+          return
+        }
+        if (root.pickingLocation) {
+          if (text >= "0" && text <= "9") locationMenu.pickAt(Number(text))
+          else if (text === "w") root.wantLocation = false
           return
         }
         if (text === "m") { root.markAll(); return }
         // Any other key is an answer of "no" to a question that was asked.
         root.armingMarkAll = false
         if (text === "p") root.togglePresencePicker()
+        else if (text === "w") root.toggleLocationPicker()
         else if (text === "r" && root.service) root.service.refresh()
         else if (text === "o") root.openWindow({})
       }
@@ -251,14 +273,43 @@ Panel {
               font.pixelSize: Style.font.caption
             }
 
-            PresenceChip {
-              visible: !!root.service && root.service.signedIn && root.service.canSetPresence
-              presence: root.service ? root.service.myPresence : null
-              palette: root.service ? root.service.themeColors : ({})
-              busy: !!root.service && root.service.settingPresence
-              fg: root.fg
-              fontFamily: root.fontFamily
-              onClicked: root.togglePresencePicker()
+            // The two chips, side by side the way the window's header has them:
+            // how you look to people, and where you are working from.
+            Row {
+              width: parent.width
+              spacing: Style.spacing.md
+
+              PresenceChip {
+                visible: !!root.service && root.service.signedIn && root.service.canSetPresence
+                presence: root.service ? root.service.myPresence : null
+                palette: root.service ? root.service.themeColors : ({})
+                busy: !!root.service && root.service.settingPresence
+                fg: root.fg
+                fontFamily: root.fontFamily
+                onClicked: root.togglePresencePicker()
+              }
+
+              // Between them, for the reason the window's header has one:
+              // "available" and "in the office" side by side read as one
+              // sentence, and they are two separate things to click.
+              Text {
+                visible: !!root.service && root.service.signedIn && root.service.canSetPresence
+                text: "·"
+                textFormat: Text.PlainText
+                color: Qt.darker(root.fg, 2.2)
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              LocationChip {
+                visible: !!root.service && root.service.signedIn && root.service.canSetLocation
+                location: root.service ? root.service.myLocation : null
+                choices: root.service ? root.service.locationChoices : []
+                busy: !!root.service && root.service.settingLocation
+                fg: root.fg
+                fontFamily: root.fontFamily
+                onClicked: root.toggleLocationPicker()
+              }
             }
           }
 
@@ -316,14 +367,26 @@ Panel {
         PresenceMenu {
           id: presenceMenu
           width: parent.width
-          visible: root.picking
+          visible: root.pickingPresence
           service: root.service
           fg: root.fg
           fontFamily: root.fontFamily
           // Escape here backs out to the list behind it rather than out of
           // the panel, so the window's own promise would be a lie.
           hint: "A number picks one.  Esc goes back"
-          onChose: root.pickingPresence = false
+          onChose: root.wantPresence = false
+        }
+
+        // ---------------- where you are working from ----------------
+        LocationMenu {
+          id: locationMenu
+          width: parent.width
+          visible: root.pickingLocation
+          service: root.service
+          fg: root.fg
+          fontFamily: root.fontFamily
+          hint: "A number picks one.  Esc goes back"
+          onChose: root.wantLocation = false
         }
 
         // ---------------- what is waiting ----------------
@@ -421,6 +484,11 @@ Panel {
             if (root.canMarkAll) keys.splice(0, 0, "m read all")
             if (root.service && root.service.canSetPresence)
               keys.splice(keys.length - 1, 0, "p presence")
+            // "w where" rather than "w location": this line has room for a
+            // fifth key and not for a fifth word, and the two chips above it
+            // have already said which is which.
+            if (root.service && root.service.canSetLocation)
+              keys.splice(keys.length - 1, 0, "w where")
             return keys.join("  ·  ")
           }
           textFormat: Text.PlainText

@@ -135,6 +135,21 @@ you set and reports `Offline`, so say that rather than setting it twice.
 `hold-presence` is the plugin's own session and is driven by its timer - leave
 it alone.
 
+Where the user is working from is the same permission and the same kind of
+asked-for work:
+
+    python3 $HELPER location        --account work --state remote
+    python3 $HELPER location        --account work --state auto
+    python3 $HELPER location-states
+
+`office`, `remote`, `timeoff`, or `auto` to hand it back. `auto` clears what was
+chosen by hand *and* what a client noticed today, leaving whatever the user's
+working hours say. A fetch reports the current one under `me.location`, with
+`source` naming which of the three layers won - `manual` is a choice, and
+`scheduled` or `automatic` is not, so do not describe a schedule as something
+the user decided. `null` means no layer had anything to say, which is not the
+same as being nowhere.
+
 `send` takes the text on **stdin**: anyone on this machine can read another
 process's command line for as long as it runs. `--text` still works for running
 it by hand. Reactions are limited to 👍 ❤️ 😂 😮 😢 😡; Graph refuses anything

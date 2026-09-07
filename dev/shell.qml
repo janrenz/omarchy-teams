@@ -166,6 +166,24 @@ ShellRoot {
       return JSON.stringify({ error: panel.teamsService.presenceError })
     }
 
+    // Its neighbour, for the same reason: w never reaches an offscreen window
+    // either. Returns what it is offering and what Graph currently reports,
+    // including which of the three layers that came from.
+    function location(): string {
+      panel.toggleLocationPicker()
+      return JSON.stringify({
+        open: panel.pickingLocation,
+        canSet: panel.teamsService.canSetLocation,
+        mine: panel.teamsService.myLocation,
+        rows: panel.teamsService.locationChoices.map(function(row) { return row.state })
+      })
+    }
+
+    function pickLocation(index: int): string {
+      panel.locationAt(index)
+      return JSON.stringify({ error: panel.teamsService.locationError })
+    }
+
     // The two routes into uploadFile() without a mouse: the file chooser and a
     // drop both end at sendFile(), so this is what a drag onto the window does.
     function attach(path: string): string {

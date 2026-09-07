@@ -17,6 +17,10 @@ Column {
   property bool agentHandover: true
   // And the p key is only there on a sign-in that may set your presence.
   property bool canSetPresence: false
+  // The w key rides on the same permission, but it is its own flag so that a
+  // list which stops promising one of them does not have to stop promising
+  // both.
+  property bool canSetLocation: false
   // The calendar's own keys are only worth listing where there is one.
   property bool hasCalendar: false
 
@@ -42,6 +46,7 @@ Column {
     ["u", "Show only unread conversations", "Doing"],
     ["n", "Start a new chat", "Doing"],
     ["p", "Set your presence, or hand it back to Teams", "Doing"],
+    ["w", "Say where you are working from, or hand that back", "Doing"],
     ["r", "Reload this conversation", "Doing"],
     [",", "Settings", "Doing"],
     ["?", "This list", "Doing"],
@@ -86,6 +91,7 @@ Column {
           return row[2] === modelData
                  && (root.agentHandover || row[0] !== "a")
                  && (root.canSetPresence || row[0] !== "p")
+                 && (root.canSetLocation || row[0] !== "w")
         })
 
         delegate: Row {

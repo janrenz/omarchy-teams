@@ -1463,6 +1463,22 @@ SESSION_PRESENCE = {
 # Teams. Several spellings, because this is also a command people type.
 CLEAR_WORDS = ("auto", "automatic", "clear", "reset")
 
+# Where Teams says you are working from, which is a signal beside a presence
+# rather than one of its states: Graph keeps three layers - a manual choice, a
+# client's detection, and what the working-hours schedule expects - and
+# aggregates them, manual first. This writes the manual layer, because that is
+# the one a person is entitled to set by hand, and `auto` lets it go again.
+#
+# The three are Graph's own subset: setManualLocation takes office, remote and
+# timeOff and nothing else. `unspecified` is what the aggregator reports when
+# no layer has anything to say, so it is a value to read and never one to send.
+# [key, workLocationType, what to call it, what it means]
+WORK_LOCATIONS = [
+    ("office", "office", "In the office", "at a desk somewhere"),
+    ("remote", "remote", "Remote", "working, but not in the building"),
+    ("timeoff", "timeOff", "Time off", "not working at all"),
+]
+
 
 def preferred_pair(state):
     """(availability, activity) for one of our short state names."""
@@ -1470,6 +1486,54 @@ def preferred_pair(state):
         if key == state:
             return availability, activity
     return "", ""
+
+
+def location_kind(state):
+    """The workLocationType Graph wants for one of our short state names."""
+    for key, kind, _label, _hint in WORK_LOCATIONS:
+        if key == state:
+            return kind
+    return ""
+
+
+def location_state(work_location_type):
+    """Our short state name for whatever Graph called this location.
+
+    Anything unrecognised - `unspecified` among them - comes back empty rather
+    than guessed, for the same reason a presence dot draws nothing until a
+    fetch has answered: a location nobody has set and one we failed to read
+    are both "we do not know", and neither of them is "office".
+    """
+    wanted = str(work_location_type or "").lower()
+    for key, kind, _label, _hint in WORK_LOCATIONS:
+        if kind.lower() == wanted:
+            return key
+    return ""
+
+
+def work_location_row(payload):
+    """The work location off a presence object, or None if it has none.
+
+    Graph carries this on `presence` itself, so it arrives with the batch the
+    sidebar's dots come out of and costs no request of its own. Absent is the
+    ordinary case rather than an error - a tenant with Microsoft Places
+    switched off answers without it, and so does a day nobody has said
+    anything about.
+    """
+    location = (payload or {}).get("workLocation") or {}
+    state = location_state(location.get("workLocationType"))
+    if not state:
+        return None
+    return {
+        "state": state,
+        "type": location.get("workLocationType") or "",
+        # Which of the three layers won: manual, automatic, scheduled, or
+        # none. It is the only way to tell "I chose this" from "my working
+        # hours say this", which the picker needs in order to say whether the
+        # row it ticks is a choice or a default.
+        "source": location.get("source") or "",
+        "placeId": location.get("placeId") or "",
+    }
 
 
 def own_user_id(token, account):
@@ -1506,6 +1570,11 @@ def fetch_presences(token, user_ids):
             "state": presence_state(row.get("availability")),
             "availability": row.get("availability") or "",
             "activity": row.get("activity") or "",
+            # Read off the same answer rather than asked for separately, and
+            # only the user's own is drawn - see cmd_fetch. Keeping it for
+            # everybody is one key of what Graph already sent; filtering it
+            # down to one id would be more machinery than the thing filtered.
+            "location": work_location_row(row),
         }
     return found, ""
 
@@ -1527,15 +1596,22 @@ def cmd_presence_states(_args):
     ]})
 
 
-def presence_call(args, verb, body):
-    """One POST to /users/{me}/presence/<verb>, with the permission checked first."""
+def presence_call(args, verb, body, what="your presence"):
+    """One POST to /users/{me}/presence/<verb>, with the permission checked first.
+
+    The work location goes through here as well: it hangs off the same
+    resource and needs the same Presence.ReadWrite, so the only thing that
+    differs is which of the two a refusal was about - hence `what`, which is
+    there so the message names the thing the user just tried to change.
+    """
     account = read_json(state_path(args.account))
     if not account:
         fail("auth_required", "Not signed in")
     if not can_set_presence(account):
         fail("presence_permission_required",
-             "This sign-in cannot set your presence. It needs Presence.ReadWrite, which an "
-             "administrator has to consent to for the tenant - see the plugin's README.")
+             "This sign-in cannot set %s. It needs Presence.ReadWrite, which an "
+             "administrator has to consent to for the tenant - see the plugin's README."
+             % what)
     try:
         token, account = access_token(args.account, account)
     except AccountError as error:
@@ -1562,7 +1638,7 @@ def presence_call(args, verb, body):
     )
     if status == 403:
         fail("presence_permission_required",
-             friendly(graph_error(payload, "This sign-in may not set your presence")))
+             friendly(graph_error(payload, "This sign-in may not set " + what)))
     return status, payload
 
 
@@ -1637,6 +1713,61 @@ def cmd_hold_presence(args):
         fail("presence_failed",
              friendly(graph_error(payload, "Could not hold the presence session")))
     out({"ok": True, "state": state})
+
+
+# --------------------------------------------------------------------------
+# where you are working from
+# --------------------------------------------------------------------------
+
+
+def cmd_location_states(_args):
+    """The work locations that can be set, for the picker.
+
+    From here rather than from the QML, for the same reason the presences and
+    the reactions are: what Graph will take is the helper's business, and a
+    picker that offers anything else is a picker with rows that fail.
+    """
+    out({"ok": True, "locations": [
+        {"state": key, "type": kind, "label": label, "hint": hint}
+        for key, kind, label, hint in WORK_LOCATIONS
+    ]})
+
+
+def cmd_location(args):
+    """Say where you are working from, or hand it back to Teams.
+
+    The manual layer beats the other two until it is cleared, which is what
+    makes a choice made this morning outlive a schedule that expected you
+    somewhere else. Handing it back drops the automatic layer for today as
+    well - that is what Graph's clearLocation does, not an extra we chose -
+    leaving whatever the working hours say and nothing if they say nothing.
+    """
+    state = str(args.state or "").strip().lower()
+    clearing = state in CLEAR_WORDS
+    kind = location_kind(state)
+    if not clearing and not kind:
+        fail("bad_location", "Teams does not take %s as a work location" % (state or "that"))
+
+    if args.demo:
+        out({"ok": True, "state": "auto" if clearing else state})
+
+    if clearing:
+        verb, body = "clearLocation", {}
+    else:
+        verb, body = "setManualLocation", {"workLocationType": kind}
+        # A building rather than "the office". The id belongs to the Places
+        # directory, which this plugin does not read and holds no scope for,
+        # so it is a pass-through for somebody running the helper by hand
+        # rather than something the picker can offer rows for.
+        place = str(getattr(args, "place", "") or "").strip()
+        if place:
+            body["placeId"] = place
+
+    status, payload = presence_call(args, verb, body, what="your work location")
+    if status not in (200, 201, 204):
+        fail("location_failed",
+             friendly(graph_error(payload, "Could not set your work location")))
+    out({"ok": True, "state": "auto" if clearing else state})
 
 
 def person_row(person, kind):
@@ -2946,7 +3077,9 @@ def demo_account(alias):
         "canSetPresence": True,
         "calendar": True,
         "canWriteCalendar": True,
-        "me": {"state": "available", "availability": "Available", "activity": "Available"},
+        "me": {"state": "available", "availability": "Available", "activity": "Available",
+               "location": {"state": "office", "type": "office", "source": "manual",
+                            "placeId": ""}},
         "chats": chats, "teams": teams,
         "unreadCount": sum(1 for row in chats if row["unread"]), "warnings": [],
     }
@@ -3297,6 +3430,19 @@ def main():
 
     sub.add_parser("presence-states", help="the presences that can be set") \
         .set_defaults(func=cmd_presence_states)
+
+    location = with_account("location", "say where you are working from")
+    location.add_argument("--state", required=True,
+                          help="office, remote, timeoff - or auto to hand it back to Teams "
+                               "and whatever your working hours say")
+    location.add_argument("--place", default="",
+                          help="a Microsoft Places building id, for an office more specific "
+                               "than 'the office'")
+    location.add_argument("--demo", action="store_true")
+    location.set_defaults(func=cmd_location)
+
+    sub.add_parser("location-states", help="the work locations that can be set") \
+        .set_defaults(func=cmd_location_states)
 
     hold = with_account("hold-presence", "keep a presence session open, so a presence can show")
     hold.add_argument("--state", default="available",

@@ -771,6 +771,23 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.10.2 — 2026-09-07
+
+- **A building could not actually be mapped to a network.** The only way to get
+  a building into the plugin was the one it detects for you — the place id
+  Graph reports once some Teams client has put you in a building — and on a
+  desktop where none ever has, that never happens. So the network could only be
+  pointed at a bare *In the office*. There is now a **Place id** and a **What
+  you call it** field with an **Add this building** button, which is what should
+  have been there from the start.
+- **And it says when your own choice is hiding the answer.** A location picked
+  by hand outranks the wifi until it is handed back, so anybody who tried the
+  picker once — which is what anybody does first — saw their own choice for ever
+  and reasonably concluded the wifi did nothing. The settings panel now says so
+  and names the key that hands it back, and the picker's **Automatic** row says
+  what it would hand back *to*: `Automatic · your wifi (Hauptgebäude) or your
+  working hours`.
+
 ### 0.10.1 — 2026-09-07
 
 - **The wifi never got detected.** The SSID read sat behind the same flag that

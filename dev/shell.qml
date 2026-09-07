@@ -64,6 +64,9 @@ ShellRoot {
         // name they gave it, and no Places permission anywhere.
         buildingNames: ["eb706f15-137e-4722-b4d1-b601481d9251 = Altbau"],
         wifiLocations: ["demo-wifi = Hauptgebäude", "gast = Altbau", "* = remote"],
+        // The demo's `me` carries a manual location, so the harness also shows
+        // the line that says a hand-picked one is masking the wifi's answer -
+        // the state anybody who tried the picker once is actually in.
         calendarView: dev.calendarView,
         weekStart: "monday",
         // A toast about an invented meeting on a real desktop is exactly what

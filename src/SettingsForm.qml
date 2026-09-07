@@ -192,6 +192,12 @@ Column {
     root.change("wifiLocations", kept.length === 0 ? "" : kept)
   }
 
+  // A building being typed in, before it is added. Held here rather than in
+  // `pending` because a half-typed place id is not a setting - it becomes one
+  // when the button says so.
+  property string draftPlaceId: ""
+  property string draftPlaceName: ""
+
   // What the write in flight is carrying. Kept so that what lands can be taken
   // out of `pending` without taking anything typed since it was sent - which
   // clearing the whole thing would, and a lost edit is exactly what makes
@@ -755,10 +761,69 @@ Column {
       onEdited: function(value) { root.nameBuilding(root.unnamedPlaceHere(), value) }
     }
 
+    // And the way in when no id has turned up on its own, which was missing
+    // and is the whole reason a building could not be mapped: the auto-detected
+    // one only appears once some Teams client has put you in a building, and on
+    // a desktop where none ever has, that is never.
+    Text {
+      width: parent.width
+      text: "Add one by hand:"
+      textFormat: Text.PlainText
+      color: Qt.darker(Color.foreground, 1.3)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    LabeledField {
+      width: parent.width
+      label: "Place id"
+      placeholder: "eb706f15-137e-4722-b4d1-b601481d9251"
+      hint: "From whoever runs Microsoft Places (Get-Place -Type Building), or from the Places app. Nothing here is sent anywhere until a rule or the picker uses it."
+      value: root.draftPlaceId
+      onEdited: function(value) { root.draftPlaceId = value }
+    }
+
+    LabeledField {
+      width: parent.width
+      label: "What you call it"
+      placeholder: "Hauptgebäude"
+      hint: "Only for you - the rules and the picker read this name, and Graph never sees it."
+      value: root.draftPlaceName
+      onEdited: function(value) { root.draftPlaceName = value }
+    }
+
+    Text {
+      width: parent.width
+      // A caution rather than a refusal: the shape is what Places generates,
+      // but being certain enough about somebody else's id format to block on
+      // it is not something to be certain about.
+      visible: root.draftPlaceId.trim() !== "" && !Model.looksLikePlaceId(root.draftPlaceId)
+      text: "That does not look like a place id - they are of the form eb706f15-137e-4722-b4d1-b601481d9251. It will be sent as written, and Graph will refuse it if it is wrong."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Color.urgent
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    Button {
+      text: "Add this building"
+      bordered: true
+      enabled: root.draftPlaceId.trim() !== "" && root.draftPlaceName.trim() !== ""
+      foreground: enabled ? Color.accent : Qt.darker(Color.foreground, 1.6)
+      fontFamily: Style.font.family
+      fontSize: Style.font.caption
+      onClicked: {
+        root.nameBuilding(root.draftPlaceId.trim(), root.draftPlaceName.trim())
+        root.draftPlaceId = ""
+        root.draftPlaceName = ""
+      }
+    }
+
     Text {
       width: parent.width
       visible: root.unnamedPlaceHere() === "" && root.nameRules().length === 0
-      text: "No building id has turned up yet. One appears here the first time any Teams client reports you in a building - or ask whoever runs Microsoft Places for the id, or add Place.Read.All to a registration of your own and let the list come from Graph."
+      text: "No building id has turned up on its own yet - one appears above the first time any Teams client reports you in a building. Until then, type one in. Or add Place.Read.All to a registration of your own and let the whole list come from Graph."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
       color: Qt.darker(Color.foreground, 1.5)
@@ -823,6 +888,33 @@ Column {
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
       color: Qt.darker(Color.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    // The thing that makes all of this look broken when it is working.
+    // A location picked by hand outranks the automatic layer *until it is
+    // handed back*, so somebody who tried the picker once - which is exactly
+    // what anybody does first - sees their own choice for ever and concludes
+    // the wifi does nothing.
+    Text {
+      width: parent.width
+      visible: !!root.service && root.wifiRules().length > 0
+               && !!root.service.myLocation
+               && String(root.service.myLocation.source) === "manual"
+      text: {
+        if (!root.service) return ""
+        var wanted = root.service.wifiLocation
+        var says = wanted && String(wanted.label || "") !== ""
+          ? "your wifi says " + String(wanted.label)
+          : "your wifi has something to say about this network"
+        return "A work location you picked by hand is showing instead - "
+             + says + ", and a hand-picked one outranks it until you hand it back. "
+             + "Press w then 0 in the window, or pick Automatic in the location menu."
+      }
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Color.urgent
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }

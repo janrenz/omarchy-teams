@@ -40,8 +40,19 @@ Column {
   // none. Capped, because a row here is numbered with a digit and four are
   // already spoken for; the settings form lists every one.
   readonly property var rows: {
+    // Row 0's hint says what handing it back would actually hand it to. With
+    // wifi rules configured that is not only the schedule, and saying so is
+    // what tells somebody who picked a row this morning why their wifi looks
+    // as though it does nothing: their own choice outranks it until this row.
+    var back = "whatever your working hours say"
+    if (service && service.wifiRules && service.wifiRules.length > 0) {
+      var says = service.wifiLocation
+      back = says && String(says.label || "") !== ""
+        ? "your wifi (" + String(says.label) + ") or your working hours"
+        : "your wifi or your working hours"
+    }
     var base = [{
-      state: "auto", label: "Automatic", hint: "whatever your working hours say", placeId: ""
+      state: "auto", label: "Automatic", hint: back, placeId: ""
     }].concat(service ? service.locationChoices : [])
     if (!service) return base
     var places = (service.buildings || []).slice(0, Model.buildingMenuCap())

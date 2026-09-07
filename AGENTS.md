@@ -424,6 +424,14 @@ fatal QML error makes it exit instead.
   `shell.json`, so a demo that saved would put `account: demo` into the bar the
   user is actually using. That mattered less when a button was needed; now any
   tick in the harness would do it.
+- **Manual beats automatic is the right rule and the thing that makes the wifi
+  look broken.** A location picked from the picker outranks the reported one
+  *until it is handed back*, so the first person to try row 1 sees their own
+  choice for ever and concludes the network mapping does nothing. Both surfaces
+  now say so: the settings panel when `myLocation.source === "manual"` and
+  rules exist, and row 0's hint, which names what handing it back would hand it
+  back *to*. Any feature layered under a precedence rule needs the layer above
+  it to admit it is there.
 - **The wifi-to-building map is the tenant's, and Graph will not hand it
   over.** Teams on Windows sets a work location from the network because an
   administrator listed the office SSIDs (`Set-PlacesSettings -Collection

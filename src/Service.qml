@@ -1913,6 +1913,14 @@ Item {
   property string userCode: ""
   property string verificationUri: ""
   property string loginMessage: ""
+  // Why a sign-in never started. Kept apart from loginMessage because that one
+  // is only on screen while `loggingIn` is true, and a start that fails sets
+  // that to false - so the reason went into a box that had just closed.
+  property string loginError: ""
+  // And something the sign-in is going ahead without: a scope the registration
+  // will not request. Not an error; still worth saying, or the setting that
+  // asked for it looks broken.
+  property string loginNote: ""
 
   // Pick up a sign-in somebody started and did not finish.
   //
@@ -1957,6 +1965,8 @@ Item {
   function startLogin(withChannels) {
     if (!configured || loginStartProc.running) return
     loggingIn = true
+    loginError = ""
+    loginNote = ""
     userCode = ""
     verificationUri = ""
     loginMessage = "Starting sign-in…"
@@ -1990,11 +2000,22 @@ Item {
       var parsed = Model.parseJson(loginStartOut.text, null)
       if (exitCode !== 0 || !parsed || parsed.ok === false) {
         root.loggingIn = false
-        root.loginMessage = parsed && parsed.error ? String(parsed.error.message) : "Could not start sign-in"
+        // On its own property, because loginMessage is drawn inside a block
+        // that is only visible *while* signing in - so a start that failed
+        // wrote its reason into something that had just been hidden, and the
+        // button looked like it did nothing at all.
+        root.loginError = parsed && parsed.error
+          ? String(parsed.error.message) : "Could not start sign-in"
+        root.loginMessage = root.loginError
         return
       }
+      root.loginError = ""
       root.userCode = String(parsed.userCode || "")
       root.verificationUri = String(parsed.verificationUri || "https://microsoft.com/devicelogin")
+      // Something asked for that this sign-in cannot have - a scope the
+      // registration will not request. The sign-in goes ahead; this says what
+      // is missing from it.
+      root.loginNote = String(parsed.note || "")
       root.loginMessage = "Enter the code at " + root.verificationUri
       loginPollTimer.restart()
     }

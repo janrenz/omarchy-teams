@@ -322,6 +322,15 @@ fatal QML error makes it exit instead.
 
 ## Things that will surprise you
 
+- **`loginMessage` is only on screen while `loggingIn` is true**, so a sign-in
+  that never *started* had nowhere to say why: the handler sets `loggingIn`
+  false and then wrote the reason into the block that had just been hidden.
+  With `needsSignIn` also false - the old token still being good - the window
+  showed nothing whatsoever, and the button read as broken. `loginError` is a
+  property of its own, drawn outside that block, and `loginNote` beside it for
+  a sign-in that went ahead without something it was asked for. Anything that
+  reports a failure by setting a message should be checked against the
+  visibility of the thing that draws it.
 - **A toast is a route back in, and it survives a shell restart.** Notifications
   go out through `omarchy-notification-send`, whose `--exec` becomes the
   `omarchy-exec-argv` hint: the click action rides as *data*, so omarchy can
@@ -456,13 +465,22 @@ fatal QML error makes it exit instead.
   is preventing is the whole sign-in: an undeclared scope fails all of them.
   The settings toggle is disabled without a client id for the same reason.
 
-  The test for "a registration of your own" is **not** "the client id field is
-  filled in", which is what it was first written as and is wrong in exactly the
-  configuration that matters: the shared id typed out in full is still the
-  shared id, and a widget configured that way had the setting offered and the
-  sign-in refused. `teams.py` reports `defaultClientId` and `ownRegistration`
-  on the fetch so the form can compare rather than keeping a second copy of the
-  constant.
+  Two things about that were got wrong first and are worth not repeating. The
+  test for "a registration of your own" is **not** "the client id field is
+  filled in": the shared id typed out in full is still the shared id, and a
+  widget configured that way had the setting offered and then the sign-in
+  refused. `teams.py` reports `defaultClientId` and `ownRegistration` on the
+  fetch so the form compares against the real thing rather than keeping a
+  second copy of the constant - and the toggle stays clickable while it is
+  *on*, because a disabled ticked toggle is a setting nobody can undo.
+
+  And the scope is **dropped, not refused**. `places_scope_for` returns
+  (ask, note); `cmd_login_start` drops it and passes the note on. Refusing was
+  the first attempt and it was the same bug in better clothes: the guard was
+  written to prevent "the whole sign-in fails", and then caused exactly that -
+  a widget with `readPlaces` on against the shared id could not sign in at all,
+  and **Sign in again** looked like a button that did nothing. A sign-in
+  without the buildings list is still one worth having.
 
   So the capability has to work without the scope, and it does: a place id is
   recognised on its shape (`Model.looksLikePlaceId`), `buildingNames` gives one

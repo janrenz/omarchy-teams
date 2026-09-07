@@ -1858,7 +1858,37 @@ Item {
             spacing: Style.spacing.md
             visible: !root.showSettings
                      && (root.settingsError !== "" || !service.configured
-                         || service.needsSignIn || service.loggingIn)
+                         || service.needsSignIn || service.loggingIn
+                         || service.loginError !== "" || service.loginNote !== "")
+
+            // A sign-in that never started. On its own line rather than in the
+            // device-code block below, which is only on screen *while* signing
+            // in - so this used to be written into something that had just
+            // been hidden, and "Sign in again" looked like a button that did
+            // nothing at all.
+            Text {
+              width: parent.width
+              visible: service.loginError !== "" && !service.loggingIn
+              text: service.loginError
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              color: Color.urgent
+              font.family: Style.font.family
+              font.pixelSize: Style.font.body
+            }
+
+            // And something the sign-in went ahead without. Not red: it
+            // worked, it just did not get everything that was asked for.
+            Text {
+              width: parent.width
+              visible: service.loginNote !== ""
+              text: service.loginNote
+              textFormat: Text.PlainText
+              wrapMode: Text.WordWrap
+              color: Qt.darker(Color.foreground, 1.4)
+              font.family: Style.font.family
+              font.pixelSize: Style.font.caption
+            }
 
             Text {
               width: parent.width

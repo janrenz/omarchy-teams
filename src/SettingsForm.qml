@@ -654,7 +654,12 @@ Column {
     // And "your own" is not "the field is filled in": the shared id typed out
     // in full is still the shared id, and a config with it written there
     // explicitly is exactly the one this used to let through.
-    enabled: root.current("setPresence", false) === true && root.ownRegistration
+    // Always switchable *off*, only switchable on with a registration of your
+    // own. A disabled toggle that is already ticked is a setting nobody can
+    // undo - and a config carrying `readPlaces` against the shared id has a
+    // sign-in that will be refused until it is undone.
+    enabled: root.current("setPresence", false) === true
+             && (root.ownRegistration || root.current("readPlaces", false) === true)
     opacity: enabled ? 1.0 : 0.5
     label: "List your buildings"
     description: "Fetches your tenant's buildings so the picker and the rules below can name one instead of saying just \"In the office\". Needs Place.Read.All on an app registration of your own - the plugin's shared one does not ask for it, because it is admin consent and every other organisation signing in through the same app would be asked for it too. Everything else here works without this: a building's id can be used on any sign-in, and you can give it a name below. Takes effect at the next sign-in."

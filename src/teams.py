@@ -473,23 +473,34 @@ def graph_get(token, path, params=None, extra_headers=None):
 # --------------------------------------------------------------------------
 
 
-def require_own_registration(client_id, places):
-    """Refuse to ask the shared registration for Place.Read.All.
+def places_scope_for(client_id, wanted):
+    """Whether this sign-in may ask for Place.Read.All, and why not if not.
 
-    Two reasons, and the first is somebody else's: DEFAULT_CLIENT_ID is
-    multi-tenant, so a permission declared on it is one every other tenant's
-    administrator is shown. The second is this sign-in's - the registration
-    does not declare it, and asking for an undeclared scope fails the *whole*
-    sign-in rather than that one scope, so without this check turning the
-    setting on would lock the account out of chats as well.
+    Returns (ask_for_it, what to tell the user).
+
+    DEFAULT_CLIENT_ID is multi-tenant, so a permission declared on it is one
+    every other tenant's administrator is shown - which is why the shared
+    registration does not declare Place.Read.All, and therefore why asking it
+    for that scope would fail the *whole* sign-in rather than that one scope.
+
+    So the scope is **dropped and reported**, not refused. Refusing was the
+    first attempt and it was the same bug wearing a better message: a widget
+    left with `readPlaces` on against the shared id could not sign in at all,
+    and the button appeared to do nothing. Signing in without the buildings
+    list is the honest outcome - everything else works, a building can still be
+    used by its id, and the note says what to do about the list.
     """
-    if places and client_id == DEFAULT_CLIENT_ID:
-        fail("own_registration_required",
-             "Listing your buildings needs Place.Read.All, which this plugin's shared app "
-             "registration does not ask for - it is admin consent, and it would be put to "
-             "every other organisation signing in through the same app. Register your own "
-             "app, add the permission there, and put its id in Azure client id. Everything "
-             "else, this machine reporting a building included, works without it.")
+    if not wanted:
+        return False, ""
+    if client_id == DEFAULT_CLIENT_ID:
+        return False, (
+            "Signed in without the buildings list. Place.Read.All is admin consent, and "
+            "this plugin's shared app registration does not ask for it - it would be put "
+            "to every other organisation signing in through the same app. Register an app "
+            "of your own, add the permission there, and put its id in Azure client id. "
+            "Everything else works meanwhile, this machine reporting a building included: "
+            "a building can be named by its place id.")
+    return True, ""
 
 
 def cmd_login_start(args):
@@ -497,7 +508,9 @@ def cmd_login_start(args):
     # tenant that will not consent to an app registered somewhere else, and for
     # anyone who would rather the consent screen named their own.
     client_id = str(args.client_id or "").strip() or DEFAULT_CLIENT_ID
-    require_own_registration(client_id, args.places)
+    # Dropped rather than refused - see places_scope_for. A sign-in that cannot
+    # have the buildings list is still a sign-in worth having.
+    places, places_note = places_scope_for(client_id, args.places)
     authority = str(args.authority or "").strip() or DEFAULT_AUTHORITY
     status, payload = http(
         authority_base(authority) + "/oauth2/v2.0/devicecode",
@@ -505,7 +518,7 @@ def cmd_login_start(args):
         data={"client_id": client_id,
               "scope": scopes_for(args.channels, args.files, args.presence,
                                   args.calendar or args.calendar_write,
-                                  args.calendar_write, args.places)},
+                                  args.calendar_write, places)},
     )
     if status != 200 or "device_code" not in payload:
         fail("devicecode_failed",
@@ -537,6 +550,11 @@ def cmd_login_start(args):
         "verificationUri": payload.get("verification_uri", "https://microsoft.com/devicelogin"),
         "interval": int(payload.get("interval", 5)),
         "expiresIn": int(payload.get("expires_in", 900)),
+        # A scope that was asked for and could not be requested. Not an error -
+        # the sign-in is going ahead - but the user asked for something they
+        # are not getting, and silence there is how a setting comes to look
+        # broken.
+        "note": places_note,
     })
 
 

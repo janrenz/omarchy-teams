@@ -788,11 +788,21 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
   flight is held rather than dropped, only what was actually written is
   forgotten, and closing the panel — with the button, with `Escape`, or with
   `,` — writes whatever is outstanding on the way out.
-- **List your buildings** could be switched on where it cannot work. It was
-  offered whenever the client-id field was not empty, and the field is not
-  empty when it holds this plugin's own id spelled out — which is the shared
-  registration, and refuses that permission. It now compares against the real
-  id rather than against emptiness, and says which of the two you have.
+- **Sign in again did nothing at all** on a widget with **List your buildings**
+  switched on. Two faults, one behind the other. The permission it asks for is
+  one the plugin's shared registration will not request, and that was written
+  as a *refusal* — so the sign-in never started, and since the old token was
+  still good the window had nothing to report and no reason to show it. The
+  scope is now **dropped and explained** rather than refused: you get signed
+  in, without the buildings list, and a line says what to do about the list.
+- **And a sign-in that never starts now says why.** Its reason was written to a
+  message that is only drawn *while* signing in, which a failed start has
+  already stopped doing.
+- **List your buildings** could also be switched on where it cannot work — it
+  was offered whenever the client-id field was not empty, and the field is not
+  empty when it holds this plugin's own id spelled out. It now compares against
+  the real id, says which of the two you have, and stays switchable off so a
+  widget already carrying it is not stuck with it.
 
 ### 0.10.0 — 2026-09-07
 

@@ -1020,29 +1020,38 @@ class SayingWhereYouAreWorkingFrom(unittest.TestCase):
 
 
 class TheSharedRegistrationWillNotAskForPlaces(unittest.TestCase):
-    """Place.Read.All is the one tier the plugin's own app id refuses."""
+    """Place.Read.All is dropped from a sign-in it cannot be asked for on."""
 
-    def test_the_shared_registration_refuses_before_any_request(self):
+    def test_the_shared_registration_drops_it_and_says_so(self):
         # It is admin consent, and DEFAULT_CLIENT_ID is multi-tenant - so
         # declaring it there would put "read every place in the directory" in
         # front of every other organisation signing in through the same app.
-        with self.assertRaises(SystemExit):
-            teams.require_own_registration(teams.DEFAULT_CLIENT_ID, True)
+        asks, note = teams.places_scope_for(teams.DEFAULT_CLIENT_ID, True)
+        self.assertFalse(asks)
+        self.assertIn("Register an app of your own", note)
+
+    def test_dropped_rather_than_refused(self):
+        # Refusing was the first attempt, and it was the same bug in better
+        # clothes: a widget left with readPlaces on against the shared id
+        # could not sign in at all, and the button looked like it did nothing.
+        # A sign-in without the buildings list is still one worth having.
+        self.assertNotIn("Place.Read.All",
+                         teams.scopes_for(True, True, True, True, True,
+                                          teams.places_scope_for(
+                                              teams.DEFAULT_CLIENT_ID, True)[0]))
 
     def test_a_registration_of_your_own_may_ask(self):
-        teams.require_own_registration("someone-elses-app", True)
+        asks, note = teams.places_scope_for("someone-elses-app", True)
+        self.assertTrue(asks)
+        self.assertEqual(note, "")
+        self.assertIn("Place.Read.All",
+                      teams.scopes_for(False, False, False, False, False, asks))
 
-    def test_without_places_the_shared_registration_is_fine(self):
-        # Which is the ordinary case, and nothing else here is gated on it.
-        teams.require_own_registration(teams.DEFAULT_CLIENT_ID, False)
-
-    def test_the_message_says_what_to_do_about_it(self):
-        # A refusal that only states the rule leaves somebody stuck, and this
-        # one is the difference between "no" and "here is how".
-        result = capture(lambda _a: teams.require_own_registration(
-            teams.DEFAULT_CLIENT_ID, True), Args())
-        self.assertEqual(result["error"]["code"], "own_registration_required")
-        self.assertIn("Register your own", result["error"]["message"])
+    def test_not_wanting_it_is_not_worth_a_note(self):
+        # The ordinary case. A note here would explain a permission to
+        # everybody who never asked for one.
+        self.assertEqual(teams.places_scope_for(teams.DEFAULT_CLIENT_ID, False), (False, ""))
+        self.assertEqual(teams.places_scope_for("someone-elses-app", False), (False, ""))
 
 
 class ListingYourBuildings(unittest.TestCase):

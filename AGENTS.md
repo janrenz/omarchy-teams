@@ -65,7 +65,15 @@ src/handover.sh         Builds the prompt that hands a conversation to the
                         hand; --print shows the prompt and launches nothing.
 skills/omarchy-teams/   What that agent is pointed at: the helper's commands, and
                         how to hand a draft back instead of posting it.
-src/SettingsForm.qml    The settings UI shown inside the shell's settings panel.
+src/SettingsForm.qml    The settings UI. An index of six pages and a page at a
+                        time - `page` says which. Every index row carries what
+                        is set on its page, so the usual question is answered
+                        without opening one. Writes itself on a debounce.
+src/SettingsRow.qml     One line of that index: where to go, and what is set
+                        there.
+src/SettingsPage.qml    One page of it, with the way back at the top. Content
+                        goes in through the default property, so a page reads
+                        as its own controls.
 src/ImageViewer.qml     A picture from the transcript, with save-as.
 ```
 
@@ -396,6 +404,14 @@ fatal QML error makes it exit instead.
   application, not the machine, so two machines renew one session - which is
   also why the heartbeat sits behind `notifies`, the same "one of the three
   Services does this" flag the notifications use.
+- **A ScrollView's contentItem takes its width from its content**, so a child
+  sizing itself off `parent.width` inside one is asking the answer to decide
+  the question. The settings form did exactly that and came out a third of the
+  width it had room for - detail lines elided, descriptions wrapping in a
+  column three inches wide - for as long as nobody measured it. It sizes off
+  `settingsScroll.width` by name now. This is the same family as the
+  implicitHeight trap further down: inside a ScrollView, size from the view,
+  never from the parent.
 - **`notifies` gates *outward* actions, and nothing else.** It exists because
   there is a Service behind the bar on every monitor and another behind the
   window, so notifications, the presence session and the location report have

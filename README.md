@@ -771,6 +771,26 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 
 ## Changelog
 
+### 0.11.0 — 2026-09-07
+
+- **Settings are six pages behind an index** rather than one column of
+  everything. It had grown past a thousand lines, which is a form edited by
+  scrolling until something familiar appears — and every screenful was a
+  fraction of it. **Account**, **Chats and channels**, **Calendar**, **Your
+  presence**, **Where you are working from**, **Appearance and updating**.
+- **Each index row says what is set on its page**, because *is the calendar
+  on?* is the question most visits actually have and a row that answers it is a
+  page nobody has to open: `week · can answer and book`, `cosy · every 120s ·
+  pauses when away`, `cloudhouse-internet → In the office`.
+- `Escape` backs a page out to the index before it closes the panel, the way it
+  unwinds everything else in this window. A few controls moved to the page they
+  belong on: how many chats to list, notifications and the agent handover were
+  filed under *Appearance*.
+- **The panel was a third of the width it had room for.** A `ScrollView` takes
+  its content width *from* its content, so the form sizing itself off its
+  parent was asking the answer to decide the question — descriptions wrapped in
+  a column three inches wide in a window ten across.
+
 ### 0.10.2 — 2026-09-07
 
 - **A building could not actually be mapped to a network.** The only way to get

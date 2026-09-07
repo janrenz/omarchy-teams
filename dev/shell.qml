@@ -219,6 +219,15 @@ ShellRoot {
                               at: view ? view.contentItem.contentY : -1 })
     }
 
+    // Which page of the settings is on screen. Offscreen there is no pointer
+    // to click an index row with, and the pages are what there is to look at.
+    function settingsPage(index: int): string {
+      var form = panel.settingsForm
+      panel.showSettings = true
+      form.page = index
+      return JSON.stringify({ page: form.page })
+    }
+
     // An edit into the settings form, and what became of it. The form writes
     // itself a moment after the last change rather than waiting for a button,
     // so "did that take?" is a question worth being able to ask - and --demo

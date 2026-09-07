@@ -672,7 +672,16 @@ Item {
     if (composingNew) { closeNewChat(); return }
     if (composingMeeting) { closeNewMeeting(); return }
     if (service.readingEvent) { service.closeEvent(); return }
-    if (showSettings) { showSettings = false; return }
+    if (showSettings) {
+      // One layer at a time, the way Escape unwinds everything else here: a
+      // settings page backs out to its index before the pane itself closes.
+      if (settingsForm.page !== settingsForm.pageIndex) {
+        settingsForm.page = settingsForm.pageIndex
+        return
+      }
+      showSettings = false
+      return
+    }
     if (pickingMessageId !== "") { pickingMessageId = ""; return }
     if (composer.activeFocus) { leaveComposer(); return }
     if (listDrawerOpen) { listDrawerOpen = false; focusPane = "list"; return }
@@ -2009,7 +2018,12 @@ Item {
 
             SettingsForm {
               id: settingsForm
-              width: parent.width - Style.spacing.xxl
+              // Off the ScrollView by name, not off `parent`. A ScrollView's
+              // contentItem takes its width *from* its content, so a child
+              // sizing itself from `parent.width` is asking the answer to
+              // decide the question - and the form came out a third of the
+              // width it had room for.
+              width: settingsScroll.width - Style.spacing.xxl
               service: service
               onCloseRequested: root.showSettings = false
             }

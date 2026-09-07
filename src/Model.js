@@ -456,6 +456,12 @@ function accountView(snapshot, alias) {
       presence: data.presence === true,
       canSetPresence: data.canSetPresence === true,
       canReadPlaces: data.canReadPlaces === true,
+      // The shared registration's own id, so the settings form can tell it
+      // from a registration of the user's own - which is what Place.Read.All
+      // needs, and which "the client id field is not empty" does not test:
+      // the shared id typed out in full is still the shared id.
+      defaultClientId: String(data.defaultClientId || ""),
+      ownRegistration: data.ownRegistration === true,
       calendar: data.calendar === true,
       canWriteCalendar: data.canWriteCalendar === true,
       // The user's own presence, from the same batched request the sidebar's
@@ -474,7 +480,7 @@ function accountView(snapshot, alias) {
     alias: String(alias || ""), ok: false, loaded: false, username: "", displayName: "",
     userId: "", channels: false, canMarkRead: false, canUpload: false, canStartChat: false, presence: false,
     canSetPresence: false, canReadPlaces: false, calendar: false, canWriteCalendar: false,
-    me: null,
+    defaultClientId: "", ownRegistration: false, me: null,
     chats: [], teams: [], unreadCount: 0,
     errorCode: "", errorMessage: "", warnings: []
   }

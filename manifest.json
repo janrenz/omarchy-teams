@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "author": "Jan Renz",
   "license": "MIT",
   "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and nothing else to set up: it signs in through its own Azure app registration. Talks to Microsoft Graph and nothing else.",
@@ -102,7 +102,7 @@
         "key": "readPlaces",
         "type": "boolean",
         "label": "List your buildings",
-        "description": "Fetches your tenant's buildings so the picker and the wifi rules can name one rather than just \"In the office\". Needs Place.Read.All on an app registration of your own: the plugin's shared registration does not ask for it, because it is admin consent and declaring it there would put it in front of every other organisation signing in through the same app. Setting a building needs no permission at all - a placeId is only a string to the presence call - so without this you name a building in buildingNames instead and everything works. Needs the presence setting and your own client id, and changing this means signing in again.",
+        "description": "Fetches your tenant's buildings so the picker and the wifi rules can name one rather than just \"In the office\". Needs Place.Read.All on an app registration of your own: the plugin's shared registration does not ask for it, because it is admin consent and declaring it there would put it in front of every other organisation signing in through the same app. Setting a building needs no permission at all - a placeId is only a string to the presence call - so without this you name a building in buildingNames instead and everything works. Needs the presence setting and a client id that is not this plugin's own shared one - the shared id written out in full is still the shared id. Changing this means signing in again.",
         "defaultValue": false
       },
       {

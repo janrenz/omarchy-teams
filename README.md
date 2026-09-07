@@ -259,7 +259,7 @@ own.
 | `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. The plugin's registration declares it; a registration of your own has to as well. |
 | `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p`, `w` and the two status chips need. An administrator has to consent to it whichever registration you use. |
 | `holdPresence` | `false` | Whether to hold a presence session open for this machine, so a presence you set has something to show against. Needs `setPresence`. |
-| `readPlaces` | `false` | Whether to ask for `Place.Read.All` at sign-in, which fetches your tenant's buildings so the picker and the rules can name one. Admin consent, and **only on a registration of your own** — the plugin's shared one refuses it. Needs `setPresence` and `clientId`. |
+| `readPlaces` | `false` | Whether to ask for `Place.Read.All` at sign-in, which fetches your tenant's buildings so the picker and the rules can name one. Admin consent, and **only on a registration of your own** — the plugin's shared one refuses it, including when its id is typed into `clientId` explicitly. Needs `setPresence`. |
 | `buildingNames` | `[]` | One per line, `<place id> = what you call it`. How a building gets a name without `readPlaces`. Name them in the window's settings, which shows the place id Graph already reports for you. |
 | `wifiLocations` | `[]` | One rule per line, `ssid = where` — a building's name, a bare place id, `office`, `remote`, `timeoff`, or `none` to report nothing there; `*` as the ssid is any other network. Tick them in the window's settings rather than writing them here. |
 | `calendar` | `false` | Whether to ask for `Calendars.Read` at sign-in, which is what the calendar pane needs. |
@@ -501,8 +501,9 @@ already reads:
 Failing that, ask whoever runs Microsoft Places (`Get-Place -Type Building`).
 
 **Or let Graph list them.** [Register your own
-app](#bringing-your-own-app-registration), add `Place.Read.All` to it, get your
-own administrator's consent — your tenant, your decision, nobody else's
+app](#bringing-your-own-app-registration) — a *different* registration, not
+this plugin's id written out in the field, which is still this plugin's id —
+add `Place.Read.All` to it, get your own administrator's consent — your tenant, your decision, nobody else's
 consent screen — put the client id in the widget's settings and turn **List
 your buildings** on. The picker then grows a row per building automatically,
 with the names the tenant gave them.
@@ -769,6 +770,29 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.10.1 — 2026-09-07
+
+- **The wifi never got detected.** The SSID read sat behind the same flag that
+  stops three copies of the plugin sending the same notification — but the
+  settings panel lives in the *window*, which is not the copy that flag picks,
+  so it could never say *you are on cloudhouse-internet, what is that?* and the
+  rules could not be made at all. Reading the network is a local process with
+  no outward effect and now happens wherever it is wanted; telling Graph about
+  it still comes from one place.
+- **Settings apply as you make them.** There was a Save button at the bottom of
+  a long scroll, which is a fine rule for a form you fill in once and a bad one
+  for a panel whose whole job is ticking a box for the network you are standing
+  on. Edits are written a moment after the last one, so nothing is written
+  while you are still typing a client id. An edit made while a write is in
+  flight is held rather than dropped, only what was actually written is
+  forgotten, and closing the panel — with the button, with `Escape`, or with
+  `,` — writes whatever is outstanding on the way out.
+- **List your buildings** could be switched on where it cannot work. It was
+  offered whenever the client-id field was not empty, and the field is not
+  empty when it holds this plugin's own id spelled out — which is the shared
+  registration, and refuses that permission. It now compares against the real
+  id rather than against emptiness, and says which of the two you have.
 
 ### 0.10.0 — 2026-09-07
 

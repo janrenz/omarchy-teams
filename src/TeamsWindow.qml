@@ -41,6 +41,9 @@ Item {
   // For the harness alone: an id is scoped to the file it is written in, so
   // scrolling the settings pane from outside needs a name on the root.
   readonly property alias settingsScroll: settingsScroll
+  // Also for the harness: the form writes itself now, so whether an edit
+  // actually lands is worth being able to ask.
+  readonly property alias settingsForm: settingsForm
 
   function open(payloadJson) {
     closingFromHost = false
@@ -1975,6 +1978,7 @@ Item {
             clip: true
 
             SettingsForm {
+              id: settingsForm
               width: parent.width - Style.spacing.xxl
               service: service
               onCloseRequested: root.showSettings = false

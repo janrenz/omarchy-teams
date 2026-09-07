@@ -387,6 +387,34 @@ fatal QML error makes it exit instead.
   application, not the machine, so two machines renew one session - which is
   also why the heartbeat sits behind `notifies`, the same "one of the three
   Services does this" flag the notifications use.
+- **`notifies` gates *outward* actions, and nothing else.** It exists because
+  there is a Service behind the bar on every monitor and another behind the
+  window, so notifications, the presence session and the location report have
+  to come from one of them. Reading the SSID is none of those - it is a local
+  process with no effect anybody sees - and putting it behind the same flag
+  broke the feature that needed it most: the settings form lives in the
+  *window*, whose Service does not announce, so it could never say "you are on
+  cloudhouse-internet, what is that?" and the wifi rules could not be made at
+  all. Hence two properties: `watchingWifi` may look, `reportsWifi` may tell
+  Graph. Before reaching for `notifies`, ask whether the thing being gated is
+  something the world sees twice or something this host needs once.
+- **The settings form writes itself, and the harness must not.** Edits apply on
+  a 700ms debounce rather than on a button - a panel where ticking a box does
+  nothing until you find Save at the bottom of a scroll is a panel where half
+  the ticks never land, and the wifi rules are ticked one network at a time.
+  Three things that had to be got right and each is checked by `dev setting` /
+  `dev settled`: edits made while a write is in flight are held rather than
+  dropped (`config.py` takes one at a time, and `saveSettings` refuses while
+  one runs); only the keys actually written are cleared from `pending`, so an
+  edit typed during the write survives it; and the pane is closed by Escape and
+  by `,` as well as by Close, so the flush hangs off `onVisibleChanged` rather
+  than off the button.
+
+  **And `saveSettings` is a no-op under `demo`.** The harness runs this very
+  Service against fixture settings while `config.py` writes the real
+  `shell.json`, so a demo that saved would put `account: demo` into the bar the
+  user is actually using. That mattered less when a button was needed; now any
+  tick in the harness would do it.
 - **The wifi-to-building map is the tenant's, and Graph will not hand it
   over.** Teams on Windows sets a work location from the network because an
   administrator listed the office SSIDs (`Set-PlacesSettings -Collection
@@ -427,6 +455,14 @@ fatal QML error makes it exit instead.
   `DEFAULT_CLIENT_ID` **before the devicecode request**, because the failure it
   is preventing is the whole sign-in: an undeclared scope fails all of them.
   The settings toggle is disabled without a client id for the same reason.
+
+  The test for "a registration of your own" is **not** "the client id field is
+  filled in", which is what it was first written as and is wrong in exactly the
+  configuration that matters: the shared id typed out in full is still the
+  shared id, and a widget configured that way had the setting offered and the
+  sign-in refused. `teams.py` reports `defaultClientId` and `ownRegistration`
+  on the fetch so the form can compare rather than keeping a second copy of the
+  constant.
 
   So the capability has to work without the scope, and it does: a place id is
   recognised on its shape (`Model.looksLikePlaceId`), `buildingNames` gives one

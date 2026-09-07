@@ -216,6 +216,24 @@ ShellRoot {
                               at: view ? view.contentItem.contentY : -1 })
     }
 
+    // An edit into the settings form, and what became of it. The form writes
+    // itself a moment after the last change rather than waiting for a button,
+    // so "did that take?" is a question worth being able to ask - and --demo
+    // makes the write a no-op, so this cannot touch a real shell.json.
+    function setting(key: string, value: string): string {
+      var form = panel.settingsForm
+      form.change(key, value)
+      return JSON.stringify({ pending: Object.keys(form.pending),
+                              dirty: form.dirty, saving: panel.teamsService.saving })
+    }
+
+    function settled(): string {
+      var form = panel.settingsForm
+      return JSON.stringify({ pending: Object.keys(form.pending),
+                              dirty: form.dirty, saving: panel.teamsService.saving,
+                              error: panel.teamsService.saveError })
+    }
+
     // What the wifi rules make of a network, without waiting for nmcli to say
     // which one this machine is on - offscreen or not, the harness is never on
     // the network the fixtures describe.

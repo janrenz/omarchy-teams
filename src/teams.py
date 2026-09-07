@@ -1093,6 +1093,11 @@ def fetch_account(alias, args):
         "presence": can_see_presence(account),
         "canSetPresence": can_set_presence(account),
         "canReadPlaces": can_read_places(account),
+        # So the settings form can tell "a registration of your own" from "the
+        # shared one, typed out". Reported rather than copied into the QML,
+        # because a second home for this constant is a second thing to change.
+        "defaultClientId": DEFAULT_CLIENT_ID,
+        "ownRegistration": str(account.get("client_id") or "") not in ("", DEFAULT_CLIENT_ID),
         "calendar": can_see_calendar(account),
         "canWriteCalendar": can_write_calendar(account),
         "me": None,
@@ -3247,6 +3252,8 @@ def demo_account(alias):
         "canStartChat": True,
         "canSetPresence": True,
         "canReadPlaces": True,
+        "defaultClientId": DEFAULT_CLIENT_ID,
+        "ownRegistration": True,
         "calendar": True,
         "canWriteCalendar": True,
         "me": {"state": "available", "availability": "Available", "activity": "Available",

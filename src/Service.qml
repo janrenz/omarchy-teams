@@ -503,6 +503,16 @@ Item {
 
   function saveSettings(patch) {
     if (saving || pluginDir === "") return false
+    // The harness runs this very Service against fixture settings, and
+    // config.py writes the real shell.json - so a demo that saved would put
+    // `account: demo` into the bar the user is actually using. It matters more
+    // now than it did: the form used to need a button pressed, and writes
+    // itself a moment after any tick. Answered as if it had happened and
+    // nothing written, which is what --demo does everywhere else.
+    if (setting("demo", false) === true) {
+      Qt.callLater(function() { root.settingsSaved() })
+      return true
+    }
     saving = true
     saveError = ""
     saveProc.command = ["python3", pluginDir + "/config.py",
@@ -913,22 +923,28 @@ Item {
   // office wifi, and leaving the network lets the schedule show through
   // again.
   //
-  // Behind the announcer flag, for the reason the presence session is: there
-  // is a Service behind the bar on every monitor and another behind the
-  // window, and one of them reporting a network is enough.
+  // Two gates, not one, and conflating them was a bug worth remembering.
+  // *Reporting* belongs behind the announcer flag for the reason the presence
+  // session does: there is a Service behind the bar on every monitor and
+  // another behind the window, and one of them telling Graph is enough.
+  // *Reading* the SSID does not - it is a local process with no outward effect
+  // - and putting it behind the same flag broke the one thing that needed it
+  // most. The settings form lives in the window, whose Service does not
+  // announce, so it could never say "you are on cloudhouse-internet, what is
+  // that?" - and the feature could not be configured at all.
   property string currentSsid: ""
   // What has actually been reported, so a poll that finds nothing changed
   // costs no request. The empty string means "nothing reported by us yet",
   // which is why it is not the same value as a rule saying `none`.
   property string reportedLocation: ""
 
-  // Reading the SSID is gated on the permission and the announcer flag but
-  // *not* on there being a rule, which is the chicken and the egg: the
-  // settings form offers "you are on cloudhouse-internet - what is that?",
-  // and it cannot offer that until something has looked. It costs one local
-  // process every few minutes and no Graph request at all; reporting is what
-  // waits for a rule, in reportWifiLocation.
-  readonly property bool watchingWifi: canSetLocation && notifies && signedIn
+  // May look at the network. Not gated on a rule existing either, which is the
+  // same chicken and egg one level down: the form offers the question and
+  // cannot offer it until something has looked.
+  readonly property bool watchingWifi: canSetLocation && signedIn
+
+  // May tell Graph about it. One Service, for the reason one Service notifies.
+  readonly property bool reportsWifi: watchingWifi && notifies
 
   // Null when no rule applies, which is not the same as a rule saying to
   // report nothing - see Model.autoLocationFor. Null leaves the layer alone
@@ -960,7 +976,7 @@ Item {
   }
 
   function reportWifiLocation() {
-    if (!watchingWifi || autoLocationProc.running || pluginDir === "") return
+    if (!reportsWifi || autoLocationProc.running || pluginDir === "") return
     if (wifiRules.length === 0) return
     if (setting("demo", false) === true) return
     var wanted = wifiLocation
@@ -1026,7 +1042,7 @@ Item {
 
   // A rule edited in the settings form, or a building list that has just
   // arrived and resolved a rule that could not be read before.
-  onWifiLocationChanged: if (watchingWifi) reportWifiLocation()
+  onWifiLocationChanged: if (reportsWifi) reportWifiLocation()
 
   // ---- holding a session open --------------------------------------------
   //
@@ -1101,7 +1117,7 @@ Item {
     if (holdPresence && canSetPresence && notifies && heldPresence !== "")
       Quickshell.execDetached(["python3", helper(), "hold-presence", "--account", alias,
                                "--state", "none"])
-    if (watchingWifi && reportedLocation !== "")
+    if (reportsWifi && reportedLocation !== "")
       Quickshell.execDetached(["python3", helper(), "auto-location", "--account", alias,
                                "--state", "none"])
   }

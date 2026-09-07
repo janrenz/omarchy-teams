@@ -11,10 +11,20 @@ import "Model.js" as Model
 // line that writes it into the registry. So the plugin brings its own form,
 // the way the Office 365 plugin does.
 //
-// Edits are collected and written on Save rather than applied as they are
-// typed: every keystroke in the client id would otherwise be a write to the
-// file the whole shell reads, and a half-typed account name would send the
-// service off to sign in as nobody.
+// Edits apply themselves, a short pause after the last one. There used to be
+// a Save button, on the grounds that a write per keystroke would hammer the
+// file the whole shell reads - which is true, and is what the pause is for
+// rather than what a button was needed for. A settings panel where ticking a
+// box does nothing until you find a button at the bottom of a scroll is a
+// panel where half the ticks never take effect, and the wifi rules made that
+// plain: they are ticked one network at a time, in the place you happen to be
+// standing.
+//
+// What survives from the old rationale is that nothing is written *while*
+// somebody types. A half-typed account name would send the service off to
+// fetch as nobody, so the debounce waits for typing to stop - and edits made
+// while a write is in flight are held rather than dropped, because the config
+// helper takes one at a time.
 Column {
   id: root
 
@@ -40,12 +50,29 @@ Column {
     for (var k in pending) next[k] = pending[k]
     next[key] = value
     pending = next
+    autoSave.restart()
   }
 
-  function discard() {
-    pending = ({})
+  // Anything outstanding, written now rather than in a moment.
+  function flushNow() {
+    autoSave.stop()
+    flush()
+  }
+
+  // Closing, not discarding. Anything outstanding goes out on the way rather
+  // than being thrown away: a panel that saves as you go and then loses the
+  // last tick because you shut it too quickly is worse than either rule on
+  // its own.
+  function close() {
+    flushNow()
     root.closeRequested()
   }
+
+  // And the pane is closed by things that never touch that button - Escape
+  // unwinds to it, and `,` toggles it - so the write happens on the way out
+  // however "out" came about. Reading its own `visible` is safe here; it is
+  // reading a *child's* that is the circular binding to avoid.
+  onVisibleChanged: if (!visible) flushNow()
 
   // Which calendars are ticked, pending edits included.
   function pickedCalendars() {
@@ -100,6 +127,20 @@ Column {
   }
 
   // Buildings named locally: `<place id> = what you call it`.
+  // Whether the sign-in would go through a registration that is not the one
+  // this plugin publishes. The id comes from the helper rather than being
+  // copied into the QML - see defaultClientId in teams.py - so an empty field
+  // and the shared id spelled out are both correctly "not your own".
+  readonly property bool ownRegistration: {
+    var typed = String(root.current("clientId", "")).trim()
+    if (typed === "") return false
+    var shared = root.service ? String(root.service.view.defaultClientId || "") : ""
+    // Before a fetch has answered there is nothing to compare against, so the
+    // account's own answer stands in - it is the same question, already asked.
+    if (shared === "") return !!root.service && root.service.view.ownRegistration === true
+    return typed.toLowerCase() !== shared.toLowerCase()
+  }
+
   function nameRules() {
     return Model.stringList(root.current("buildingNames", []))
   }
@@ -151,18 +192,44 @@ Column {
     root.change("wifiLocations", kept.length === 0 ? "" : kept)
   }
 
-  function save() {
-    if (!service || !dirty) { root.closeRequested(); return }
-    service.saveSettings(pending)
+  // What the write in flight is carrying. Kept so that what lands can be taken
+  // out of `pending` without taking anything typed since it was sent - which
+  // clearing the whole thing would, and a lost edit is exactly what makes
+  // saving-as-you-go feel broken.
+  property var inFlight: ({})
+
+  function flush() {
+    if (!service || !dirty) return
+    // The helper writes one at a time and saveSettings refuses while one is
+    // running, so this waits rather than being dropped on the floor.
+    if (service.saving) { autoSave.restart(); return }
+    inFlight = pending
+    service.saveSettings(inFlight)
+  }
+
+  Timer {
+    id: autoSave
+    // Long enough that typing a client id is one write rather than thirty-six,
+    // short enough that nobody wonders whether a tick took.
+    interval: 700
+    repeat: false
+    onTriggered: root.flush()
   }
 
   Connections {
     target: root.service
-    // Cleared only once the write has actually landed, so a failed save keeps
-    // what was typed rather than throwing it away and saying so.
+    // Only what was actually written is forgotten, and only once the write has
+    // landed - so a failed save keeps what was typed, and an edit made while
+    // the write was in flight survives it.
     function onSettingsSaved() {
-      root.pending = ({})
-      root.closeRequested()
+      var left = {}
+      for (var key in root.pending)
+        if (JSON.stringify(root.pending[key]) !== JSON.stringify(root.inFlight[key]))
+          left[key] = root.pending[key]
+      root.pending = left
+      root.inFlight = ({})
+      // Anything typed during the write is now the next one.
+      if (root.dirty) autoSave.restart()
     }
   }
 
@@ -583,8 +650,11 @@ Column {
     // not: it is admin consent, and it would be put to every other
     // organisation signing in through the same app. Disabled rather than
     // allowed and then refused, because the refusal costs the whole sign-in.
-    enabled: root.current("setPresence", false) === true
-             && String(root.current("clientId", "")).trim() !== ""
+    //
+    // And "your own" is not "the field is filled in": the shared id typed out
+    // in full is still the shared id, and a config with it written there
+    // explicitly is exactly the one this used to let through.
+    enabled: root.current("setPresence", false) === true && root.ownRegistration
     opacity: enabled ? 1.0 : 0.5
     label: "List your buildings"
     description: "Fetches your tenant's buildings so the picker and the rules below can name one instead of saying just \"In the office\". Needs Place.Read.All on an app registration of your own - the plugin's shared one does not ask for it, because it is admin consent and every other organisation signing in through the same app would be asked for it too. Everything else here works without this: a building's id can be used on any sign-in, and you can give it a name below. Takes effect at the next sign-in."
@@ -594,9 +664,10 @@ Column {
 
   Text {
     width: parent.width
-    visible: root.current("setPresence", false) === true
-             && String(root.current("clientId", "")).trim() === ""
-    text: "Listing buildings needs your own Azure client id above, with Place.Read.All added to that registration. Naming a building by hand needs neither - see below."
+    visible: root.current("setPresence", false) === true && !root.ownRegistration
+    text: String(root.current("clientId", "")).trim() === ""
+      ? "Listing buildings needs your own Azure client id above, with Place.Read.All added to that registration. Naming a building by hand needs neither - see below."
+      : "That is this plugin's own shared app registration, which does not ask for Place.Read.All - it is admin consent, and every other organisation signing in through the same app would be asked for it too. Register one of your own and put its id above. Naming a building by hand needs no permission at all - see below."
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
     color: Qt.darker(Color.foreground, 1.4)
@@ -869,6 +940,9 @@ Column {
   PanelSeparator { width: parent.width }
 
   // ---------------- saving ----------------
+  //
+  // No Save button: there is nothing for one to do. What is left here is a
+  // line saying where the writing got to, and a way out.
 
   Text {
     width: parent.width
@@ -885,30 +959,27 @@ Column {
     spacing: Style.spacing.sm
 
     Button {
-      enabled: root.dirty && !(root.service && root.service.saving)
-      text: root.service && root.service.saving ? "Saving…" : "Save"
-      bordered: true
-      foreground: root.dirty ? Color.accent : Qt.darker(Color.foreground, 1.6)
-      fontFamily: Style.font.family
-      fontSize: Style.font.caption
-      onClicked: root.save()
-    }
-
-    Button {
-      text: root.dirty ? "Discard" : "Close"
+      text: "Close"
       bordered: true
       foreground: Color.foreground
       fontFamily: Style.font.family
       fontSize: Style.font.caption
-      onClicked: root.discard()
+      onClicked: root.close()
     }
 
     Text {
       anchors.verticalCenter: parent.verticalCenter
-      visible: root.dirty
-      text: Object.keys(root.pending).length + " unsaved"
+      // Three states worth telling apart, and the third is the reassuring
+      // one: a panel that says nothing after a change looks like a panel that
+      // ignored it.
+      text: {
+        if (root.service && root.service.saving) return "Saving…"
+        if (root.dirty) return "Saving in a moment…"
+        if (root.service && root.service.saveError !== "") return ""
+        return "Changes apply as you make them"
+      }
       textFormat: Text.PlainText
-      color: Qt.darker(Color.foreground, 1.5)
+      color: Qt.darker(Color.foreground, root.dirty ? 1.2 : 1.6)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }

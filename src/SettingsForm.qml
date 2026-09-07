@@ -63,6 +63,50 @@ Column {
     root.change("calendarIds", picked.length === 0 ? "" : picked)
   }
 
+  // The wifi-to-location rules, pending edits included.
+  function wifiRules() {
+    return Model.stringList(root.current("wifiLocations", []))
+  }
+
+  // What the network this machine is on is currently mapped to, as a rule's
+  // right-hand side - empty for "nothing said about this one yet".
+  function ruleForHere() {
+    var here = root.service ? String(root.service.currentSsid || "") : ""
+    if (here === "") return ""
+    var rows = Model.wifiRuleRows(root.wifiRules(),
+                                  root.service ? root.service.buildings : [])
+    for (var i = 0; i < rows.length; i++)
+      if (rows[i].ssid.toLowerCase() === here.toLowerCase()) return rows[i].target
+    return ""
+  }
+
+  // Point the network this machine is on at something, or take it off the
+  // list. One rule per network: a second line for the same SSID would be a
+  // rule that never fires, and the first one wins in Model.autoLocationFor.
+  function mapHere(target) {
+    var here = root.service ? String(root.service.currentSsid || "") : ""
+    if (here === "") return
+    var kept = []
+    var rules = root.wifiRules()
+    for (var i = 0; i < rules.length; i++) {
+      var at = rules[i].indexOf("=")
+      var ssid = (at === -1 ? rules[i] : rules[i].slice(0, at)).trim()
+      if (ssid.toLowerCase() !== here.toLowerCase()) kept.push(rules[i])
+    }
+    // Clicking what is already ticked takes it off, the way the calendar
+    // ticks do - there has to be a way back to "say nothing here".
+    if (String(target || "") !== "") kept.push(here + " = " + String(target))
+    root.change("wifiLocations", kept.length === 0 ? "" : kept)
+  }
+
+  function dropRule(rule) {
+    var kept = []
+    var rules = root.wifiRules()
+    for (var i = 0; i < rules.length; i++)
+      if (rules[i] !== rule) kept.push(rules[i])
+    root.change("wifiLocations", kept.length === 0 ? "" : kept)
+  }
+
   function save() {
     if (!service || !dirty) { root.closeRequested(); return }
     service.saveSettings(pending)
@@ -474,6 +518,207 @@ Column {
     color: Color.urgent
     font.family: Style.font.family
     font.pixelSize: Style.font.caption
+  }
+
+  PanelSeparator { width: parent.width }
+
+  // ---------------- where you are working from ----------------
+  //
+  // Two things: whether the picker may name a building, and which network
+  // means which one. The second is deliberately not a text field of SSIDs and
+  // GUIDs - it is the network you are on now and a list of buildings to point
+  // it at, because the one moment you certainly know which building a wifi
+  // belongs to is while you are standing in it.
+
+  PanelSectionHeader { width: parent.width; text: "Where you are working from" }
+
+  Toggle {
+    width: parent.width
+    enabled: root.current("setPresence", false) === true
+    opacity: enabled ? 1.0 : 0.5
+    label: "List your buildings"
+    description: "Lets the work-location picker name a building instead of just \"In the office\", and lets the network rules below point at one. Needs Place.Read.All, which an administrator has to consent to for the tenant - setting a building needs nothing beyond the presence permission, but learning which buildings exist and what they are called does. Without it everything here still works; the picker simply offers the office and no building in it. Takes effect at the next sign-in."
+    checked: root.current("readPlaces", false) === true
+    onClicked: root.change("readPlaces", !(root.current("readPlaces", false) === true))
+  }
+
+  Text {
+    width: parent.width
+    visible: !!root.service && root.service.signedIn && root.service.wantPlaces
+             && !root.service.canReadPlaces
+    text: "This sign-in cannot list your buildings yet. Sign in again to ask for Place.Read.All - if the sign-in then fails, the tenant has not consented to it."
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Color.urgent
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    width: parent.width
+    visible: !!root.service && root.service.buildingsNote !== ""
+    text: root.service ? root.service.buildingsNote : ""
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Qt.darker(Color.foreground, 1.4)
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
+  Text {
+    width: parent.width
+    visible: !!root.service && root.service.buildingsError !== ""
+    text: root.service ? root.service.buildingsError : ""
+    textFormat: Text.PlainText
+    wrapMode: Text.WordWrap
+    color: Color.urgent
+    font.family: Style.font.family
+    font.pixelSize: Style.font.caption
+  }
+
+  // ---- this network, and what it means -------------------------------------
+
+  Column {
+    width: parent.width
+    spacing: Style.spacing.sm
+    visible: !!root.service && root.service.canSetLocation
+
+    Text {
+      width: parent.width
+      text: root.service && String(root.service.currentSsid || "") !== ""
+        ? "You are on " + String(root.service.currentSsid) + ". What is that?"
+        : "This machine is on no wifi network, so there is nothing to point at a building. Rules already made still apply when you are back on one."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Color.foreground
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+
+    Text {
+      width: parent.width
+      text: "Teams on Windows reads this from the tenant's own wifi list; nothing in Graph hands that over, so this is your copy of the part that concerns you. Whatever you tick is reported as an automatic location, which a location you pick by hand still beats - and it is withdrawn when this machine goes to a network you have said nothing about."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Qt.darker(Color.foreground, 1.4)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
+
+    // The buildings first, because a building is the whole point of doing
+    // this from here rather than in a text field.
+    Repeater {
+      model: root.service && String(root.service.currentSsid || "") !== ""
+             ? root.service.buildings : []
+
+      Toggle {
+        required property var modelData
+        width: root.width
+        label: String(modelData.name || "")
+              + (String(modelData.label || "") !== ""
+                 ? "  ·  " + String(modelData.label) : "")
+        // Written as the building's name rather than its id: a rule anybody
+        // can read is a rule anybody can fix, and Model.buildingNamed resolves
+        // either. A renamed building then shows up as a rule with a problem
+        // instead of one that quietly stops firing.
+        checked: root.ruleForHere().toLowerCase() === String(modelData.name || "").toLowerCase()
+        onClicked: root.mapHere(root.ruleForHere().toLowerCase()
+                                === String(modelData.name || "").toLowerCase()
+                                ? "" : String(modelData.name || ""))
+      }
+    }
+
+    // And the three that need no building, including the one that says to
+    // keep quiet about this network.
+    Repeater {
+      model: root.service && String(root.service.currentSsid || "") !== ""
+        ? [{ target: "office", label: "In the office", hint: "no particular building" },
+           { target: "remote", label: "Remote", hint: "working, but not in the building" },
+           { target: "timeoff", label: "Time off", hint: "not working at all" },
+           { target: "none", label: "Report nothing here",
+             hint: "withdraw what this machine said and let your schedule show through" }]
+        : []
+
+      Toggle {
+        required property var modelData
+        width: root.width
+        label: String(modelData.label) + "  ·  " + String(modelData.hint)
+        checked: root.ruleForHere().toLowerCase() === String(modelData.target)
+        onClicked: root.mapHere(root.ruleForHere().toLowerCase() === String(modelData.target)
+                                ? "" : String(modelData.target))
+      }
+    }
+  }
+
+  // ---- every rule, including the networks you are not on -------------------
+
+  Column {
+    width: parent.width
+    spacing: Style.spacing.xs
+    visible: root.wifiRules().length > 0
+
+    Text {
+      width: parent.width
+      text: "Networks you have mapped"
+      textFormat: Text.PlainText
+      color: Qt.darker(Color.foreground, 1.2)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+      font.bold: true
+    }
+
+    Repeater {
+      model: Model.wifiRuleRows(root.wifiRules(),
+                                root.service ? root.service.buildings : [])
+
+      // A row rather than a Toggle: these are the ones for networks this
+      // machine is not on, so there is nothing to tick - only what it says
+      // and a way to take it off.
+      Row {
+        required property var modelData
+        width: root.width
+        spacing: Style.spacing.sm
+
+        Text {
+          anchors.verticalCenter: parent.verticalCenter
+          width: root.width - dropButton.width - Style.spacing.sm * 2
+          // The problem instead of the answer where there is one. A rule
+          // pointing at a building nobody answers to does nothing at all,
+          // and doing nothing quietly is the failure worth naming.
+          text: (String(modelData.ssid) === "*" ? "any other network" : String(modelData.ssid))
+                + "  →  "
+                + (String(modelData.problem) !== ""
+                   ? String(modelData.target) + " — " + String(modelData.problem)
+                   : String(modelData.label))
+          textFormat: Text.PlainText
+          elide: Text.ElideRight
+          color: String(modelData.problem) !== ""
+                 ? Color.urgent : Qt.darker(Color.foreground, 1.3)
+          font.family: Style.font.family
+          font.pixelSize: Style.font.caption
+        }
+
+        PanelActionButton {
+          id: dropButton
+          anchors.verticalCenter: parent.verticalCenter
+          iconText: "\u{F0156}"   // nf-md-close
+          tooltipText: "Forget this network"
+          foreground: Color.foreground
+          onClicked: root.dropRule(String(modelData.rule))
+        }
+      }
+    }
+
+    Text {
+      width: parent.width
+      text: "A network with no rule leaves your work location alone rather than clearing it - tethering to a phone should not announce anything. Add \"any other network\" by hand in shell.json as `* = remote` if you want one."
+      textFormat: Text.PlainText
+      wrapMode: Text.WordWrap
+      color: Qt.darker(Color.foreground, 1.5)
+      font.family: Style.font.family
+      font.pixelSize: Style.font.caption
+    }
   }
 
   PanelSeparator { width: parent.width }

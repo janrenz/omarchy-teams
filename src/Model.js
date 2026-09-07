@@ -229,6 +229,148 @@ function choiceLabel(choices, state, fallback) {
   return fallback === undefined ? "" : String(fallback)
 }
 
+// ---------------------------------------------------------------------------
+// where the wifi says you are
+// ---------------------------------------------------------------------------
+//
+// The Windows client does this from the tenant's own configuration: an
+// administrator lists the office SSIDs in Places and maps access points to
+// buildings, and Teams reads that. No Graph endpoint exposes either list - it
+// is Exchange PowerShell all the way down - so the map here is the user's own
+// setting, one `ssid = where` per line, and this is the part that reads it.
+//
+// Pure, so `node dev/test-model.js` covers it: deciding which building a
+// network means is exactly the kind of thing that should not need a
+// compositor to check.
+
+// What a rule's right-hand side can say instead of a building.
+var AUTO_LOCATION_WORDS = {
+  "office": "office", "in the office": "office", "in office": "office",
+  "remote": "remote", "home": "remote", "wfh": "remote",
+  "timeoff": "timeoff", "time off": "timeoff", "off work": "timeoff",
+  // Withdrawing what this machine said, rather than saying something else.
+  // On a network you have named but do not want reported, this is the answer.
+  "none": "none", "off": "none", "-": "none", "ignore": "none"
+}
+
+// How many buildings the picker numbers. Its rows are digits and four of them
+// are already spoken for, so ten rows is the ceiling and this is what is left.
+// The rest are still reachable - the settings form lists every one - they just
+// have no key.
+function buildingMenuCap() {
+  return 6
+}
+
+// The SSID of the network this machine is on, out of
+// `nmcli -t -f active,ssid dev wifi`.
+function ssidOf(text) {
+  var lines = String(text || "").split("\n")
+  for (var i = 0; i < lines.length; i++) {
+    if (lines[i].indexOf("yes:") !== 0) continue
+    // nmcli's terse output backslash-escapes a colon inside a field, so the
+    // separator is the first colon that is not escaped - and an SSID with one
+    // in its name comes back whole rather than cut in half at it.
+    return lines[i].slice(4).replace(/\\(.)/g, "$1").trim()
+  }
+  return ""
+}
+
+// One building, by whatever the user is likely to have written: its name, the
+// label the tenant gave it, or the id itself for anybody who had the id
+// already. Case and surrounding space are ignored, because this is typed.
+function buildingNamed(wanted, buildings) {
+  var rows = buildings || []
+  var needle = String(wanted || "").trim().toLowerCase()
+  if (needle === "") return null
+  for (var i = 0; i < rows.length; i++) {
+    var row = rows[i]
+    if (String(row.id || "").toLowerCase() === needle
+        || String(row.name || "").trim().toLowerCase() === needle
+        || (String(row.label || "").trim() !== ""
+            && String(row.label || "").trim().toLowerCase() === needle))
+      return row
+  }
+  return null
+}
+
+// The rules, parsed, for the settings form to draw and for autoLocationFor to
+// walk. Every row says what it will do or why it cannot, because a mapping
+// that quietly does nothing is the whole failure mode here: a building renamed
+// in Places leaves a rule pointing at a name nobody answers to.
+function wifiRuleRows(rules, buildings) {
+  var out = []
+  var lines = stringList(rules)
+  for (var i = 0; i < lines.length; i++) {
+    var at = lines[i].indexOf("=")
+    var ssid = (at === -1 ? lines[i] : lines[i].slice(0, at)).trim()
+    var target = (at === -1 ? "" : lines[i].slice(at + 1)).trim()
+    var row = { rule: lines[i], ssid: ssid, target: target,
+                state: "", placeId: "", label: "", problem: "" }
+    if (ssid === "") {
+      row.problem = "no network named"
+    } else if (target === "") {
+      row.problem = "nothing after the ="
+    } else {
+      var word = AUTO_LOCATION_WORDS[target.toLowerCase()]
+      if (word) {
+        row.state = word
+        row.label = word === "none" ? "report nothing" : locationWord(word)
+      } else {
+        var building = buildingNamed(target, buildings)
+        if (building) {
+          row.state = "office"
+          row.placeId = String(building.id)
+          row.label = String(building.name)
+        } else {
+          // Named but unresolvable. Not downgraded to a bare "office": a
+          // building that cannot be found is not the same as no building, and
+          // claiming the second would put the user somewhere they did not say.
+          row.problem = (buildings && buildings.length > 0)
+            ? "no building called that"
+            : "buildings have not been listed yet"
+        }
+      }
+    }
+    out.push(row)
+  }
+  return out
+}
+
+// The one word for a state, for a rule's own label. The picker's rows come
+// from the helper's table; this is for a line of settings text that has no
+// picker behind it.
+function locationWord(state) {
+  switch (String(state || "")) {
+    case "office":  return "In the office"
+    case "remote":  return "Remote"
+    case "timeoff": return "Time off"
+    default:        return ""
+  }
+}
+
+// What this machine should report on the network it is on, or null for "say
+// nothing at all" - which is not the same as reporting `none`, and the caller
+// has to tell them apart: null means no rule applied and nothing should be
+// written, `none` means a rule said to withdraw what was written before.
+//
+// An exact SSID wins over `*`, so a catch-all can sit under the named
+// networks without swallowing them.
+function autoLocationFor(ssid, rules, buildings) {
+  var rows = wifiRuleRows(rules, buildings)
+  var name = String(ssid || "").trim()
+  var fallback = null
+  for (var i = 0; i < rows.length; i++) {
+    if (rows[i].problem !== "") continue
+    if (rows[i].ssid === "*") { if (!fallback) fallback = rows[i]; continue }
+    if (name !== "" && rows[i].ssid.toLowerCase() === name.toLowerCase())
+      return { state: rows[i].state, placeId: rows[i].placeId, label: rows[i].label,
+               ssid: rows[i].ssid }
+  }
+  if (!fallback) return null
+  return { state: fallback.state, placeId: fallback.placeId, label: fallback.label,
+           ssid: "*" }
+}
+
 // The one account, as a view the UI can bind to without null checks.
 function accountView(snapshot, alias) {
   var accounts = (snapshot && snapshot.accounts) || []
@@ -252,6 +394,7 @@ function accountView(snapshot, alias) {
       canStartChat: data.canStartChat === true,
       presence: data.presence === true,
       canSetPresence: data.canSetPresence === true,
+      canReadPlaces: data.canReadPlaces === true,
       calendar: data.calendar === true,
       canWriteCalendar: data.canWriteCalendar === true,
       // The user's own presence, from the same batched request the sidebar's
@@ -269,7 +412,8 @@ function accountView(snapshot, alias) {
   return {
     alias: String(alias || ""), ok: false, loaded: false, username: "", displayName: "",
     userId: "", channels: false, canMarkRead: false, canUpload: false, canStartChat: false, presence: false,
-    canSetPresence: false, calendar: false, canWriteCalendar: false, me: null,
+    canSetPresence: false, canReadPlaces: false, calendar: false, canWriteCalendar: false,
+    me: null,
     chats: [], teams: [], unreadCount: 0,
     errorCode: "", errorMessage: "", warnings: []
   }

@@ -686,6 +686,20 @@ class Scopes(unittest.TestCase):
         self.assertTrue(teams.can_see_presence({"scopes": "Presence.Read.All"}))
         self.assertFalse(teams.can_see_presence({"scopes": "Presence.ReadWrite"}))
 
+    def test_listing_buildings_needs_its_own_grant(self):
+        # Setting a building needs nothing beyond Presence.ReadWrite - a
+        # placeId is a string to that call. Learning the buildings is what
+        # costs a permission.
+        self.assertTrue(teams.can_read_places({"scopes": "Chat.ReadWrite Place.Read.All"}))
+        self.assertTrue(teams.can_read_places({"scopes": "Place.ReadWrite.All"}))
+        self.assertFalse(teams.can_read_places({"scopes": "Chat.ReadWrite Presence.ReadWrite"}))
+
+    def test_places_is_a_tier_asked_for_only_when_wanted(self):
+        self.assertNotIn("Place.Read.All", teams.scopes_for(False))
+        self.assertNotIn("Place.Read.All", teams.scopes_for(True, True, True, True, True))
+        self.assertIn("Place.Read.All",
+                      teams.scopes_for(False, False, False, False, False, True))
+
     def test_presence_write_is_a_tier_asked_for_only_when_wanted(self):
         self.assertNotIn("Presence.ReadWrite", teams.scopes_for(False))
         self.assertNotIn("Presence.ReadWrite", teams.scopes_for(True, True))
@@ -697,9 +711,11 @@ class Scopes(unittest.TestCase):
         # and store_tokens records that as this sign-in's scopes. Asking for
         # the base set would have the file and presence tiers fall off an
         # account an hour after it signed in.
-        held = "Chat.ReadWrite Files.ReadWrite Presence.ReadWrite ChannelMessage.Read.All"
+        held = ("Chat.ReadWrite Files.ReadWrite Presence.ReadWrite Place.Read.All "
+                "ChannelMessage.Read.All")
         asked = teams.scopes_held_by({"scopes": held})
-        for scope in ("Files.ReadWrite", "Presence.ReadWrite", "ChannelMessage.Read.All"):
+        for scope in ("Files.ReadWrite", "Presence.ReadWrite", "Place.Read.All",
+                      "ChannelMessage.Read.All"):
             self.assertIn(scope, asked)
         # And nothing is asked for that this sign-in never had.
         self.assertNotIn("Presence.ReadWrite", teams.scopes_held_by({"scopes": "Chat.ReadWrite"}))
@@ -1001,6 +1017,145 @@ class SayingWhereYouAreWorkingFrom(unittest.TestCase):
                         {"workLocation": {"workLocationType": "unspecified"}},
                         {"workLocation": {"workLocationType": "somewhere new"}}):
             self.assertIsNone(teams.work_location_row(payload), payload)
+
+
+class ListingYourBuildings(unittest.TestCase):
+    """The Places directory, which is what lets a location name a building."""
+
+    def run_buildings(self, scopes="Chat.ReadWrite Place.Read.All", responses=None):
+        self.calls = []
+        queue = list(responses or [(200, {"value": []})])
+
+        def http(url, method="GET", data=None, json_body=None, headers=None, timeout=20):
+            self.calls.append({"url": url, "method": method})
+            return queue.pop(0) if queue else (200, {"value": []})
+
+        args = Args()
+        args.demo = False
+        patched = {
+            "read_json": lambda *a, **k: {"scopes": scopes, "client_id": "app-1"},
+            "access_token": lambda alias, account: ("token", {"scopes": scopes}),
+            "http": http,
+        }
+        original = {name: getattr(teams, name) for name in patched}
+        for name, stub in patched.items():
+            setattr(teams, name, stub)
+        try:
+            return capture(teams.cmd_buildings, args)
+        finally:
+            for name, value in original.items():
+                setattr(teams, name, value)
+
+    def test_buildings_are_asked_for_by_their_own_type(self):
+        result = self.run_buildings(responses=[(200, {"value": [
+            {"id": "b-1", "placeId": "b-1", "displayName": "Hauptgebäude", "label": "HQ"}]})])
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.calls[0]["url"],
+                         teams.GRAPH + "/places/microsoft.graph.building")
+        self.assertEqual(result["buildings"],
+                         [{"id": "b-1", "name": "Hauptgebäude", "label": "HQ"}])
+
+    def test_the_place_id_is_what_the_presence_calls_take(self):
+        # Places answers with both, and placeId is the documented name for the
+        # thing being handed to setManualLocation.
+        row = teams.building_row({"id": "inner", "placeId": "outer", "displayName": "A"})
+        self.assertEqual(row["id"], "outer")
+        # Only one of them, and it is still the id that gets used.
+        self.assertEqual(teams.building_row({"id": "only", "displayName": "A"})["id"], "only")
+
+    def test_a_building_with_no_name_is_still_pickable(self):
+        row = teams.building_row({"placeId": "b-9"})
+        self.assertEqual(row["name"], "b-9")
+
+    def test_an_empty_answer_says_why_rather_than_looking_broken(self):
+        # Places hides buildings until an administrator makes them visible,
+        # and then answers 200 with nothing in it.
+        result = self.run_buildings(responses=[(200, {"value": []})])
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["buildings"], [])
+        self.assertIn("EnableBuildings", result["note"])
+
+    def test_a_full_answer_says_nothing_extra(self):
+        result = self.run_buildings(responses=[(200, {"value": [
+            {"placeId": "b-1", "displayName": "A"}]})])
+        self.assertEqual(result["note"], "")
+
+    def test_a_place_with_no_id_is_dropped_rather_than_offered(self):
+        result = self.run_buildings(responses=[(200, {"value": [
+            {"displayName": "Nameless"}, {"placeId": "b-1", "displayName": "A"}]})])
+        self.assertEqual([row["id"] for row in result["buildings"]], ["b-1"])
+
+    def test_the_list_is_capped(self):
+        many = [{"placeId": "b-%d" % i, "displayName": str(i)} for i in range(80)]
+        result = self.run_buildings(responses=[(200, {"value": many})])
+        self.assertEqual(len(result["buildings"]), teams.BUILDING_CAP)
+
+    def test_without_the_scope_nothing_is_attempted(self):
+        result = self.run_buildings(scopes="Chat.ReadWrite Presence.ReadWrite")
+        self.assertEqual(result["error"]["code"], "places_permission_required")
+        self.assertEqual(self.calls, [], "a request was made that was known to be refused")
+
+    def test_a_403_says_the_permission_rather_than_the_failure(self):
+        result = self.run_buildings(responses=[(403, {"error": {"message": "Missing scope"}})])
+        self.assertEqual(result["error"]["code"], "places_permission_required")
+
+
+class ReportingWhereThisMachineIs(unittest.TestCase):
+    """The automatic layer - the plugin as the network agent Windows has."""
+
+    def run_auto(self, **kwargs):
+        helper = SettingYourPresence()
+        kwargs.setdefault("state", "office")
+        kwargs.setdefault("place", "")
+        result = helper.run_presence(command=teams.cmd_auto_location, **kwargs)
+        self.calls = helper.calls
+        return result
+
+    def test_a_building_is_reported_on_the_automatic_layer(self):
+        # Automatic rather than manual on purpose: manual beats automatic, so a
+        # location the user picked by hand outlives sitting on the office wifi.
+        result = self.run_auto(place="b-1")
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.calls[0]["url"],
+                         teams.GRAPH + "/users/user-1/presence/setAutomaticLocation")
+        self.assertEqual(self.calls[0]["body"],
+                         {"workLocationType": "office", "placeId": "b-1"})
+
+    def test_the_office_with_no_building_is_a_report_of_its_own(self):
+        # An SSID list without a building mapping is what Teams itself falls
+        # back to, so it has to be sendable.
+        self.run_auto()
+        self.assertEqual(self.calls[0]["body"], {"workLocationType": "office"})
+
+    def test_none_withdraws_what_this_machine_said(self):
+        result = self.run_auto(state="none")
+        self.assertEqual(result["state"], "none")
+        self.assertTrue(self.calls[0]["url"].endswith("/presence/clearAutomaticLocation"))
+        self.assertEqual(self.calls[0]["body"], {})
+
+    def test_withdrawing_a_layer_that_was_never_set_is_not_a_failure(self):
+        result = self.run_auto(state="none", responses=[(404, {})])
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["alreadyGone"])
+
+    def test_it_reports_only_what_graph_takes(self):
+        result = self.run_auto(state="unspecified")
+        self.assertEqual(result["error"]["code"], "bad_location")
+        self.assertEqual(self.calls, [])
+
+    def test_it_needs_the_presence_write_and_says_which_thing_was_refused(self):
+        result = self.run_auto(scopes="Chat.ReadWrite Presence.Read.All")
+        self.assertEqual(result["error"]["code"], "presence_permission_required")
+        self.assertIn("this machine", result["error"]["message"])
+        self.assertEqual(self.calls, [])
+
+    def test_it_does_not_touch_the_manual_layer(self):
+        # The two layers are two calls, and this one must never reach for the
+        # other: a report from the network is not a decision by the user.
+        for state in ("office", "remote", "none"):
+            self.run_auto(state=state)
+            self.assertNotIn("setManualLocation", self.calls[0]["url"], state)
+            self.assertNotIn("clearLocation", self.calls[0]["url"], state)
 
 
 class PendingSignIn(unittest.TestCase):

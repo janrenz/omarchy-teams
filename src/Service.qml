@@ -31,6 +31,14 @@ Item {
   // Whether to hold a presence session open while this desktop is up. Only
   // means anything with the above on - see holdTimer.
   readonly property bool holdPresence: wantPresence && setting("holdPresence", false) === true
+  // Whether to ask for Place.Read.All at the next sign-in, which is what
+  // names a building. Off by default and admin consent, like the presence
+  // write - see SCOPES_PLACES in teams.py.
+  readonly property bool wantPlaces: setting("readPlaces", false) === true
+  // `ssid = where` per line. The tenant's own SSID-to-building map lives in
+  // Exchange and no Graph endpoint hands it over, so this is the user's copy
+  // of the part of it that concerns them.
+  readonly property var wifiRules: Model.stringList(setting("wifiLocations", []))
   // The bar only ever draws an unread count, and the team tree costs one Graph
   // request per team - 29 of them on this tenant. So the widget turns it off
   // and the window turns it on; nothing draws a channel list nobody asked for.
@@ -765,6 +773,7 @@ Item {
   // Presence.ReadWrite covers both, which is why there is no setting of its
   // own and no second sign-in to ask for.
   readonly property bool canSetLocation: canSetPresence
+  readonly property bool canReadPlaces: view.canReadPlaces === true
 
   // The user's own work location as Graph aggregates it, or null when no layer
   // has anything to say. Null is an ordinary answer rather than a failure: a
@@ -795,12 +804,16 @@ Item {
   // `auto` hands the location back to Teams. That drops the choice made by
   // hand and the automatic layer for today with it - Graph's own clearLocation
   // does both - leaving whatever the working hours expect.
-  function setLocation(state) {
+  function setLocation(state, placeId) {
     var wanted = String(state || "")
     if (wanted === "" || !canSetLocation || settingLocation || pluginDir === "") return
     settingLocation = true
     locationError = ""
     var command = ["python3", helper(), "location", "--account", alias, "--state", wanted]
+    // A building is the same choice with a place on it, so it rides on the
+    // same call rather than being a second one - `office` with a placeId is
+    // exactly what setManualLocation takes.
+    if (String(placeId || "") !== "") command.push("--place", String(placeId))
     if (setting("demo", false) === true) command.push("--demo")
     locationProc.command = command
     locationProc.running = true
@@ -828,6 +841,182 @@ Item {
       root.refresh()
     }
   }
+
+  // ---- the buildings a location can name ---------------------------------
+  //
+  // Behind Place.Read.All, which is the whole reason this is a separate tier:
+  // setting a building needs nothing beyond Presence.ReadWrite - a placeId is
+  // just a string to that call - but *learning* which buildings exist and what
+  // they are called needs the Places directory. Refused, the picker is the one
+  // it was before: "In the office" and no building under it.
+  property var buildings: []
+  property bool buildingsLoading: false
+  property string buildingsError: ""
+  // Places hides buildings until an administrator makes them visible, and
+  // then answers 200 with an empty list - which looks exactly like a bug from
+  // here, so the helper says which it is and this carries the sentence over.
+  property string buildingsNote: ""
+
+  function loadBuildings() {
+    if (!configured || pluginDir === "" || !canReadPlaces) return
+    if (buildingListProc.running) return
+    buildingsLoading = true
+    buildingsError = ""
+    var command = ["python3", helper(), "buildings", "--account", alias]
+    if (setting("demo", false) === true) command.push("--demo")
+    buildingListProc.command = command
+    buildingListProc.running = true
+  }
+
+  Process {
+    id: buildingListProc
+    running: false
+    stdout: StdioCollector { id: buildingListOut; waitForEnd: true }
+    stderr: StdioCollector { id: buildingListErrOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      root.buildingsLoading = false
+      var parsed = Model.parseJson(buildingListOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        root.buildingsError = parsed && parsed.error
+          ? String(parsed.error.message)
+          : Model.oneLine(buildingListErrOut.text || "Could not list your buildings", 160)
+        return
+      }
+      root.buildingsError = ""
+      root.buildings = parsed.buildings || []
+      root.buildingsNote = String(parsed.note || "")
+    }
+  }
+
+  // Asked for as soon as the sign-in turns out to have the scope. Unlike the
+  // presence table this cannot be fetched at start-up: it needs an account,
+  // and whether the account may ask only becomes known when a fetch answers.
+  onCanReadPlacesChanged: if (canReadPlaces) loadBuildings()
+
+  // ---- what the wifi says, and reporting it ------------------------------
+  //
+  // The Windows client does this from the tenant's configuration; nothing in
+  // Graph exposes that, so the map is `wifiRules` and this is the machine's
+  // half: read the SSID, look it up, and tell Graph on the *automatic* layer.
+  // Automatic rather than manual on purpose - manual beats automatic, so a
+  // building somebody picked by hand still stands while they sit on the
+  // office wifi, and leaving the network lets the schedule show through
+  // again.
+  //
+  // Behind the announcer flag, for the reason the presence session is: there
+  // is a Service behind the bar on every monitor and another behind the
+  // window, and one of them reporting a network is enough.
+  property string currentSsid: ""
+  // What has actually been reported, so a poll that finds nothing changed
+  // costs no request. The empty string means "nothing reported by us yet",
+  // which is why it is not the same value as a rule saying `none`.
+  property string reportedLocation: ""
+
+  // Reading the SSID is gated on the permission and the announcer flag but
+  // *not* on there being a rule, which is the chicken and the egg: the
+  // settings form offers "you are on cloudhouse-internet - what is that?",
+  // and it cannot offer that until something has looked. It costs one local
+  // process every few minutes and no Graph request at all; reporting is what
+  // waits for a rule, in reportWifiLocation.
+  readonly property bool watchingWifi: canSetLocation && notifies && signedIn
+
+  // Null when no rule applies, which is not the same as a rule saying to
+  // report nothing - see Model.autoLocationFor. Null leaves the layer alone
+  // entirely, because a network nobody has said anything about is not a
+  // statement that they are not in the office.
+  readonly property var wifiLocation: Model.autoLocationFor(currentSsid, wifiRules, buildings)
+
+  function readSsid() {
+    if (!watchingWifi || ssidProc.running) return
+    // NetworkManager rather than the wireless interface: Quickshell's
+    // Networking module reports whether wifi is on but never which network,
+    // and nmcli is on every machine that has NetworkManager - which is every
+    // machine Omarchy runs on.
+    ssidProc.command = ["nmcli", "-t", "-f", "active,ssid", "dev", "wifi"]
+    ssidProc.running = true
+  }
+
+  Process {
+    id: ssidProc
+    running: false
+    stdout: StdioCollector { id: ssidOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      // No wifi hardware, or nmcli missing: an empty SSID, which a catch-all
+      // rule can still answer and a named one cannot. Not an error anybody
+      // needs telling about.
+      root.currentSsid = exitCode === 0 ? Model.ssidOf(ssidOut.text) : ""
+      root.reportWifiLocation()
+    }
+  }
+
+  function reportWifiLocation() {
+    if (!watchingWifi || autoLocationProc.running || pluginDir === "") return
+    if (wifiRules.length === 0) return
+    if (setting("demo", false) === true) return
+    var wanted = wifiLocation
+    // A network with no rule for it: leave whatever is there. Withdrawing on
+    // an unknown network would make the layer flap every time somebody
+    // tethered to their phone.
+    if (!wanted) return
+    var mark = String(wanted.state) + ":" + String(wanted.placeId || "")
+    if (mark === reportedLocation) return
+    var command = ["python3", helper(), "auto-location", "--account", alias,
+                   "--state", String(wanted.state)]
+    if (String(wanted.placeId || "") !== "")
+      command.push("--place", String(wanted.placeId))
+    autoLocationProc.command = command
+    autoLocationProc.running = true
+  }
+
+  Process {
+    id: autoLocationProc
+    running: false
+    stdout: StdioCollector { id: autoLocationOut; waitForEnd: true }
+    onExited: function(exitCode) {
+      var parsed = Model.parseJson(autoLocationOut.text, null)
+      if (exitCode !== 0 || !parsed || parsed.ok === false) {
+        // Not surfaced in the window, the same as the presence heartbeat:
+        // this is a background report nobody asked for by hand, and a line of
+        // red over the conversation list is not how to say that a location is
+        // stale. The picker's own errors are the ones worth showing.
+        root.reportedLocation = ""
+        return
+      }
+      root.reportedLocation = String(parsed.state || "") + ":" + String(parsed.placeId || "")
+      // Read the aggregate back, because what was reported is not necessarily
+      // what wins: a location picked by hand outranks this one, and the chip
+      // should say what other people see.
+      root.refresh()
+    }
+  }
+
+  // Walking between buildings is a slower thing than walking away from the
+  // desk, so this is checked oftener than the presence session is renewed but
+  // nowhere near as often as messages are polled.
+  Timer {
+    id: wifiTimer
+    interval: 3 * 60 * 1000
+    repeat: true
+    running: root.watchingWifi
+    triggeredOnStart: true
+    onTriggered: root.readSsid()
+  }
+
+  // Coming back onto a network should move it now rather than at the next
+  // tick. The gate's connectivity signal is the closest thing to "the network
+  // changed" that reaches this file, and re-reading the SSID on a spurious
+  // one costs a local process and nothing else.
+  Connections {
+    target: poll
+    // `offline` is the closest thing to "the network changed" that reaches
+    // this file - it follows NetworkManager's connectivity - and re-reading
+    // the SSID on a spurious one costs a local process and nothing else.
+    function onOfflineChanged() { if (root.watchingWifi) root.readSsid() }
+  }
+
+  // A rule edited in the settings form, or a building list that has just
+  // arrived and resolved a rule that could not be read before.
+  onWifiLocationChanged: if (watchingWifi) reportWifiLocation()
 
   // ---- holding a session open --------------------------------------------
   //
@@ -890,10 +1079,21 @@ Item {
   onWantedSessionPresenceChanged: if (holdTimer.running) holdSession(wantedSessionPresence)
 
   // Letting go on the way out, so a shell that is shut down does not leave the
-  // user looking available for the rest of the hour.
-  Component.onDestruction: if (holdPresence && canSetPresence && notifies && heldPresence !== "") {
-    Quickshell.execDetached(["python3", helper(), "hold-presence", "--account", alias,
-                             "--state", "none"])
+  // user looking available for the rest of the hour - and does not leave this
+  // machine claiming to be in a building it was last seen in. Both in one
+  // handler because QML takes one per signal per file: a second
+  // Component.onDestruction is the same property assigned twice, and the file
+  // then does not load at all.
+  //
+  // The wifi half withdraws only what this machine actually reported.
+  // Clearing a layer we never wrote would tread on another client's answer.
+  Component.onDestruction: {
+    if (holdPresence && canSetPresence && notifies && heldPresence !== "")
+      Quickshell.execDetached(["python3", helper(), "hold-presence", "--account", alias,
+                               "--state", "none"])
+    if (watchingWifi && reportedLocation !== "")
+      Quickshell.execDetached(["python3", helper(), "auto-location", "--account", alias,
+                               "--state", "none"])
   }
 
   function react(messageId, emoji, remove) {
@@ -1742,6 +1942,7 @@ Item {
     // itself - see the comment on SCOPES_FILES in teams.py.
     if (wantFiles) command.push("--files")
     if (wantPresence) command.push("--presence")
+    if (wantPlaces) command.push("--places")
     if (wantCalendar) command.push("--calendar")
     if (wantCalendarWrite) command.push("--calendar-write")
     loginStartProc.command = command

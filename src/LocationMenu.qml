@@ -32,18 +32,35 @@ Column {
   // Automatic leads, the same as the presence picker: handing the location
   // back is the state the other three are a departure from, and it is the row
   // somebody who said "remote" on Monday is looking for on Wednesday.
-  readonly property var rows: [{
-    state: "auto", label: "Automatic", hint: "whatever your working hours say"
-  }].concat(service ? service.locationChoices : [])
+  //
+  // Then the buildings, if this sign-in may list them. They are `office`
+  // rows with a place on them rather than a state of their own - which is
+  // what setManualLocation takes - so "In the office" above them is the same
+  // choice without a building, and stays for anybody whose tenant lists
+  // none. Capped, because a row here is numbered with a digit and four are
+  // already spoken for; the settings form lists every one.
+  readonly property var rows: {
+    var base = [{
+      state: "auto", label: "Automatic", hint: "whatever your working hours say", placeId: ""
+    }].concat(service ? service.locationChoices : [])
+    if (!service) return base
+    var places = (service.buildings || []).slice(0, Model.buildingMenuCap())
+    for (var i = 0; i < places.length; i++)
+      base.push({ state: "office", placeId: String(places[i].id || ""),
+                  label: String(places[i].name || ""),
+                  hint: String(places[i].label || "") })
+    return base
+  }
 
   // Told, so a host can shut its own overlay on the way out.
   signal chose(string state)
 
   function pickAt(index) {
     if (!service || index < 0 || index >= rows.length) return
-    var state = String(rows[index].state || "")
+    var row = rows[index]
+    var state = String(row.state || "")
     root.chose(state)
-    service.setLocation(state)
+    service.setLocation(state, String(row.placeId || ""))
   }
 
   spacing: Style.spacing.xs
@@ -79,14 +96,18 @@ Column {
 
       readonly property var now: root.service ? root.service.myLocation : null
 
-      // Which row is true right now. Unlike the presence picker, Automatic is
-      // a row that can be ticked here: Graph aggregates three layers and says
-      // in `source` which of them won, so "nothing has been said about today"
-      // is a state it will actually report rather than one we would have to
-      // infer from the absence of a memory.
+      // Which row is true right now, compared on the place as well as the
+      // state: "In the office" and a building are both `office` rows, and
+      // without the place both would be ticked.
+      //
+      // Automatic can be ticked here, which it cannot in the presence picker.
+      // Graph aggregates three layers and names the winner in `source`, so
+      // "nothing has been said about today" is a state it will report rather
+      // than one that would have to be inferred from the absence of a memory.
       readonly property bool current: String(modelData.state || "") === "auto"
         ? (!!root.service && root.service.signedIn && !now)
-        : (!!now && String(now.state || "") === String(modelData.state || ""))
+        : (!!now && String(now.state || "") === String(modelData.state || "")
+           && String(now.placeId || "") === String(modelData.placeId || ""))
 
       // And where the winning layer came from, for the row that won it. A
       // location the calendar expects and a location somebody chose read the
@@ -95,8 +116,13 @@ Column {
         if (!line.current || !now) return ""
         var source = String(now.source || "")
         if (source === "scheduled") return "from your working hours"
-        if (source === "automatic") return "noticed by a Teams client"
-        return ""
+        if (source !== "automatic") return ""
+        // The automatic layer is one this plugin may have written itself, and
+        // "from your wifi" is a truer thing to say about it than "a Teams
+        // client noticed" when the client was this one.
+        var mine = root.service ? String(root.service.reportedLocation || "") : ""
+        var here = String(now.state || "") + ":" + String(now.placeId || "")
+        return mine !== "" && mine === here ? "from your wifi" : "noticed by a Teams client"
       }
 
       width: parent ? parent.width : 0

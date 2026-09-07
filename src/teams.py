@@ -112,6 +112,18 @@ SCOPES_PRESENCE = " Presence.ReadWrite"
 SCOPES_CALENDAR = " Calendars.Read"
 SCOPES_CALENDAR_WRITE = " Calendars.ReadWrite"
 
+# Your buildings are a sixth tier, and admin consent for the second time.
+# Setting a work location needs no more than Presence.ReadWrite, building and
+# all - a placeId is a string as far as that call is concerned. What needs a
+# permission is *learning* the buildings: their names and ids live in the
+# Places directory behind Place.Read.All, which an administrator has to
+# consent to and which a registration has to declare. So it is opt-in twice
+# over, and the graceful path when it is refused is the one the plugin had
+# before: the picker offers "In the office" with no building under it, which
+# is what Teams itself falls back to when only an SSID list is configured and
+# no building mapping.
+SCOPES_PLACES = " Place.Read.All"
+
 STATE_DIR = os.path.join(
     os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state")),
     "omarchy",
@@ -123,10 +135,12 @@ CHAT_CAP = 40
 TEAM_CAP = 30
 CHANNEL_CAP = 40
 MESSAGE_CAP = 50
+BUILDING_CAP = 40
 MAX_RESPONSE_BYTES = 8 * 1024 * 1024
 
 
-def scopes_for(channels, files=False, presence=False, calendar=False, calendar_write=False):
+def scopes_for(channels, files=False, presence=False, calendar=False, calendar_write=False,
+               places=False):
     scopes = SCOPES_CHANNELS if channels else SCOPES_CHATS
     if calendar_write:
         calendar_scope = SCOPES_CALENDAR_WRITE
@@ -135,7 +149,7 @@ def scopes_for(channels, files=False, presence=False, calendar=False, calendar_w
     else:
         calendar_scope = ""
     return (scopes + (SCOPES_FILES if files else "") + (SCOPES_PRESENCE if presence else "")
-            + calendar_scope)
+            + calendar_scope + (SCOPES_PLACES if places else ""))
 
 
 def scopes_held_by(account):
@@ -150,7 +164,8 @@ def scopes_held_by(account):
     off an account at its first refresh, an hour after signing in.
     """
     return scopes_for(has_channels(account), can_upload(account), can_set_presence(account),
-                      can_see_calendar(account), can_write_calendar(account))
+                      can_see_calendar(account), can_write_calendar(account),
+                      can_read_places(account))
 
 
 # --------------------------------------------------------------------------
@@ -458,7 +473,7 @@ def cmd_login_start(args):
         data={"client_id": client_id,
               "scope": scopes_for(args.channels, args.files, args.presence,
                                   args.calendar or args.calendar_write,
-                                  args.calendar_write)},
+                                  args.calendar_write, args.places)},
     )
     if status != 200 or "device_code" not in payload:
         fail("devicecode_failed",
@@ -1045,6 +1060,7 @@ def fetch_account(alias, args):
         "canStartChat": can_create_chat(account) and can_find_people(account),
         "presence": can_see_presence(account),
         "canSetPresence": can_set_presence(account),
+        "canReadPlaces": can_read_places(account),
         "calendar": can_see_calendar(account),
         "canWriteCalendar": can_write_calendar(account),
         "me": None,
@@ -1387,6 +1403,16 @@ def can_upload(account):
 def can_see_presence(account):
     """Whether this sign-in may read other people's presence."""
     return "presence.read.all" in str((account or {}).get("scopes", "")).lower()
+
+
+def can_read_places(account):
+    """Whether this sign-in may list the tenant's buildings.
+
+    Place.Read.All, which is admin consent - so a tenant that will not grant
+    it leaves the work-location picker exactly as it was, offering "In the
+    office" and no building. Nothing else in the plugin depends on it.
+    """
+    return "place.read" in str((account or {}).get("scopes", "")).lower()
 
 
 def can_set_presence(account):
@@ -1768,6 +1794,119 @@ def cmd_location(args):
         fail("location_failed",
              friendly(graph_error(payload, "Could not set your work location")))
     out({"ok": True, "state": "auto" if clearing else state})
+
+
+DEMO_BUILDINGS = [
+    {"id": "demo-building-0", "placeId": "demo-building-0", "displayName": "Hauptgebäude",
+     "label": "HQ", "hasWiFi": True},
+    {"id": "demo-building-1", "placeId": "demo-building-1", "displayName": "Werkstatt Nord",
+     "label": "", "hasWiFi": True},
+]
+
+
+def building_row(place):
+    """One building, as the picker and the settings form want it.
+
+    `placeId` rather than `id` is what the presence calls take, and Places
+    answers with both - equal in every example, but it is the documented name
+    for the thing being passed and worth reading rather than assuming.
+    """
+    place_id = str(place.get("placeId") or place.get("id") or "")
+    return {
+        "id": place_id,
+        "name": (place.get("displayName") or place.get("label") or place_id).strip(),
+        # Whatever the tenant wrote in the building's label - "HQ", "the one
+        # with the canteen" - which is often what people actually call it.
+        "label": (place.get("label") or "").strip(),
+    }
+
+
+def cmd_buildings(args):
+    """The tenant's buildings, so a work location can name one.
+
+    Two things make this answer empty without anything being broken, and both
+    are said rather than left looking like a failure: a sign-in without
+    Place.Read.All, and a tenant that has not made its buildings visible -
+    Places hides them until `Set-PlacesSettings -EnableBuildings` is run, and
+    then this endpoint answers 200 with nothing in it.
+    """
+    if args.demo:
+        out({"ok": True, "buildings": [building_row(row) for row in DEMO_BUILDINGS], "note": ""})
+
+    account = read_json(state_path(args.account))
+    if not account:
+        fail("auth_required", "Not signed in")
+    if not can_read_places(account):
+        fail("places_permission_required",
+             "This sign-in cannot list your buildings. It needs Place.Read.All, which an "
+             "administrator has to consent to for the tenant - see the plugin's README.")
+    try:
+        token, account = access_token(args.account, account)
+    except AccountError as error:
+        fail(error.code, error.message)
+
+    status, payload = http(
+        GRAPH + "/places/microsoft.graph.building",
+        headers={"Authorization": "Bearer " + token},
+    )
+    if status == 403:
+        fail("places_permission_required",
+             friendly(graph_error(payload, "This sign-in may not list your buildings")))
+    if status != 200:
+        fail("places_failed", friendly(graph_error(payload, "Could not list your buildings")))
+
+    rows = [building_row(row) for row in payload.get("value", [])[:BUILDING_CAP]]
+    rows = [row for row in rows if row["id"]]
+    note = ""
+    if not rows:
+        note = ("This tenant lists no buildings. Places hides them until an administrator "
+                "runs Set-PlacesSettings -EnableBuildings 'Default:true'.")
+    out({"ok": True, "buildings": rows, "note": note})
+
+
+def cmd_auto_location(args):
+    """The automatic layer: this machine reporting where it thinks it is.
+
+    The layer Graph documents for "network and location agents", which is what
+    this becomes when it is told which wifi means which building - and the
+    reason it is this layer rather than the manual one: manual beats automatic,
+    so a location the user picked by hand still stands while they are sitting
+    on the office wifi. Leaving the network clears it and the schedule shows
+    through again.
+
+    Graph will not say which SSID means which building - that mapping lives in
+    Exchange, behind Places PowerShell, and no Graph endpoint exposes it - so
+    the map is the plugin's own setting and this command is told the answer
+    rather than working it out.
+    """
+    state = str(args.state or "").strip().lower()
+    clearing = state in ("none", "off", "") or state in CLEAR_WORDS
+    kind = location_kind(state)
+    if not clearing and not kind:
+        fail("bad_location", "Teams does not take %s as a work location" % state)
+
+    if args.demo:
+        out({"ok": True, "state": "none" if clearing else state,
+             "placeId": "" if clearing else str(args.place or "")})
+
+    if clearing:
+        verb, body = "clearAutomaticLocation", {}
+    else:
+        verb, body = "setAutomaticLocation", {"workLocationType": kind}
+        place = str(getattr(args, "place", "") or "").strip()
+        if place:
+            body["placeId"] = place
+
+    status, payload = presence_call(args, verb, body, what="this machine's work location")
+    # Clearing a layer that was never set is the state being asked for rather
+    # than a failure, the same as letting go of an expired presence session.
+    if clearing and status == 404:
+        out({"ok": True, "state": "none", "placeId": "", "alreadyGone": True})
+    if status not in (200, 201, 204):
+        fail("location_failed",
+             friendly(graph_error(payload, "Could not report this machine's work location")))
+    out({"ok": True, "state": "none" if clearing else state,
+         "placeId": "" if clearing else str(getattr(args, "place", "") or "")})
 
 
 def person_row(person, kind):
@@ -3075,6 +3214,7 @@ def demo_account(alias):
         "canUpload": True,
         "canStartChat": True,
         "canSetPresence": True,
+        "canReadPlaces": True,
         "calendar": True,
         "canWriteCalendar": True,
         "me": {"state": "available", "availability": "Available", "activity": "Available",
@@ -3362,6 +3502,9 @@ def main():
     start.add_argument("--presence", action="store_true",
                        help="also ask for Presence.ReadWrite, for setting your own presence "
                             "(admin consent)")
+    start.add_argument("--places", action="store_true",
+                       help="also ask for Place.Read.All, for listing the tenant's buildings "
+                            "(admin consent)")
     start.add_argument("--calendar", action="store_true",
                        help="also ask for Calendars.Read, for the calendar")
     start.add_argument("--calendar-write", action="store_true",
@@ -3443,6 +3586,20 @@ def main():
 
     sub.add_parser("location-states", help="the work locations that can be set") \
         .set_defaults(func=cmd_location_states)
+
+    buildings = with_account("buildings", "the tenant's buildings, for naming a work location")
+    buildings.add_argument("--demo", action="store_true")
+    buildings.set_defaults(func=cmd_buildings)
+
+    auto = with_account("auto-location",
+                        "report where this machine thinks it is - the automatic layer")
+    auto.add_argument("--state", required=True,
+                      help="office, remote, timeoff - or none to withdraw what this machine "
+                           "reported and let the schedule show through")
+    auto.add_argument("--place", default="",
+                      help="a building id from `buildings`, for office")
+    auto.add_argument("--demo", action="store_true")
+    auto.set_defaults(func=cmd_auto_location)
 
     hold = with_account("hold-presence", "keep a presence session open, so a presence can show")
     hold.add_argument("--state", default="available",

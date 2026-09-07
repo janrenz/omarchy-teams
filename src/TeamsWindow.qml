@@ -38,6 +38,9 @@ Item {
   // The toplevel itself, so a harness can photograph what this draws without
   // the shell in the way. Nothing in the plugin uses it.
   readonly property alias floatingWindow: window
+  // For the harness alone: an id is scoped to the file it is written in, so
+  // scrolling the settings pane from outside needs a name on the root.
+  readonly property alias settingsScroll: settingsScroll
 
   function open(payloadJson) {
     closingFromHost = false
@@ -1697,6 +1700,7 @@ Item {
                   visible: service.signedIn && service.canSetLocation && !root.showSettings
                   location: service.myLocation
                   choices: service.locationChoices
+                  buildings: service.buildings
                   busy: service.settingLocation
                   fg: Color.foreground
                   fontFamily: Style.font.family
@@ -1961,7 +1965,10 @@ Item {
           }
 
           // ---------------- settings ----------------
+          // Named so the harness can scroll it: offscreen there is no wheel
+          // and no keyboard, and this pane is taller than one screenful.
           ScrollView {
+            id: settingsScroll
             width: parent.width
             height: parent.height - y
             visible: root.showSettings

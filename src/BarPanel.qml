@@ -305,6 +305,7 @@ Panel {
                 visible: !!root.service && root.service.signedIn && root.service.canSetLocation
                 location: root.service ? root.service.myLocation : null
                 choices: root.service ? root.service.locationChoices : []
+                buildings: root.service ? root.service.buildings : []
                 busy: !!root.service && root.service.settingLocation
                 fg: root.fg
                 fontFamily: root.fontFamily

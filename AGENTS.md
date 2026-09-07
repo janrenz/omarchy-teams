@@ -36,6 +36,8 @@ src/LocationChip.qml    The other chip beside it: where you are working from.
 src/LocationMenu.qml    Its picker. A file of its own rather than four more
                         rows in PresenceMenu, because Graph writes the two
                         with different calls and ten rows outrun the digits.
+                        Buildings are extra `office` rows with a place on
+                        them, capped at Model.buildingMenuCap().
 src/TeamsWindow.qml     The window. Sidebar, transcript, message box, and the
                         calendar beside them - `pane` says which of the two is
                         on screen. Also the file chooser and the window-wide
@@ -256,6 +258,21 @@ are silent on a two-handler file that the engine then refuses - so a full
 `dev/run.sh` after touching a signal handler is what catches it. A harness that
 comes up is the proof; `run.sh` reporting that it never came up is the failure.
 
+`dev calendar`'s neighbours for the work location are `dev location`, `dev
+pickLocation <n>`, `dev wifi <ssid>` - which *tells* the service what network
+it is on, because the harness is never on the one the fixtures describe - and
+`dev settings <on> <fraction>`, which opens the settings pane and scrolls it,
+since the wifi rules are edited there and `,` never reaches an offscreen
+window.
+
+**A relative JS import in `dev/shell.qml` resolves against the stage, not the
+repo.** `import "Model.js"`, the same as every file in `src/`, because
+`link.sh` puts Model.js beside it there. The repo-relative `"../src/Model.js"`
+is what looks right, resolves when `qmlformat` reads it, and is then
+"Ignoring unresolvable import" at load - which costs the whole config, not one
+binding, and `run.sh` still says "harness up". **`run.sh` reporting that is not
+proof the config loaded**; an `ipc call` that answers is.
+
 `dev/link.sh` assembles a Quickshell config folder in
 `$XDG_RUNTIME_DIR/omarchy-teams-dev` (`dev/stage.sh` decides where, and refuses
 to fall back to shared temp) and symlinks the sources plus `dev/shell.qml` into
@@ -370,6 +387,40 @@ fatal QML error makes it exit instead.
   application, not the machine, so two machines renew one session - which is
   also why the heartbeat sits behind `notifies`, the same "one of the three
   Services does this" flag the notifications use.
+- **The wifi-to-building map is the tenant's, and Graph will not hand it
+  over.** Teams on Windows sets a work location from the network because an
+  administrator listed the office SSIDs (`Set-PlacesSettings -Collection
+  Presence -WorkplaceWifiNetworkSSIDList`) and mapped access points to
+  buildings with a BSSID CSV. Both live in Exchange PowerShell; **no Graph
+  endpoint exposes either**, checked. So `wifiLocations` is the user's own copy
+  of the part that concerns them, `Model.autoLocationFor` is the whole of the
+  decision, and the settings form says where the list comes from rather than
+  leaving somebody hunting for a sync that does not exist.
+
+  Which layer it writes is the load-bearing choice. `setAutomaticLocation`, not
+  `setManualLocation`: manual beats automatic, so a location picked by hand
+  survives sitting on the office wifi, and Graph documents the automatic layer
+  for exactly this - "network and location agents". Writing the manual layer
+  from a timer would overwrite the user every three minutes.
+
+  Two things follow from the layer being per *user*. Graph keeps one automatic
+  location, not one per device, so two desktops running this plugin talk over
+  each other - said in the README rather than worked around, because there is
+  nowhere to work around it. And the SSID read is gated on the permission but
+  **not** on a rule existing: the settings form's whole flow is "you are on
+  cloudhouse-internet, what is that?", and it cannot ask until something has
+  looked. Reporting is what waits for a rule.
+- **Buildings cost a permission for their *names*, not for being set.** A
+  `placeId` is a string as far as `setManualLocation` is concerned, so setting
+  a building needs nothing beyond `Presence.ReadWrite`. Listing the buildings
+  is `Place.Read.All` - admin consent, and a new tier, so invariant 8 applies:
+  it went on the registration before the version asking for it shipped. Its
+  graceful path is the picker the plugin already had, which is also what Teams
+  falls back to when a tenant configures SSIDs and no building mapping. One
+  more trap: Places answers `200` with an empty list until an administrator
+  runs `Set-PlacesSettings -EnableBuildings 'Default:true'`, which from the
+  outside looks exactly like a bug - hence the `note` the helper prints and the
+  form shows.
 - **A work location is three answers, and Graph says which one it used.**
   `presence.workLocation` is an *aggregate* of a manual choice, a client's
   detection and the working-hours schedule, in that order, and `source` names

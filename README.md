@@ -12,7 +12,8 @@ Teams chats, channels and your calendar in the Omarchy bar, and in a window of t
 - **Emoji, inline images and clickable links** in the transcript. Both kinds of link: an address somebody typed out in full, and one behind its own words — the composer's link button writes `<a href="…">the release notes</a>`, and the words are all a reader would otherwise get. They open in your browser, tinted from the running theme rather than in Qt's blue.
 - **Presence.** Beside each one-to-one chat: a filled circle for available, a filled circle for busy, a ring for away, a dim circle for offline — in the running theme's own colours. Group chats have none, because a group is not away. Told apart from unread by shape and place, not by hue: presence sits immediately in front of the name because it is about the person, unread is a bar down the leading edge because it is about the conversation, and a chat can show both. Needs `Presence.Read.All` — ordinary user consent.
 - **Your own presence, set from here.** `p`, or the dot in the header: Available, Busy, Do not disturb, Be right back, Appear away, Appear offline, and *Automatic* to hand it back to Teams. It is the client's own status menu, written through Graph, and it sticks until you hand it back. This one needs `Presence.ReadWrite`, which an administrator has to consent to — writing your own presence is the dearer permission, not reading everybody's — so it is off until you turn it on. There is a second setting for the part nobody expects: a presence you set only shows while Teams believes you are signed in *somewhere*, so the plugin can be that somewhere. See [Your presence](#your-presence).
-- **Where you are working from, set from here too.** `w`, or the word beside the presence chip: *In the office*, *Remote*, *Time off*, and *Automatic* to hand it back. Teams keeps it beside your presence rather than inside it, and so does this: a presence says whether you can be interrupted, a location says where you are, and they are two different writes to Graph. Same permission, though — `Presence.ReadWrite` covers both — so there is no second setting and no second sign-in. Graph aggregates three layers behind it and says which one won, so the picker can tell "I chose this" from "my working hours say this". See [Where you are working from](#where-you-are-working-from).
+- **Where you are working from, set from here too.** `w`, or the word beside the presence chip: *In the office*, *Remote*, *Time off*, **your buildings by name**, and *Automatic* to hand it back. Teams keeps it beside your presence rather than inside it, and so does this: a presence says whether you can be interrupted, a location says where you are, and they are two different writes to Graph. Graph aggregates three layers behind it and says which one won, so the picker can tell "I chose this" from "my working hours say this". Naming a building needs `Place.Read.All` — the ids are free, the *names* are the permission — and everything works without it, minus the building. See [Where you are working from](#where-you-are-working-from).
+- **And it can work it out from the wifi**, which is the one thing the Windows client does that a Linux desktop had no way to. Tell it which SSID is which building — once, from the settings panel, while you are standing in the building — and it reports that to Graph as an *automatic* location whenever this machine is on that network, and withdraws it when you leave. A location you pick by hand still wins, because that is what the layers are for. Teams on Windows reads the same mapping out of the tenant's own Places configuration; no Graph endpoint hands that over, so this keeps your copy of the part that concerns you. See [The wifi can decide](#the-wifi-can-decide).
 - **Reactions.** The ones already on a message, counted, with yours marked - click a chip to add or remove yours. The pointer on a chip says who reacted, what Teams calls that reaction, and which of the two a click would do. Reacting is a keyboard job first: `j`/`k` walk the transcript a message at a time, `e` opens the picker on the one under the cursor, and `1`-`6` pick. The mouse can do it too, from the `+` that appears on the message you are pointing at.
 - **Your calendar**, in the same window: `c`, or **Calendar** in the header. Day, work week, week and month; a clock face with overlapping meetings side by side and a line across today; whole-day things in a strip of their own; a month grid that runs into the months either side; and an agenda instead when the window is too narrow for columns. Open a meeting for who is coming and what each of them said, **accept, tentative or decline** with a line for the organiser, **book one** with people from the directory in it, or **call one off**. **Join** hands the link to whatever handles Teams meetings here, which is the one thing a QML window cannot do itself. A notification a few minutes before each one. Needs `Calendars.Read`, and `Calendars.ReadWrite` for anything that changes something — both ordinary user consent. See [Your calendar](#your-calendar).
 - **Keyboard first.** The whole window drives from the keyboard — see below, or press `?` in the window.
@@ -62,7 +63,8 @@ focus".
 
 The dropdown behind the bar icon has its own handful, because it holds its own
 few things: `p` opens the presence picker (`0`–`6` pick, `Escape` goes back),
-`w` the work location picker (`0`–`3`), `m` marks every unread chat read, `o`
+`w` the work location picker (`0`–`3`, then a digit per building), `m` marks
+every unread chat read, `o`
 opens the window, `r` refreshes, `j`/`k` and `Enter` walk what is unread, and
 `Escape` closes it. Either picker closes the other: both take the digits, and
 one of them has to own the keyboard.
@@ -143,7 +145,7 @@ The sign-in goes through this plugin's own app registration, published for accou
 Two things your organisation still decides for itself:
 
 - **Whether it will consent to an app registered elsewhere at all.** Some tenants only let users consent to apps their own administrator has approved or that carry a verified publisher. If the sign-in comes back saying an administrator has to approve it, either ask yours to — the app id is `b4221167-67e0-44ba-b111-9f9d31db87f9` — or [register your own](#bringing-your-own-app-registration), which nobody has to approve because it is already theirs.
-- **The two admin-consent permissions**, `ChannelMessage.Read.All` and `Presence.ReadWrite`. Those need an administrator whichever registration you sign in with — see [If channels are refused](#if-channels-are-refused).
+- **The three admin-consent permissions**, `ChannelMessage.Read.All`, `Presence.ReadWrite` and `Place.Read.All`. Those need an administrator whichever registration you sign in with — see [If channels are refused](#if-channels-are-refused).
 
 ## Bringing your own app registration
 
@@ -171,6 +173,7 @@ An Azure app registration declares up front which delegated permissions it is al
    | `Presence.Read.All` | the presence dot beside a one-to-one chat | user |
    | `Files.ReadWrite` | sending a file into a chat — optional, see below | user |
    | `Presence.ReadWrite` | setting your own presence and work location — optional, see below | **admin** |
+   | `Place.Read.All` | naming a building in your work location — optional, see below | **admin** |
    | `Calendars.Read` | your calendar — optional, see below | user |
    | `Calendars.ReadWrite` | answering an invitation, booking a meeting, calling one off — optional, see below | user |
 
@@ -203,11 +206,21 @@ An Azure app registration declares up front which delegated permissions it is al
    never asks for that. Declaring it does no harm; it just does nothing.
 
    `Presence.ReadWrite` is opt-in for that reason *and* because of consent. It
-   is the only permission besides the channel ones that needs an administrator:
-   reading the whole organisation's presence is ordinary user consent, and
-   writing your own is not. So a sign-in that asks for it without the grant
-   fails outright, which is why it waits for **Set your presence** to be turned
-   on. Everything else is unaffected either way.
+   is one of three permissions here that need an administrator — the other two
+   being `ChannelMessage.Read.All` and `Place.Read.All` — where reading the
+   whole organisation's presence is ordinary user consent and writing your own
+   is not. So a sign-in that asks for it without the grant fails outright,
+   which is why it waits for **Set your presence and work location** to be
+   turned on. Everything else is unaffected either way.
+
+   `Place.Read.All` is the same shape and worth being clear about what it is
+   *for*: setting a building needs nothing beyond `Presence.ReadWrite`, because
+   a building is a `placeId` and that is a string as far as the presence call
+   is concerned. What needs the permission is **learning which buildings exist
+   and what they are called**. Refused, the work-location picker is the one it
+   was before — *In the office* with no building under it, which is also what
+   Teams itself falls back to when a tenant has configured office SSIDs and no
+   building mapping. Nothing else in the plugin depends on it.
 
 5. Copy the **Application (client) ID**.
 6. In Omarchy, open the Teams widget's settings and put it in **Azure client id**. A single-tenant registration also needs its tenant id in **Authority**; `common` is for multi-tenant ones.
@@ -244,6 +257,8 @@ own.
 | `sendFiles` | `false` | Whether to ask for `Files.ReadWrite` at sign-in, which is what an **Attach** button needs. The plugin's registration declares it; a registration of your own has to as well. |
 | `setPresence` | `false` | Whether to ask for `Presence.ReadWrite` at sign-in, which is what `p`, `w` and the two status chips need. An administrator has to consent to it whichever registration you use. |
 | `holdPresence` | `false` | Whether to hold a presence session open for this machine, so a presence you set has something to show against. Needs `setPresence`. |
+| `readPlaces` | `false` | Whether to ask for `Place.Read.All` at sign-in, which is what lets the picker and the wifi rules name a building rather than just *In the office*. Admin consent. Needs `setPresence`. |
+| `wifiLocations` | `[]` | One rule per line, `ssid = where` — a building's name, `office`, `remote`, `timeoff`, or `none` to report nothing there; `*` as the ssid is any other network. Tick them in the window's settings rather than writing them here. |
 | `calendar` | `false` | Whether to ask for `Calendars.Read` at sign-in, which is what the calendar pane needs. |
 | `calendarWrite` | `false` | Whether to ask for `Calendars.ReadWrite` instead, which is what answering an invitation, booking a meeting and calling one off need. Needs `calendar`. |
 | `calendarIds` | — | Which calendars the pane draws, as Graph's ids — tick them in the window's settings rather than writing them here. Empty means your calendar alone. At most 8 are drawn. Needs no permission beyond `calendar`. |
@@ -435,15 +450,37 @@ are, and Graph writes them with two different calls.
 |---|---|
 | `0` | **Automatic** — hand it back to whatever your working hours say |
 | `1`–`3` | In the office, Remote, Time off |
+| `4`… | Your buildings, by name — with `Place.Read.All`, see below |
 
-Three, because those are the three `setManualLocation` takes. Graph's fourth
-value, `unspecified`, is what it *reports* when nothing has been said about
-today — a state to read and never one to send, so the picker does not offer it
-and row 0 does the job it would have done.
+Three states, because those are the three `setManualLocation` takes. Graph's
+fourth value, `unspecified`, is what it *reports* when nothing has been said
+about today — a state to read and never one to send, so the picker does not
+offer it and row 0 does the job it would have done.
 
-No second permission and no second sign-in: `Presence.ReadWrite` covers both
-writes, so turning **Set your presence and work location** on turns both on
-together. If the picker is there, this is there.
+A building is not a fourth state: it is *In the office* with a `placeId` on it,
+which is exactly what the call takes, so row 1 stays for the days you are in
+the building and cannot be bothered to say which. Six buildings are numbered,
+because a row here is a single digit and four are already spoken for; the rest
+are still there in the settings panel.
+
+### Naming a building
+
+The ids are free — pass one to `location --place` and Graph takes it. The
+*names* are the permission: `Place.Read.All`, admin consent, and the tenant
+must also have made its buildings visible with
+`Set-PlacesSettings -EnableBuildings 'Default:true'` or the endpoint answers
+politely with nothing. Turn on **List your buildings** in the widget's
+settings, sign in again, and the picker grows the extra rows. Refused or not
+configured, the picker is exactly what it was.
+
+The plugin says which of those two it is rather than showing an empty list: an
+answer with no buildings in it and a permission that was never granted look
+identical from the outside, and only one of them is anybody's to fix.
+
+Setting one costs no second permission and no second sign-in:
+`Presence.ReadWrite` covers both writes, so turning **Set your presence and
+work location** on turns both on together. If the presence picker is there,
+this one is there. Only *naming a building* asks for anything more.
 
 ### Three layers, and which one won
 
@@ -454,15 +491,71 @@ is why a *Remote* chosen this morning outlives a schedule that expected you in
 the building.
 
 And it reports which layer won, which the presence cannot do: the picker ticks
-the row that is true and says *from your working hours* or *noticed by a Teams
-client* when the answer is not one you gave. **Automatic** is ticked when no
-layer has anything to say, so a day nobody has decided about looks like one.
+the row that is true and says *from your working hours*, *from your wifi*, or
+*noticed by a Teams client* when the answer is not one you gave — the middle
+one where the winning report is the one this plugin made itself. **Automatic**
+is ticked when no layer has anything to say, so a day nobody has decided about
+looks like one.
 
 Handing it back clears the manual layer **and** the automatic one for today —
 that is what Graph's `clearLocation` does, not an extra this plugin chose —
 leaving the schedule, and nothing at all if the schedule is silent. A tenant
 with Microsoft Places switched off has no layers to aggregate, and the chip
 then says *work location* rather than inventing a place.
+
+## The wifi can decide
+
+The Windows client sets your work location on its own from the wireless
+network, and it can do that because an administrator has listed the office
+SSIDs in Places and mapped access points to buildings. **No Graph endpoint
+exposes either list** — it is Exchange PowerShell all the way down — so this
+plugin cannot read the tenant's mapping and does not pretend to. It keeps your
+copy of the part that concerns you instead.
+
+Which is one setting, and best made from the settings panel while you are
+sitting in the building:
+
+> **You are on cloudhouse-internet. What is that?**
+> ☑ Hauptgebäude · HQ  ☐ Werkstatt Nord  ☐ In the office  ☐ Remote  ☐ Time off
+> ☐ Report nothing here
+
+Tick one and that is the rule. Written out, rules look like this, and
+`shell.json` is welcome to hold them directly:
+
+```
+cloudhouse-internet = Hauptgebäude
+gaeste-wlan         = remote
+*                   = none
+```
+
+The right-hand side is a building's name, its label, its id, or one of
+`office`, `remote`, `timeoff`, `none`. `*` is any other network. A rule
+pointing at a building nobody answers to — one renamed in Places, say — is
+shown as a problem rather than quietly doing nothing, which is the whole
+failure mode of a mapping like this.
+
+**It writes the automatic layer, not the manual one.** That is the difference
+between a convenience and a nuisance: manual beats automatic, so *Remote*
+picked by hand on a Tuesday morning still stands while you sit on the office
+wifi, and the plugin's report shows through again the moment you hand the
+manual one back. Walking to a network you have said nothing about leaves your
+location alone rather than clearing it — tethering to a phone should not
+announce anything — and only a rule saying `none` withdraws what this machine
+reported.
+
+The network is checked every three minutes, and again when NetworkManager says
+connectivity changed, so walking between buildings moves it without waiting for
+a tick. The SSID comes from `nmcli`; Quickshell's own networking module reports
+whether wifi is on but never which network. And it is let go when the shell
+stops, so a laptop shut at the office does not leave this machine claiming to
+be there.
+
+Two honest limits, both from the layer being shared. Graph keeps **one**
+automatic location per user, not one per device, so two machines running this
+plugin on different networks will talk over each other — the last one to
+report wins. And the picker says *from your wifi* rather than *noticed by a
+Teams client* only when the winning report is the one this plugin made; when
+another client got there first it cannot tell you which.
 
 ## Your calendar
 
@@ -599,7 +692,9 @@ Two places where the obvious reading is wrong, and both are covered by tests:
 - **No reminders inside the window**, and none for what is already running: the notification is the reminder, it comes from the poll rather than from a timer of its own, and what was under way when the shell started is not announced.
 - **No search, in a calendar or anywhere else.** Graph has one; this plugin does not use it. Step to the week.
 - **No status message.** Teams lets you write a line of text under your presence, and Graph will take one. The six states are what the picker offers; a text field with an expiry and an @-mention picker in it is a different feature, and it is not here yet.
-- **A work location, but not a desk.** *In the office* is as specific as the picker gets. Graph will take a `placeId` — a particular building out of the Microsoft Places directory — but reading that directory is another permission for another release, and a picker whose rows were GUIDs would be worse than one that says "the office". `location --place` on the helper passes one through for anybody who has the id already.
+- **A building, but not a floor or a desk.** Places has floors, sections, desks and rooms under a building, and Graph's work location will take any place id. The picker lists buildings alone: a floor is not what anybody means by "where are you working from", and the list would stop being a list. `location --place` passes any id through for anybody who wants one.
+- **The wifi rules are per user, not per tenant.** Teams on Windows reads the office SSIDs and the access-point-to-building mapping out of the tenant's Places configuration; no Graph endpoint exposes either, so this plugin cannot inherit yours and you tell it once instead. See [The wifi can decide](#the-wifi-can-decide).
+- **One automatic location per user, not per machine.** Graph keeps a single automatic layer, so two desktops running this plugin on different networks overwrite each other and the last report wins. Nothing to be done about it from here; it is where Graph put the state.
 - **No "in a call", and no reading back which presence you chose.** Both for the same reason: the plugin will not report something it does not know. See [Your presence](#your-presence).
 
 ## Development
@@ -634,6 +729,45 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.10.0 — 2026-09-07
+
+- **Your buildings, by name.** The work-location picker grows a row per
+  building under *In the office* — `4` onwards — and the chip then says
+  *Hauptgebäude* rather than *in the office*, which is what everybody else
+  sees anyway. A building is not a fourth state: it is the office row with a
+  `placeId` on it, which is exactly what `setManualLocation` takes.
+  Needs `Place.Read.All`, admin consent, behind a **List your buildings**
+  setting — and it is worth being precise about why, because it is not what it
+  looks like. *Setting* a building needs nothing beyond the presence
+  permission; a `placeId` is a string to that call. *Learning which buildings
+  exist and what they are called* is the part that needs the Places directory.
+  Refused, or a tenant that has not run `Set-PlacesSettings -EnableBuildings`,
+  leaves the picker exactly as it was — and the plugin says which of the two it
+  is rather than showing an empty list.
+- **And it can work the building out from the wifi**, which is the one thing
+  the Windows client did that a Linux desktop had no way to. Tell it which SSID
+  means which building — from the settings panel, which offers the network you
+  are on and the buildings to point it at, so nobody copies a GUID — and it
+  reports that to Graph whenever this machine is on that network.
+- **On the automatic layer, deliberately.** Manual beats automatic, so a
+  location picked by hand still stands while you sit on the office wifi, and
+  the wifi's answer shows through again the moment you hand the manual one
+  back. A network with no rule leaves your location alone rather than clearing
+  it: tethering to a phone should not announce anything. Let go when the shell
+  stops, so a laptop shut at the office does not leave this machine claiming to
+  be there.
+- **The mapping is yours, not the tenant's, and that is not a shortcut.** Teams
+  on Windows reads the office SSIDs and the access-point-to-building mapping
+  out of Places; both live in Exchange PowerShell and no Graph endpoint exposes
+  either, so there is nothing to inherit. The rules say so in the settings
+  panel rather than leaving anybody wondering why their tenant's list did not
+  appear.
+- A rule pointing at a building nobody answers to — one renamed in Places — is
+  shown as a problem instead of quietly doing nothing, which is the failure
+  mode a mapping like this has.
+- The SSID comes from `nmcli`: Quickshell's networking module reports whether
+  wifi is on but never which network.
 
 ### 0.9.0 — 2026-09-07
 

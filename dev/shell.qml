@@ -2,6 +2,12 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+// Plain "Model.js", not "../src/Model.js": a relative import resolves against
+// this file's place in the *stage*, where link.sh has put Model.js beside it -
+// not against where the file really lives. The repo-relative path resolves
+// when qmlformat reads it and is then "unresolvable import" at load, which
+// costs the whole config rather than one binding.
+import "Model.js" as Model
 
 // Development harness: the real window, on fixture data, rendered offscreen.
 //
@@ -48,6 +54,12 @@ ShellRoot {
         // view nobody looks at.
         calendar: true,
         calendarWrite: true,
+        // The buildings and the wifi rules are opt-in on a real account
+        // because their scopes are. In the harness they are always on: the
+        // fixtures answer locally, and the reporting is refused by --demo.
+        setPresence: true,
+        readPlaces: true,
+        wifiLocations: ["demo-wifi = Hauptgebäude", "* = remote"],
         calendarView: dev.calendarView,
         weekStart: "monday",
         // A toast about an invented meeting on a real desktop is exactly what
@@ -182,6 +194,38 @@ ShellRoot {
     function pickLocation(index: int): string {
       panel.locationAt(index)
       return JSON.stringify({ error: panel.teamsService.locationError })
+    }
+
+    // The settings form, which is a pane of the window rather than a window of
+    // its own - and `,` never reaches an offscreen one. Worth a knob because
+    // the wifi rules are edited here and nowhere else.
+    function settings(on: bool, down: real): string {
+      panel.showSettings = on
+      // Down the pane by a fraction of its own content, because a section
+      // near the bottom of it is otherwise unphotographable.
+      var view = panel.settingsScroll
+      if (on && view && down > 0) {
+        var room = Math.max(0, view.contentHeight - view.height)
+        view.contentItem.contentY = room * down
+      }
+      return JSON.stringify({ showSettings: panel.showSettings,
+                              at: view ? view.contentItem.contentY : -1 })
+    }
+
+    // What the wifi rules make of a network, without waiting for nmcli to say
+    // which one this machine is on - offscreen or not, the harness is never on
+    // the network the fixtures describe.
+    function wifi(ssid: string): string {
+      var svc = panel.teamsService
+      // Told rather than looked up: the harness is never on the network its
+      // fixtures describe, and this is what the settings form binds to.
+      if (ssid !== "") svc.currentSsid = ssid
+      return JSON.stringify({
+        ssid: ssid,
+        buildings: svc.buildings.map(function(row) { return row.name }),
+        rules: Model.wifiRuleRows(svc.wifiRules, svc.buildings),
+        would: Model.autoLocationFor(ssid, svc.wifiRules, svc.buildings)
+      })
     }
 
     // The two routes into uploadFile() without a mouse: the file chooser and a

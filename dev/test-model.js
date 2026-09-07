@@ -25,7 +25,9 @@ const Model = new Function(
     "eventTint, attendeeSummary, attendeeTally, minutesUntil, isNow, nextUp, " +
     "startingSoon, firstBusyHour, nowMinutes, newMeetingProblem, newMeetingPayload, " +
     "stringList, eventIsReadOnly, eventCalendarLabel, calendarSourceCap, " +
-    "keyOf, dateOf, addDays, addMonths, weekStart, todayKey, clockLabel }"
+    "keyOf, dateOf, addDays, addMonths, weekStart, todayKey, clockLabel, " +
+    "ssidOf, buildingNamed, wifiRuleRows, autoLocationFor, locationWord, " +
+    "buildingMenuCap, choiceLabel }"
 )()
 
 let passed = 0
@@ -957,6 +959,96 @@ test("a picked-calendars setting survives whatever is actually in the file", () 
   eq(Model.stringList(""), [])
   eq(Model.stringList(["a", "", null, "a", " b "]), ["a", "b"])
   eq(Model.stringList(42), [])
+})
+
+// ---------------------------------------------------------------------------
+
+const BUILDINGS = [
+  { id: "b-1", name: "Hauptgebäude", label: "HQ" },
+  { id: "b-2", name: "Werkstatt Nord", label: "" }
+]
+
+test("the SSID comes off nmcli's terse output", () => {
+  eq(Model.ssidOf("no:guest-wifi\nyes:cloudhouse-internet\nno:eduroam"),
+     "cloudhouse-internet")
+  // Nothing connected, and nothing to guess from.
+  eq(Model.ssidOf("no:guest-wifi"), "")
+  eq(Model.ssidOf(""), "")
+  eq(Model.ssidOf(undefined), "")
+  // An SSID with a colon in it: nmcli escapes it, so the field separator is
+  // the first colon that is not backslashed. Splitting naively gives "Fritz".
+  eq(Model.ssidOf("yes:Fritz\\:Box 7590"), "Fritz:Box 7590")
+})
+
+test("a building is found by name, label or id", () => {
+  eq(Model.buildingNamed("Hauptgebäude", BUILDINGS).id, "b-1")
+  eq(Model.buildingNamed("  hauptgebäude ", BUILDINGS).id, "b-1")
+  eq(Model.buildingNamed("HQ", BUILDINGS).id, "b-1")
+  eq(Model.buildingNamed("b-2", BUILDINGS).id, "b-2")
+  eq(Model.buildingNamed("Nowhere", BUILDINGS), null)
+  eq(Model.buildingNamed("", BUILDINGS), null)
+  // An empty label must not match every rule whose target is empty.
+  eq(Model.buildingNamed("   ", BUILDINGS), null)
+})
+
+test("a rule says what it will do, or why it cannot", () => {
+  const rows = Model.wifiRuleRows([
+    "cloudhouse-internet = Hauptgebäude",
+    "gaeste-wlan = remote",
+    "* = none",
+    "kaputt = Gebäude Süd",
+    "no-equals-sign",
+    " = remote"
+  ], BUILDINGS)
+  eq(rows.length, 6)
+  eq([rows[0].state, rows[0].placeId, rows[0].label],
+     ["office", "b-1", "Hauptgebäude"])
+  eq([rows[1].state, rows[1].placeId], ["remote", ""])
+  eq([rows[2].ssid, rows[2].state], ["*", "none"])
+  // Named but unresolvable stays unresolved rather than becoming a bare
+  // "office": that would put somebody in a building they did not name.
+  eq([rows[3].state, rows[3].problem], ["", "no building called that"])
+  eq(rows[4].problem, "nothing after the =")
+  eq(rows[5].problem, "no network named")
+})
+
+test("a rule pointing at a building is held back until the list has arrived", () => {
+  // Otherwise the first poll after a shell start writes "the office" for a
+  // rule that will resolve to a building a second later.
+  const rows = Model.wifiRuleRows(["wifi = Hauptgebäude"], [])
+  eq(rows[0].problem, "buildings have not been listed yet")
+  eq(Model.autoLocationFor("wifi", ["wifi = Hauptgebäude"], []), null)
+})
+
+test("the network on decides what is reported", () => {
+  const rules = ["cloudhouse-internet = Hauptgebäude", "* = remote"]
+  eq(Model.autoLocationFor("cloudhouse-internet", rules, BUILDINGS),
+     { state: "office", placeId: "b-1", label: "Hauptgebäude",
+       ssid: "cloudhouse-internet" })
+  // The catch-all is what any other network means, and it must not swallow a
+  // named one however it is ordered.
+  eq(Model.autoLocationFor("eduroam", rules, BUILDINGS).state, "remote")
+  eq(Model.autoLocationFor("eduroam", rules, BUILDINGS).ssid, "*")
+  eq(Model.autoLocationFor("CLOUDHOUSE-INTERNET", rules, BUILDINGS).placeId, "b-1")
+  // A cable, or wifi off: no SSID, so only a catch-all can apply.
+  eq(Model.autoLocationFor("", rules, BUILDINGS).state, "remote")
+  // Nothing configured is nothing to say - which is not the same as saying
+  // "none", and the caller has to tell those apart.
+  eq(Model.autoLocationFor("eduroam", [], BUILDINGS), null)
+  eq(Model.autoLocationFor("eduroam", ["cloudhouse-internet = HQ"], BUILDINGS), null)
+})
+
+test("a picker numbered with digits caps the buildings it lists", () => {
+  // Four rows are already spoken for, and 0-9 is what a row can be numbered.
+  eq(Model.buildingMenuCap(), 6)
+})
+
+test("choiceLabel reads a helper table rather than keeping a copy", () => {
+  const rows = [{ state: "office", label: "In the office" }]
+  eq(Model.choiceLabel(rows, "office"), "In the office")
+  eq(Model.choiceLabel(rows, "remote", "work location"), "work location")
+  eq(Model.choiceLabel(rows, "", "work location"), "work location")
+  eq(Model.choiceLabel(null, "office"), "")
 })
 
 // ---------------------------------------------------------------------------

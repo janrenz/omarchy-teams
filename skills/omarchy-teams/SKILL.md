@@ -150,6 +150,23 @@ working hours say. A fetch reports the current one under `me.location`, with
 the user decided. `null` means no layer had anything to say, which is not the
 same as being nowhere.
 
+A building rather than "the office" needs its id, and the ids come from the
+Places directory:
+
+    python3 $HELPER buildings       --account work
+
+Which needs `Place.Read.All` and the `readPlaces` setting; without them the
+helper says so, and "In the office" with no building is the honest answer
+rather than a guess. Pass the id on as `location --state office --place <id>`.
+An empty list with `ok: true` is a tenant that has not made its buildings
+visible - the `note` says so, and it is not a failure to report as one.
+
+`auto-location` is the automatic layer - this machine saying where it thinks it
+is, driven by the plugin's wifi rules and its own timer. **Leave it alone**,
+the way `hold-presence` is left alone: writing it by hand claims a detection
+that did not happen, and it is the layer a user's own choice is meant to
+override.
+
 `send` takes the text on **stdin**: anyone on this machine can read another
 process's command line for as long as it runs. `--text` still works for running
 it by hand. Reactions are limited to 👍 ❤️ 😂 😮 😢 😡; Graph refuses anything

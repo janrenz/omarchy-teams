@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.9.0",
+  "version": "0.10.0",
   "author": "Jan Renz",
   "license": "MIT",
   "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and nothing else to set up: it signs in through its own Azure app registration. Talks to Microsoft Graph and nothing else.",
@@ -35,6 +35,8 @@
       "sendFiles": false,
       "setPresence": false,
       "holdPresence": false,
+      "readPlaces": false,
+      "wifiLocations": [],
       "calendar": false,
       "calendarWrite": false,
       "calendarView": "week",
@@ -94,6 +96,20 @@
         "label": "Let Teams see you at this machine",
         "description": "A presence you set only shows while Teams believes you are signed in somewhere; with no Teams client running anywhere you are Offline whatever you pick. This makes the plugin one of those clients - available while somebody is at the machine, away once nobody is - renewed every twenty minutes and let go when the shell stops. Needs the setting above.",
         "defaultValue": false
+      },
+      {
+        "key": "readPlaces",
+        "type": "boolean",
+        "label": "List your buildings",
+        "description": "Lets the work-location picker name a building rather than just \"In the office\", and lets the wifi rules point at one. Needs Place.Read.All, which an administrator has to consent to - setting a building needs nothing beyond Presence.ReadWrite, because a placeId is only a string to that call, but learning which buildings exist and what they are called needs the Places directory. Refused, everything still works and the picker simply offers the office with no building in it. Needs the presence setting above, and changing this means signing in again.",
+        "defaultValue": false
+      },
+      {
+        "key": "wifiLocations",
+        "type": "array",
+        "label": "Which wifi means where",
+        "description": "One rule per line, `ssid = where`, where `where` is a building's name, `office`, `remote`, `timeoff`, or `none` to report nothing on that network. `*` as the ssid is any other network. Tick them in the window's settings rather than writing them here - it offers the network you are on and the buildings to point it at, which beats copying GUIDs. When a rule matches, the plugin reports it to Graph as an automatic location, which a location you pick by hand still overrides; a network with no rule leaves your work location alone. Teams on Windows reads the equivalent list out of the tenant's own Places configuration, which no Graph endpoint exposes - hence this.",
+        "defaultValue": []
       },
       {
         "key": "calendar",

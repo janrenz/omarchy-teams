@@ -237,9 +237,14 @@ Item {
       root.errorMessage = ""
       root.snapshot = parsed
       root.announceNewChats()
-      // A conversation open while the list refreshed is still the one being
-      // read; reloading it here would scroll the transcript out from under
-      // whoever is reading it.
+      // The list has moved on, and the conversation being read may have moved
+      // with it. This used to be left alone because re-reading it here scrolled
+      // the transcript out from under whoever was reading - so the transcript
+      // now follows the newest line only for a reader who was already at it,
+      // and reloadIfMoved spends a request only when there is really something
+      // new. A message arriving in the sidebar while the conversation it
+      // belongs to sat unchanged was the half of the refresh that was missing.
+      root.reloadIfMoved()
       if (root.refreshQueued) Qt.callLater(root.refresh)
     }
   }
@@ -435,6 +440,7 @@ Item {
     openConversation = row
     // A different conversation, so what is on screen belongs to the last one.
     messages = []
+    unattendedReload = false
     fetchMessages(row)
 
     // Opening a chat is reading it. Only for chats - a channel has no read
@@ -1317,8 +1323,50 @@ Item {
   // it flashed blank, and it counted as opening the chat again - marking read
   // a second time. The same conversation's rows stay on screen until better
   // ones land.
-  function reloadConversation() {
+  // True while the transcript is being re-read because a poll found something
+  // rather than because somebody asked for it. The window reads it to decide
+  // whether to follow the newest line: opening, sending and the r key always
+  // land at the bottom, a poll only does so for a reader who is already there.
+  property bool unattendedReload: false
+
+  function reloadConversation(unattended) {
+    unattendedReload = unattended === true
     fetchMessages(openConversation)
+  }
+
+  // The time on the newest message the transcript is holding, or null while it
+  // is holding none.
+  function newestMessageWhen() {
+    var rows = messages
+    var newest = null
+    for (var i = 0; i < rows.length; i++) {
+      var at = Model.parseDate(String(rows[i].when || ""))
+      if (at && (newest === null || at > newest)) newest = at
+    }
+    return newest
+  }
+
+  // Whether the list that has just landed says the open conversation has
+  // something the transcript does not, and re-reading it if so. Asked on every
+  // poll, which is why it is careful about what it costs: re-reading a
+  // conversation nobody is looking at is a Graph request for nothing.
+  //
+  // A chat carries the time of its last message, so the comparison is exact and
+  // the request goes out only when there is really a newer message. A channel
+  // carries neither that nor a read state - Graph offers no channel viewpoint
+  // at all - so there is nothing to compare and the open channel is re-read
+  // each poll instead: one request per interval, and only while somebody has
+  // that channel on screen.
+  function reloadIfMoved() {
+    if (!openConversation || messagesLoading || messageProc.running) return
+    if (String(openConversation.kind) === "channel") { reloadConversation(true); return }
+    var row = rowFor(String(openConversation.key))
+    if (!row) return
+    var moved = Model.parseDate(String(row.when || ""))
+    if (!moved) return
+    var held = newestMessageWhen()
+    if (held !== null && moved <= held) return
+    reloadConversation(true)
   }
 
   Process {

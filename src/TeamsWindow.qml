@@ -2239,6 +2239,12 @@ Item {
                   Connections {
                     target: service
                     function onMessagesChanged() {
+                      // Rows a poll brought in are not rows anybody asked for:
+                      // a reader who has scrolled back into the history stays
+                      // where they are, and one who was at the newest line goes
+                      // on following it. Opening a conversation, sending, and
+                      // pressing r land at the bottom either way.
+                      if (service.unattendedReload && !transcript.followNewest) return
                       transcript.followNewest = true
                       Qt.callLater(transcript.toNewest)
                     }

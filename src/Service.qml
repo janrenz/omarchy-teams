@@ -267,8 +267,22 @@ Item {
     needIdle: root.holdPresence
   }
 
-  // For a host that wants to explain a sidebar that is not moving.
-  readonly property string pollReason: poll.reason
+  // Away and offline stop the polling - but not for an account that has no
+  // answer yet. There are two Services on one account, the bar's and the
+  // window's, and only the one the sign-in was done in hears about it; the
+  // other finds out by looking. Gated on idleness it may never look: the bar
+  // went on saying "sign in - opens the window" next to a window that was
+  // signed in and working, and nothing short of touching the machine moved it.
+  // That is the case PollGate's own header calls out - a gate that fails
+  // closed swallows the fetch that fills an empty panel - so a signed-out
+  // Service keeps its ordinary cadence whether or not anybody is at the
+  // machine. It is one call per interval, and it stops at the sign-in.
+  readonly property bool pollPaused: poll.paused && signedIn
+
+  // For a host that wants to explain a sidebar that is not moving. Silent when
+  // the line above is overriding the gate, so a tooltip cannot blame idleness
+  // for a pause that is not happening.
+  readonly property string pollReason: pollPaused ? poll.reason : ""
 
   // triggeredOnStart is what makes waking up and coming back online immediate:
   // the gate opening restarts this timer, and a restarted timer fires at once
@@ -276,7 +290,7 @@ Item {
   Timer {
     interval: root.refreshIntervalSec * 1000 * poll.intervalScale
     repeat: true
-    running: root.configured && !poll.paused
+    running: root.configured && !root.pollPaused
     triggeredOnStart: true
     onTriggered: {
       root.refresh()

@@ -189,6 +189,18 @@ Item {
     calendarActive: root.pane === "calendar" && window.visible
   }
 
+  // A save writes shell.json, and the shell hands the *bar widget* the new
+  // values - the window has no settings of its own and read them out of
+  // shell.json when it opened, so nothing here knew the file had changed. The
+  // form then redrew from that stale copy: it forgets a key once the write has
+  // landed, the field falls back to `settings`, and the old value comes back
+  // over the new one. An account name typed into a window that stayed open
+  // looked like a name that would not save, when it had in fact been written.
+  Connections {
+    target: service
+    function onSettingsSaved() { root.loadSettings() }
+  }
+
   // ---- keyboard -----------------------------------------------------------
   //
   // Omarchy is keyboard-first, so this is a focus ladder rather than a handful

@@ -58,8 +58,9 @@ Item {
         anchors.rightMargin: Style.spacing.md
         spacing: Style.spacing.sm
 
-        Button {
+        KeyButton {
           text: "Today"
+          keyText: "t"
           bordered: true
           foreground: root.fg
           fontFamily: root.fontFamily
@@ -134,9 +135,10 @@ Item {
           }
         }
 
-        Button {
+        KeyButton {
           visible: !!root.service && root.service.canWriteCalendar
           text: "New meeting"
+          keyText: "n"
           bordered: true
           foreground: root.accent
           fontFamily: root.fontFamily

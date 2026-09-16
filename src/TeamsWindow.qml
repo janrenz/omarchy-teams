@@ -1820,10 +1820,11 @@ Item {
                 onClicked: service.unreadOnly = !service.unreadOnly
               }
 
-              Button {
+              KeyButton {
                 visible: service.signedIn && service.canStartChat && !root.showSettings
                          && !root.onCalendar
                 text: "New chat"
+                keyText: "n"
                 bordered: true
                 foreground: Color.accent
                 fontFamily: Style.font.family
@@ -2667,9 +2668,10 @@ Item {
                     onClicked: attachDialog.open()
                   }
 
-                  Button {
+                  KeyButton {
                     enabled: !service.messagesLoading
                     text: "Reload"
+                    keyText: "r"
                     bordered: true
                     foreground: Color.foreground
                     fontFamily: Style.font.family
@@ -2680,9 +2682,10 @@ Item {
                   // The same handover the a key does. Gone entirely when the
                   // setting is off, rather than disabled: a button that cannot
                   // ever do anything is worse than no button.
-                  Button {
+                  KeyButton {
                     visible: service.agentHandover
                     text: "Ask agent"
+                    keyText: "a"
                     tooltipText: "Open your coding agent on this conversation"
                     bordered: true
                     foreground: Color.foreground

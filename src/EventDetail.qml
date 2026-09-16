@@ -197,9 +197,10 @@ Column {
     // link, and being invited is not what makes it openable.
     visible: root.joinUrl !== "" || root.answerable
 
-    Button {
+    KeyButton {
       visible: root.joinUrl !== ""
       text: "Join"
+      keyText: "J"
       tooltipText: "Opens the meeting in whatever handles Teams meetings on this machine - "
                  + "a window like this one cannot carry audio and video."
       bordered: true

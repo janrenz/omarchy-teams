@@ -124,6 +124,11 @@ BarWidget {
     text: Model.plainText(root.barLabel !== "" ? root.barLabel : root.barIcon)
     slotSize: root.barLabel !== "" ? Style.bar.statusSlot * 2 : Style.bar.iconSlot
     active: root.tintOnUnread && service.unreadCount > 0
+    // Paused by hand is drawn, not just said: an icon that stays bright while
+    // nothing behind it is moving is an unread count nobody should trust. The
+    // automatic pauses are not dimmed - they lift on their own, and a bar that
+    // greyed out every time somebody went for coffee would be noise.
+    dimmed: service.manualPause
 
     tooltipText: {
       if (!service.configured)
@@ -137,7 +142,8 @@ BarWidget {
       if (!service.hasChannels) lines.push("chats only - channels not consented")
       // A bar that is not moving because nobody is at the machine looks exactly
       // like a bar that is broken. Say which.
-      if (service.pollReason !== "") lines.push(service.pollReason)
+      if (service.manualPause) lines.push("fetching paused - z in the dropdown resumes")
+      else if (service.pollReason !== "") lines.push(service.pollReason)
       for (var i = 0; i < service.warnings.length; i++)
         lines.push(Model.plainText(service.warnings[i].message))
       return lines.join("\n")

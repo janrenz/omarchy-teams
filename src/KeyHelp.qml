@@ -48,6 +48,7 @@ Column {
     ["p", "Set your presence, or hand it back to Teams", "Doing"],
     ["w", "Say where you are working from, or hand that back", "Doing"],
     ["r", "Reload this conversation", "Doing"],
+    ["z", "Pause fetching, or resume it. Asking by hand still works", "Doing"],
     [",", "Settings", "Doing"],
     ["?", "This list", "Doing"],
 

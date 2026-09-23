@@ -59,7 +59,8 @@ src/EventDetail.qml     One meeting opened: who is coming, the agenda, Join,
 src/NewMeetingForm.qml  Booking one. The window owns the draft; this edits it.
 src/Notifier.qml        omarchy-notification-send, the prime-then-announce rule,
                         and the click that opens the chat.
-src/PollGate.qml        Whether it is worth polling at all: idle, network, battery.
+src/PollGate.qml        Whether it is worth polling at all: idle, network, battery,
+                        and `held` - the pause the user switched on.
 src/handover.sh         Builds the prompt that hands a conversation to the
                         user's coding agent and execs omarchy-agent. Runnable by
                         hand; --print shows the prompt and launches nothing.
@@ -349,6 +350,25 @@ fatal QML error makes it exit instead.
   its flags is guarded with a leading space in `asText()`; and `-r` needs the id
   a previous send printed with `-p`, which is what makes several messages in one
   conversation update one toast instead of stacking.
+- **The user's pause gates what goes out on its own, and a new automatic
+  fetch has to be put behind it.** `paused` is a setting (`z`, the button
+  beside Refresh, the form's switch), read as `manualPause` and handed to the
+  gate as `held`, which ignores `pausePolling`. The poll timer is the obvious
+  half; the rest were each found by looking: `onSettingsChanged` refreshing,
+  `onCalendarWantedChanged` at midnight, the dropdown's `open()`, and the
+  read-back after a wifi report. Anything the user does - Refresh, `r`, a send,
+  a status - still goes out and still reads back. Two things are deliberately
+  *not* held: a signed-out Service (the same door `pollPaused` already opens,
+  and why a paused shell fills its panel once) and the presence heartbeat,
+  which is a write that keeps a chosen status visible. Offscreen never gets a
+  `z`, so `dev pause <true|false>` is the knob.
+
+  It also forced the window to watch `shell.json`: it used to read it only on
+  opening and after its own writes, so a pause from the dropdown left it
+  polling. Both that watcher and the reload after a save are skipped under
+  `demo` - the reload used to swap the harness's fixtures for the real bar
+  entry, after which the next tick in the harness wrote into your real
+  `shell.json`. That happened while building this.
 - **The poll gate's signals arrive late.** For the first second or two of a
   shell's life UPower has no devices, NetworkManager reports `Unknown`
   connectivity and `canCheckConnectivity` is false - measured, on this machine.

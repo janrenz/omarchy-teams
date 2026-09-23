@@ -265,7 +265,59 @@ Item {
     // The presence session follows the desktop, so it needs to know about
     // idleness even when polling is not being paused for it.
     needIdle: root.holdPresence
+    // Not behind pausePolling: that setting is about the automatic reasons,
+    // and turning those off is not asking never to be able to pause.
+    held: root.manualPause
   }
+
+  // ---- the pause the user switches ------------------------------------------
+  //
+  // The gate above stops for reasons the machine can see. This is the one it
+  // cannot: somebody who wants the plugin to leave Graph alone for a while -
+  // a tenant counting requests, an afternoon of not being told about things,
+  // a metered link NetworkManager calls fine. It stops everything that goes
+  // out on its own - the poll, the calendar riding on it, the re-read of the
+  // open conversation, the read-back after a location report - and nothing
+  // that somebody does: Refresh, r, sending, booking, answering a meeting,
+  // setting a status and signing in all still go out, and each still reads
+  // its answer back, because a change the user made and then cannot see is
+  // worse than the request it cost.
+  //
+  // The presence session is the one outward thing it leaves running, on
+  // purpose. It is a write, not a fetch, and it is what keeps a status
+  // somebody picked visible at all - stopping it would turn "stop fetching"
+  // into "go grey to your colleagues within the hour", which nobody pausing a
+  // poll has asked for.
+  //
+  // A setting, so it survives a shell restart and so every Service agrees:
+  // there is one behind the bar on each monitor and another behind the
+  // window, and the pause is the user's, not one surface's. `pauseWanted`
+  // is what was just asked for, drawn at once rather than after shell.json
+  // has gone round - and kept if the write fails, so the switch still does
+  // what it says on this surface for as long as it is up.
+  property var pauseWanted: null
+  property bool pauseSaveQueued: false
+  readonly property bool manualPause: pauseWanted !== null
+    ? pauseWanted === true : setting("paused", false) === true
+
+  function setPaused(on) {
+    pauseWanted = on === true
+    flushPause()
+  }
+
+  function togglePause() { setPaused(!manualPause) }
+
+  // saveSettings refuses while another write is running - the settings form
+  // may be mid-flush - so the pause waits for it rather than being lost.
+  function flushPause() {
+    if (pauseWanted === null) return
+    pauseSaveQueued = !saveSettings({ paused: pauseWanted })
+  }
+
+  // What the setting said last time the settings arrived, so a pause being
+  // switched is not mistaken for a new question worth a fetch. Switching it
+  // off already fetches: the poll timer starts again, and it fires on start.
+  property bool seenPaused: false
 
   // Away and offline stop the polling - but not for an account that has no
   // answer yet. There are two Services on one account, the bar's and the
@@ -277,6 +329,12 @@ Item {
   // closed swallows the fetch that fills an empty panel - so a signed-out
   // Service keeps its ordinary cadence whether or not anybody is at the
   // machine. It is one call per interval, and it stops at the sign-in.
+  //
+  // The user's own pause goes through the same door, and for the same
+  // reason: a fetch with no token behind it asks Graph nothing, and a pause
+  // that kept the bar saying "sign in" after a sign-in in the window would be
+  // a pause that broke signing in. It also means a shell started paused
+  // fills its panel once and then holds still, rather than drawing nothing.
   readonly property bool pollPaused: poll.paused && signedIn
 
   // For a host that wants to explain a sidebar that is not moving. Silent when
@@ -284,9 +342,9 @@ Item {
   // for a pause that is not happening.
   readonly property string pollReason: pollPaused ? poll.reason : ""
 
-  // triggeredOnStart is what makes waking up and coming back online immediate:
-  // the gate opening restarts this timer, and a restarted timer fires at once
-  // rather than an interval later.
+  // triggeredOnStart is what makes waking up, coming back online and resuming
+  // a pause immediate: the gate opening restarts this timer, and a restarted
+  // timer fires at once rather than an interval later.
   Timer {
     interval: root.refreshIntervalSec * 1000 * poll.intervalScale
     repeat: true
@@ -314,10 +372,23 @@ Item {
   }
   onPluginDirChanged: if (configured) { loadPalette(); refresh(); flushQueuedMessages() }
   onSettingsChanged: {
+    // Read off the settings rather than off manualPause, whose binding may
+    // not have caught up with them yet inside this handler.
+    var pausedNow = setting("paused", false) === true
+    var pauseSwitched = pausedNow !== seenPaused
+    seenPaused = pausedNow
+    if (pauseWanted !== null && pauseWanted === pausedNow) pauseWanted = null
     // The view the calendar opens on comes from the settings once, and after
     // that from whoever last pressed a view button.
     if (!calendarModeChosen) calendarMode = validCalendarMode(setting("calendarView", "week"))
-    if (configured) { refresh(); flushQueuedMessages() }
+    if (configured) {
+      // A settings change is a reason to fetch, but not while fetching is
+      // paused, and not for the pause itself - resuming is the timer's to
+      // answer, and doing it here as well was two fetches for one switch.
+      if (!pauseSwitched && !(pauseWanted !== null ? pauseWanted : pausedNow)) refresh()
+      // A conversation somebody opened is not automatic, paused or not.
+      flushQueuedMessages()
+    }
   }
 
   // ---- telling you something arrived --------------------------------------
@@ -549,6 +620,7 @@ Item {
     stderr: StdioCollector { id: saveErrOut; waitForEnd: true }
     onExited: function(exitCode) {
       root.saving = false
+      if (root.pauseSaveQueued) Qt.callLater(root.flushPause)
       var parsed = Model.parseJson(saveOut.text, null)
       if (exitCode !== 0 || !parsed || parsed.ok === false) {
         root.saveError = parsed && parsed.error
@@ -1031,8 +1103,9 @@ Item {
       root.reportedLocation = String(parsed.state || "") + ":" + String(parsed.placeId || "")
       // Read the aggregate back, because what was reported is not necessarily
       // what wins: a location picked by hand outranks this one, and the chip
-      // should say what other people see.
-      root.refresh()
+      // should say what other people see. Not while paused - the report was
+      // the wifi timer's, not the user's, so its read-back is too.
+      if (!root.manualPause) root.refresh()
     }
   }
 
@@ -1077,6 +1150,8 @@ Item {
   // Duplicates would be harmless - Graph names the session after the
   // application, so they all renew the same one - but they would be requests
   // nobody asked for.
+  //
+  // Not stopped by the user's pause - see manualPause for why.
   property string heldPresence: ""
 
   readonly property string wantedSessionPresence: poll.idleNow ? "away" : "available"
@@ -1565,7 +1640,10 @@ Item {
   // rebuilt from the reply.
   property string calendarInFlight: ""
 
-  onCalendarWantedChanged: if (calendarWanted !== "") loadCalendar()
+  // While paused, only for somebody looking at it: stepping a week in the
+  // window is a question asked by hand, and midnight moving today along under
+  // the bar's reminders is not.
+  onCalendarWantedChanged: if (calendarWanted !== "" && (!manualPause || calendarActive)) loadCalendar()
 
   function loadCalendar(force) {
     if (!configured || pluginDir === "" || !hasCalendar) return

@@ -21,6 +21,13 @@ import Quickshell.Wayland
 //            stretched further in the power-saver profile, because the user
 //            asking the system for less power is asking us too.
 //
+// And one thing only the user knows: `held`, the pause they switched on
+// themselves. It is not one of the automatic reasons and does not answer to
+// their switches - somebody who turned "stop polling while away" off has not
+// thereby said they never want to pause - so it holds whatever those are set
+// to, and it is the first reason given, because it is the one that will not
+// lift on its own.
+//
 // Both signals arrive late: for the first second or two of a shell's life
 // UPower has no devices, NetworkManager reports Unknown connectivity, and
 // `canCheckConnectivity` is false. Every default here therefore means "go
@@ -38,12 +45,14 @@ QtObject {
   // to stop over it - the presence session follows the desktop whether or not
   // the poll timer does.
   property bool needIdle: false
+  // The user's own pause. Nothing lifts it but the user.
+  property bool held: false
 
   readonly property bool away: pauseWhenAway && idleSeconds > 0 && idle.isIdle
   readonly property bool offline: pauseWhenOffline
                                  && Networking.canCheckConnectivity
                                  && Networking.connectivity === NetworkConnectivity.None
-  readonly property bool paused: away || offline
+  readonly property bool paused: held || away || offline
 
   // Idle, as a fact rather than as a reason to pause. False while nothing has
   // armed the monitor, which is the same "go ahead" every default here means.
@@ -59,6 +68,7 @@ QtObject {
 
   // For a host that wants to say why the panel is not moving. Empty when it is.
   readonly property string reason: {
+    if (held) return "fetching paused"
     if (offline) return "offline"
     if (away) return "paused while you are away"
     return ""

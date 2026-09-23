@@ -65,8 +65,8 @@ The dropdown behind the bar icon has its own handful, because it holds its own
 few things: `p` opens the presence picker (`0`–`6` pick, `Escape` goes back),
 `w` the work location picker (`0`–`3`, then a digit per building), `m` marks
 every unread chat read, `o`
-opens the window, `r` refreshes, `j`/`k` and `Enter` walk what is unread, and
-`Escape` closes it. Either picker closes the other: both take the digits, and
+opens the window, `r` refreshes, `z` pauses fetching or resumes it, `j`/`k`
+and `Enter` walk what is unread, and `Escape` closes it. Either picker closes the other: both take the digits, and
 one of them has to own the keyboard.
 
 `m` asks twice. Graph has no route back to unread, so the first press says how
@@ -131,6 +131,7 @@ reading, which is the step that used to be missing.
 | `p` | Set your presence, or hand it back to Teams |
 | `w` | Say where you are working from, or hand that back |
 | `r` | Reload the open conversation |
+| `z` | Pause fetching, or resume it — see [When it does not poll](#when-it-does-not-poll) |
 | `,` | Settings |
 | `?` | This list |
 
@@ -272,6 +273,7 @@ own.
 | `chats` | `25` | How many chats to list (1–40). |
 | `density` | `cosy` | How much room the window gives things: `compact`, `cosy`, `roomy`, `spacious`. A multiplier over the theme's own spacing, so it follows your font size rather than fighting it. |
 | `refreshIntervalSec` | `120` | How often to poll (30–3600). |
+| `paused` | `false` | Pause fetching until you switch it off again: nothing goes out on its own, whatever `pausePolling` says. What you ask for by hand still does. `z` in the window or the dropdown flips it. |
 | `pausePolling` | `true` | Stop polling while the screen has been idle five minutes or there is no network. Doubles the interval on battery. |
 | `icon` / `label` | `󰊻` | Bar glyph, or text instead of it. |
 | `ipcTarget` | — | A name of your own for the dropdown, so a key can summon it: set `teams` and bind `omarchy-shell teams toggle`. Empty means the dropdown opens by clicking the icon. The window is separate and always answers to `omarchy-shell shell toggle janrenz.omarchy.teams`. |
@@ -292,6 +294,33 @@ Clicking the notification opens that chat. Several messages in one chat update o
 A poll is also a token refresh, and Graph counts every one of them, so it stops when there is nobody to poll for. Nothing is asked of Graph while the screen has been idle for five minutes, or while the machine has no network at all, and a fetch goes out the moment you come back or reconnect rather than at the next tick. Idle inhibitors count as being present, so a full-screen call does not look like an empty desk. On battery the interval is doubled, and tripled in the power-saver profile.
 
 Anything you ask for by hand still goes out, offline included: a failure you can see beats a silence you cannot. The bar's tooltip says why nothing is moving while it is paused. Set `pausePolling` to `false` to keep the old fixed cadence.
+
+### Pausing it yourself
+
+`z` in the window or the dropdown, the pause button beside Refresh in either,
+or **Pause fetching** under *Appearance and updating*, and it holds still until
+you switch it off again — at your desk, online, and whether or not
+`pausePolling` is on. Nothing goes out on its own: no poll, no calendar, no
+re-reading the conversation you have open, no read-back after the wifi reports
+where you are. It is a setting, so it survives a shell restart, and every
+surface agrees about it: the bar on each monitor and the window read the same
+switch. While it is on the bar icon is dimmed, its tooltip says so, and the
+dropdown's header line ends in *paused*.
+
+What you do still goes out, and still reads its answer back: Refresh, `r`,
+middle-clicking the icon, sending, reacting, marking read, answering or booking
+a meeting, setting your presence or location, signing in. Opening the dropdown
+does not count as asking — it shows what was last fetched. Resuming fetches at
+once rather than an interval later.
+
+Two things carry on. A shell started while paused fills the panel once and
+then holds still, rather than drawing nothing until you resume; so does a
+service that is not signed in yet, because a fetch with no token behind it
+asks Graph nothing and is how the bar finds out about a sign-in made in the
+window. And the presence session (`holdPresence`) keeps being renewed: it is a
+write, not a fetch, and it is what keeps a status you picked visible at all —
+stopping it would turn *pause fetching* into *go grey to your colleagues within
+the hour*.
 
 They are raised from behind the bar icon, not from the window, so they arrive whether or not the window is open — and only once, though both have a service of their own polling the same account.
 
@@ -770,6 +799,28 @@ Two settings exist for its benefit, both ignored unless `demo` is on:
 `preview.png` is a copy of `showcase-conversation.png` under the one name the marketplace looks for in the repository root; the script writes both so the listing card cannot drift from the screenshots in this file.
 
 ## Changelog
+
+### 0.12.0 — 2026-09-23
+
+- **Fetching can be paused by hand.** `z` in the window or the dropdown, a
+  pause button beside Refresh in both, or **Pause fetching** under *Appearance
+  and updating*. The automatic pause only knows about idleness and the network;
+  this one is for everything else — a tenant counting requests, an afternoon of
+  not being told about things — and it holds until you switch it off, whatever
+  `pausePolling` says. It stops the poll, the calendar riding on it, the
+  re-read of the open conversation and the read-back after a wifi report.
+  Refresh, `r`, sending, booking and setting your status still go out, and
+  resuming fetches at once.
+- **A paused bar looks paused.** The icon dims, the tooltip says *fetching
+  paused*, the dropdown's header line ends in *paused*, and the settings index
+  row says so before it says the interval.
+- **The presence session is left running**, on purpose: it is a write that
+  keeps your chosen status visible, not a fetch, and pausing it would turn you
+  grey to everyone within the hour. See *Pausing it yourself*.
+- **The window now notices a settings change it did not make.** It read
+  `shell.json` when it opened and after its own writes, so pausing from the
+  dropdown left the window polling an account you had just paused. It watches
+  the file the shell watches now.
 
 ### 0.11.0 — 2026-09-07
 

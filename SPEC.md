@@ -329,6 +329,7 @@ mode, anchor, span, events, the open event, RSVP, booking and cancelling.
 | `chats` | integer | 25 | 1–40 |
 | `density` | string | `cosy` | `compact`, `cosy`, `roomy`, `spacious` |
 | `refreshIntervalSec` | integer | 120 | 30–3600 |
+| `paused` | boolean | false | The user's own pause; holds whatever `pausePolling` says |
 | `pausePolling` | boolean | true | |
 | `icon` | string | `󰊻` | |
 | `label` | string | `""` | |

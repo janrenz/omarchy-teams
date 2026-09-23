@@ -370,6 +370,9 @@ Column {
       title: "Appearance and updating"
       detail: {
         var parts = [String(root.current("density", "cosy"))]
+        // First when it is on, because it overrides everything after it: an
+        // interval nobody is polling on is not the answer to "how often".
+        if (root.service && root.service.manualPause) parts.push("fetching paused")
         parts.push("every " + Number(root.current("refreshIntervalSec", 120)) + "s")
         if (root.current("pausePolling", true) !== false) parts.push("pauses when away")
         return parts.join("  ·  ")
@@ -1177,6 +1180,17 @@ Column {
       value: parseInt(String(root.current("refreshIntervalSec", 120)), 10) || 120
       onValueChanged: if (value !== parseInt(String(root.current("refreshIntervalSec", 120)), 10))
         root.change("refreshIntervalSec", value)
+    }
+
+    // Through the Service rather than through `pending`: the same switch is z
+    // in the window and in the dropdown, and all three have to show one state
+    // at once rather than this one waiting out the debounce.
+    Toggle {
+      width: parent.width
+      label: "Pause fetching"
+      description: "Nothing is fetched on its own until you switch this off again - no polling, no calendar, no re-reading the open conversation - whatever the switch below says. Refresh, r, sending, booking and setting your status still go out, and a fetch goes out the moment you resume. z does the same from the window or the dropdown, and the bar icon dims while it is on."
+      checked: !!root.service && root.service.manualPause
+      onClicked: if (root.service) root.service.togglePause()
     }
 
     Toggle {

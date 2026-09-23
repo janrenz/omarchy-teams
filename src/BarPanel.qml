@@ -139,7 +139,9 @@ Panel {
     armingMarkAll = false
     list.cursorIndex = -1
     root.controller.show()
-    if (service) service.refresh()
+    // Opening is a glance, not a request: while fetching is paused it shows
+    // what was last fetched, and r is there for somebody who wants more.
+    if (service && !service.manualPause) service.refresh()
   }
 
   function close() {
@@ -214,6 +216,8 @@ Panel {
         if (text === "p") root.togglePresencePicker()
         else if (text === "w") root.toggleLocationPicker()
         else if (text === "r" && root.service) root.service.refresh()
+        // z, as in snooze: p is presence here and in the window alike.
+        else if (text === "z" && root.service) root.service.togglePause()
         else if (text === "o") root.openWindow({})
       }
 
@@ -264,6 +268,9 @@ Panel {
                   ? "nothing unread"
                   : (root.service.unreadCount === 1
                      ? "1 unread chat" : root.service.unreadCount + " unread chats"))
+                // A count that has stopped moving says so beside the count,
+                // since that is the number it makes stale.
+                if (root.service.manualPause) parts.push("paused")
                 return parts.join(" · ")
               }
               textFormat: Text.PlainText
@@ -339,6 +346,22 @@ Panel {
               tooltipText: "Open the window  ·  o"
               foreground: root.fg
               onClicked: root.openWindow({})
+            }
+
+            // Beside Refresh because it is the other half of the same
+            // question - when this panel asks Graph anything. The glyph is
+            // what pressing it will do, the way a media player's is, and it
+            // takes the accent while paused so a held panel is told apart
+            // from a quiet one at a glance.
+            PanelActionButton {
+              iconText: root.service && root.service.manualPause
+                ? "\u{F040A}"    // nf-md-play
+                : "\u{F03E4}"    // nf-md-pause
+              tooltipText: root.service && root.service.manualPause
+                ? "Resume fetching  ·  z" : "Pause fetching  ·  z"
+              foreground: root.service && root.service.manualPause ? root.accent : root.fg
+              visible: !!root.service && root.service.configured
+              onClicked: if (root.service) root.service.togglePause()
             }
 
             PanelActionButton {

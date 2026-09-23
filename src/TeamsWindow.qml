@@ -196,9 +196,42 @@ Item {
   // landed, the field falls back to `settings`, and the old value comes back
   // over the new one. An account name typed into a window that stayed open
   // looked like a name that would not save, when it had in fact been written.
+  //
+  // Not under demo, where nothing was written: re-reading there swapped the
+  // harness's fixtures for the real bar entry, and the next tick in the
+  // harness then saved into the shell.json the user is actually running.
   Connections {
     target: service
-    function onSettingsSaved() { root.loadSettings() }
+    function onSettingsSaved() {
+      if (!(root.settings && root.settings.demo === true)) root.loadSettings()
+    }
+  }
+
+  // The same staleness from the other side: a write the window did not make.
+  // The bar's dropdown pausing the fetching is the case that forced it - the
+  // window went on polling an account the user had just paused, because it
+  // had read `paused: false` when it opened and nothing told it otherwise.
+  // Watching the file the shell itself watches is the one signal both
+  // surfaces share. Not in the harness, whose settings are fixtures and must
+  // not be overwritten by the real bar entry whenever the shell saves.
+  FileView {
+    path: {
+      var base = Quickshell.env("XDG_CONFIG_HOME")
+      if (!base) base = Quickshell.env("HOME") + "/.config"
+      return base + "/omarchy/shell.json"
+    }
+    id: shellJsonWatch
+    watchChanges: true
+    printErrors: false
+    // The text itself is not used: the settings still come through config.py
+    // like every other read of them, so there is one parser of the bar layout
+    // and not two. Reloaded all the same, because a write lands as a rename
+    // and it is the reload that watches the file that replaced the old one -
+    // which is what the shell does with its own watcher on this file.
+    onFileChanged: {
+      shellJsonWatch.reload()
+      if (!(root.settings && root.settings.demo === true)) root.loadSettings()
+    }
   }
 
   // ---- keyboard -----------------------------------------------------------
@@ -1566,6 +1599,8 @@ Item {
           else if (text === "e" || text === "+") root.startPicking()
           else if (text === "a") root.askAgent()
           else if (text === "r") service.reloadConversation()
+          // z, as in snooze - p is already presence.
+          else if (text === "z") service.togglePause()
           else if (text === "u") service.unreadOnly = !service.unreadOnly
           // The comma is what most applications use for preferences.
           else if (text === ",") root.showSettings = !root.showSettings
@@ -1859,6 +1894,23 @@ Item {
               // A glyph rather than the word: one idea with a picture
               // everybody already knows, and a tiled window's header runs out
               // of room long before it runs out of buttons.
+              // Beside Refresh, the way the dropdown has it. The glyph is what
+              // pressing it will do, and the accent is what says the window
+              // has stopped asking - a sidebar that is not moving looks the
+              // same whether it is paused or simply quiet.
+              PanelActionButton {
+                visible: service.configured && !root.showSettings
+                iconText: service.manualPause
+                  ? "\u{F040A}"    // nf-md-play
+                  : "\u{F03E4}"    // nf-md-pause
+                tooltipText: service.manualPause
+                  ? "Fetching paused - resume  (z)" : "Pause fetching  (z)"
+                foreground: service.manualPause ? Color.accent : Color.foreground
+                bordered: true
+                size: unreadButton.height
+                onClicked: service.togglePause()
+              }
+
               PanelActionButton {
                 visible: service.configured && !root.showSettings
                 enabled: !service.loading

@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "janrenz.omarchy.teams",
   "name": "Microsoft Teams",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "author": "Jan Renz",
   "license": "MIT",
   "description": "Teams chats, channels and your calendar in the Omarchy bar and in a window of their own. A dropdown behind the bar icon for your presence and what is unread; everything else in the window. Needs python3 (standard library only) and nothing else to set up: it signs in through its own Azure app registration. Talks to Microsoft Graph and nothing else.",
@@ -45,6 +45,7 @@
       "meetingReminders": true,
       "reminderMinutes": 5,
       "refreshIntervalSec": 120,
+      "paused": false,
       "pausePolling": true,
       "tintOnUnread": true,
       "notify": true,
@@ -210,6 +211,13 @@
         "max": 3600,
         "step": 30,
         "defaultValue": 120
+      },
+      {
+        "key": "paused",
+        "type": "boolean",
+        "label": "Pause fetching",
+        "description": "Nothing is fetched on its own until this is switched off again - no polling, no calendar, no re-reading the open conversation - whatever the setting below says. Anything you ask for by hand still goes out: Refresh, r, sending, booking and setting your status. The presence session keeps running, because it is what keeps your status visible. z switches it from the window or the dropdown.",
+        "defaultValue": false
       },
       {
         "key": "pausePolling",

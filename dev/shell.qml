@@ -239,6 +239,16 @@ ShellRoot {
                               dirty: form.dirty, saving: panel.teamsService.saving })
     }
 
+    // The z key, which offscreen never receives. Under demo the save is
+    // answered without being written, so this exercises the switch and the
+    // gate and leaves your shell.json alone.
+    function pause(on: bool): string {
+      var svc = panel.teamsService
+      svc.setPaused(on)
+      return JSON.stringify({ paused: svc.manualPause, pollPaused: svc.pollPaused,
+                              pollReason: svc.pollReason, saving: svc.saving })
+    }
+
     function settled(): string {
       var form = panel.settingsForm
       return JSON.stringify({ pending: Object.keys(form.pending),
@@ -283,6 +293,8 @@ ShellRoot {
         error: svc.errorCode + (svc.errorMessage ? ": " + svc.errorMessage : ""),
         settingsError: panel.settingsError,
         pollReason: svc.pollReason,
+        paused: svc.manualPause,
+        pollPaused: svc.pollPaused,
         uploading: svc.uploading,
         uploadError: svc.uploadError,
         uploadNotice: svc.uploadNotice,

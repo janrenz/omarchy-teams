@@ -125,11 +125,9 @@ Item {
   // running was started before them. So it is remembered and run after.
   property bool refreshQueued: false
 
+  property double fetchStartedAt: 0
   function refresh() {
     if (!configured || pluginDir === "") return
-    if (fetchProc.running) { refreshQueued = true; return }
-    refreshQueued = false
-    loading = true
     var command = ["python3", helper(), "fetch", "--account", alias,
                    "--chats", String(chatCount)]
     // The team list is one request now that channels are fetched on demand, so
@@ -137,7 +135,21 @@ Item {
     // draws an unread count and nothing else, skips it.
     if (!includeTeams || !wantChannels) command.push("--no-teams")
     if (setting("demo", false) === true) command.push("--demo")
+    if (fetchProc.running) {
+      // Settings arriving wake three callers on the same tick - configured,
+      // the poll timer and the settings handler - and queueing the second
+      // and third made the window fetch everything twice. The same question
+      // asked a moment ago is already being answered; anything later, or
+      // different, may be about something that changed since, so it waits.
+      if (JSON.stringify(command) === JSON.stringify(fetchProc.command)
+          && Date.now() - fetchStartedAt < 2000) return
+      refreshQueued = true
+      return
+    }
+    refreshQueued = false
+    loading = true
     fetchProc.command = command
+    fetchStartedAt = Date.now()
     fetchProc.running = true
   }
 
@@ -146,7 +158,7 @@ Item {
   function refreshEverything() {
     teamChannels = ({})
     refresh()
-    for (var id in expandedTeams) if (expandedTeams[id] === true) { loadChannels(id); break }
+    loadNextChannels()
     // And the conversation being read, which is the whole point of pressing
     // Refresh while reading one. The list and the transcript come from
     // different requests, so refreshing only the list left the new message
@@ -176,6 +188,14 @@ Item {
     else next[id] = true
     expandedTeams = next
     if (next[id] === true && !teamChannels[id]) loadChannels(id)
+  }
+
+  // One team at a time, so every open team without a list gets its turn:
+  // opening a second team while the first was loading, or Refresh with
+  // several open, used to leave all but one of them reading "No channels".
+  function loadNextChannels() {
+    for (var id in expandedTeams)
+      if (expandedTeams[id] === true && !teamChannels[id]) { loadChannels(id); return }
   }
 
   function loadChannels(teamId) {
@@ -210,6 +230,7 @@ Item {
       for (var k in root.teamChannels) next[k] = root.teamChannels[k]
       next[String(parsed.teamId || wanted)] = parsed.channels || []
       root.teamChannels = next
+      root.loadNextChannels()
     }
   }
 
@@ -230,6 +251,17 @@ Item {
       if (!parsed) {
         root.errorCode = "bad_output"
         root.errorMessage = "Could not read the helper's response"
+        if (root.refreshQueued) Qt.callLater(root.refresh)
+        return
+      }
+      // A token that could not be refreshed for a passing reason - the wifi
+      // not up yet after a resume, a throttled token endpoint - is not a
+      // sign-out. Keep what is on screen and say why it is not moving,
+      // rather than emptying the list until the next poll.
+      var answered = Model.accountView(parsed, root.alias)
+      if (!answered.ok && answered.errorCode === "token_refresh_failed" && root.signedIn) {
+        root.errorCode = "token_refresh_failed"
+        root.errorMessage = answered.errorMessage || "Could not reach Microsoft"
         if (root.refreshQueued) Qt.callLater(root.refresh)
         return
       }
@@ -437,6 +469,13 @@ Item {
   onSignedInChanged: if (!signedIn) { notifier.forget(); meetingNotifier.forget() }
 
   function announceNewChats() {
+    // An answer with no chats in it because reading them failed is not a list
+    // where everything went quiet: observing it would forget every chat, and
+    // the next good poll would announce the whole unread backlog again.
+    if (view.ok !== true) return
+    var warned = view.warnings || []
+    for (var w = 0; w < warned.length; w++)
+      if (warned[w] && warned[w].scope === "chats") return
     var chats = view.chats || []
     var me = String(view.displayName || "")
     var fresh = []
@@ -648,6 +687,9 @@ Item {
   // The chat just created, so the window can open it once the list catches up.
   property string pendingChatId: ""
 
+  // What the search in flight is for. The debounce is shorter than a trip to
+  // the directory, so the box has usually moved on by the time it answers.
+  property string peopleRan: ""
   function searchPeople(query) {
     var text = String(query || "").trim()
     peopleQuery = text
@@ -655,6 +697,7 @@ Item {
     if (text.length < 2) { peopleResults = []; return }
     if (peopleProc.running || pluginDir === "") return
     peopleSearching = true
+    peopleRan = text
     var command = ["python3", helper(), "people", "--account", alias, "--query", text]
     if (setting("demo", false) === true) command.push("--demo")
     peopleProc.command = command
@@ -675,6 +718,12 @@ Item {
     stderr: StdioCollector { id: peopleErrOut; waitForEnd: true }
     onExited: function(exitCode) {
       root.peopleSearching = false
+      // Answering "jan" while the box reads "jan r" would show the wrong
+      // people under the right query; ask again for what is there now.
+      if (root.peopleQuery !== root.peopleRan) {
+        if (root.peopleQuery.length >= 2) Qt.callLater(root.searchPeople, root.peopleQuery)
+        return
+      }
       var parsed = Model.parseJson(peopleOut.text, null)
       if (exitCode !== 0 || !parsed || parsed.ok === false) {
         root.peopleError = parsed && parsed.error
@@ -1269,6 +1318,8 @@ Item {
   property string uploadNotice: ""
   property string uploadPath: ""
 
+  property string uploadComment: ""
+  property string uploadKey: ""
   function uploadFile(path) {
     var file = String(path || "").trim()
     if (!openConversation || file === "" || pluginDir === "") return
@@ -1292,6 +1343,8 @@ Item {
     uploadError = ""
     uploadNotice = ""
     uploadPath = file
+    uploadComment = draft
+    uploadKey = draftKey
     var command = ["python3", helper(), "upload", "--account", alias,
                    "--chat", String(openConversation.id), "--stdin"]
     if (setting("demo", false) === true) command.push("--demo")
@@ -1308,7 +1361,7 @@ Item {
     // Whatever is in the message box goes with the file as its comment, which
     // is what Teams itself does when you drop one on a conversation.
     onStarted: uploadProc.write(JSON.stringify({
-      file: root.uploadPath, comment: root.draft
+      file: root.uploadPath, comment: root.uploadComment
     }) + "\n")
     onExited: function(exitCode) {
       root.uploading = false
@@ -1320,7 +1373,7 @@ Item {
         return
       }
       root.uploadNotice = "Sent " + String(parsed.name || "that file")
-      root.draft = ""
+      root.clearSent(root.uploadKey, root.uploadComment)
       root.reloadConversation()
       root.refresh()
     }
@@ -1404,7 +1457,6 @@ Item {
     messages = []
     messagesError = ""
     messagesQueued = false
-    draft = ""
   }
 
   // Re-read the conversation already open. Deliberately not by closing and
@@ -1473,7 +1525,11 @@ Item {
         return
       }
       root.messagesError = ""
-      root.messages = parsed.messages || []
+      // Re-reading a conversation that has not moved answers with the same
+      // rows; handing the window an equal array still rebuilt the transcript
+      // and lost whatever the reader had selected in it.
+      var rows = parsed.messages || []
+      if (JSON.stringify(rows) !== JSON.stringify(root.messages)) root.messages = rows
     }
   }
 
@@ -1483,11 +1539,56 @@ Item {
   property bool sending: false
   property string sendError: ""
 
+  // A draft per conversation. One shared box meant that clicking a toast
+  // for Bob while halfway through a line to Ana put that line in Bob's box,
+  // one Shift+Enter away from going to him. Kept in memory only: closing a
+  // conversation and coming back finds the text where it was left.
+  property var drafts: ({})
+  property string draftKey: ""
+  onOpenConversationChanged: {
+    var key = openConversation ? String(openConversation.key || "") : ""
+    if (key === draftKey) return
+    var next = {}
+    for (var k in drafts) next[k] = drafts[k]
+    if (draftKey !== "" && draft !== "") next[draftKey] = draft
+    else delete next[draftKey]
+    draft = next[key] || ""
+    delete next[key]
+    drafts = next
+    draftKey = key
+  }
+
+  // Take what was sent out of the box it was typed in - and only that. The
+  // box stays editable while a send is in flight, so anything typed after
+  // pressing Send is the start of the next message, not part of this one.
+  function clearSent(key, text) {
+    if (text === "") return
+    if (key === draftKey) {
+      if (draft === text) draft = ""
+      else if (draft.indexOf(text) === 0) draft = draft.slice(text.length).replace(/^\s+/, "")
+      return
+    }
+    var held = String(drafts[key] || "")
+    if (held === "" || held.indexOf(text) !== 0) return
+    var next = {}
+    for (var k in drafts) next[k] = drafts[k]
+    next[key] = held.slice(text.length).replace(/^\s+/, "")
+    if (next[key] === "") delete next[key]
+    drafts = next
+  }
+
+  // What the send in flight is carrying, and from where - read when the
+  // process starts, which is not the moment the key was pressed.
+  property string sendingText: ""
+  property string sendingKey: ""
+
   function send() {
     if (sending || !openConversation || draft.trim() === "" || pluginDir === "") return
     sending = true
     sendError = ""
     var row = openConversation
+    sendingText = draft
+    sendingKey = draftKey
     var command = ["python3", helper(), "send", "--account", alias, "--stdin"]
     if (row.kind === "chat") command = command.concat(["--chat", String(row.id)])
     else command = command.concat(["--team", String(row.teamId), "--channel", String(row.id)])
@@ -1503,7 +1604,7 @@ Item {
     // machine can read /proc/<pid>/cmdline; nobody can read another process's
     // stdin - and a message is somebody's words.
     stdinEnabled: true
-    onStarted: sendProc.write(JSON.stringify({ text: root.draft }) + "\n")
+    onStarted: sendProc.write(JSON.stringify({ text: root.sendingText }) + "\n")
     stdout: StdioCollector { id: sendOut; waitForEnd: true }
     stderr: StdioCollector { id: sendErrOut; waitForEnd: true }
     onExited: function(exitCode) {
@@ -1517,7 +1618,7 @@ Item {
         // blinked is the one failure they cannot recover from.
         return
       }
-      root.draft = ""
+      root.clearSent(root.sendingKey, root.sendingText)
       root.reloadConversation()
       root.refresh()
     }
@@ -1563,11 +1664,20 @@ Item {
   property var clock: new Date()
   readonly property string todayKey: Model.keyOf(clock)
 
+  // On start too: a window left hidden overnight would otherwise open the
+  // calendar on yesterday, and fetch yesterday's week, for up to a minute.
+  // And the reminders ride on it rather than on the poll, which on battery in
+  // power-saver comes round every six minutes - longer than the window a
+  // reminder has to land in.
   Timer {
     interval: 60 * 1000
     repeat: true
+    triggeredOnStart: true
     running: root.calendarActive || root.wantsMeetingAlerts
-    onTriggered: root.clock = new Date()
+    onTriggered: {
+      root.clock = new Date()
+      root.announceMeetings()
+    }
   }
 
   // The view the calendar opens on. A setting for the first paint and a plain
@@ -2021,14 +2131,12 @@ Item {
     if (!wantsMeetingAlerts) return
     var soon = Model.startingSoon(calendarEvents, clock, reminderMinutes)
     var fresh = []
-    var present = []
-    var all = calendarEvents || []
-    // Everything in the range is present, so an event that has been announced
-    // is not announced again when the next poll finds it still there - and an
-    // occurrence of a daily meeting is a different id tomorrow, which is what
-    // makes tomorrow's standup news again.
-    for (var i = 0; i < all.length; i++)
-      present.push(String(all[i].id || "") + "@" + String(all[i].when || ""))
+    // Only what is starting soon counts as present. Passing the whole range
+    // made every meeting of the day "known" at the first poll, so by the time
+    // one was five minutes away it had already been seen and nothing was
+    // said. An announced meeting stays known while it is still starting soon,
+    // and an occurrence of a daily meeting is a different id tomorrow, which
+    // is what makes tomorrow's standup news again.
     for (var s = 0; s < soon.length; s++) {
       var event = soon[s]
       var minutes = Model.minutesUntil(event, clock)
@@ -2044,7 +2152,7 @@ Item {
         replaceKey: "meeting:" + String(event.id || "")
       })
     }
-    meetingNotifier.observe("meetings", fresh, present)
+    meetingNotifier.observe("meetings", fresh)
   }
 
   // ---- sign-in ----------------------------------------------------------
@@ -2183,7 +2291,11 @@ Item {
       if (parsed.ok === false) {
         root.loggingIn = false
         loginPollTimer.stop()
-        root.loginMessage = String((parsed.error || {}).message || "Sign-in failed")
+        // loginMessage is only drawn while loggingIn is true, which it just
+        // stopped being - an expired or declined code needs loginError to be
+        // seen at all.
+        root.loginError = String((parsed.error || {}).message || "Sign-in failed")
+        root.loginMessage = root.loginError
         return
       }
       if (parsed.status === "pending") return

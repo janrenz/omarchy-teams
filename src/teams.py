@@ -19,17 +19,21 @@ registered somewhere else has to. See README.md.
 
 import argparse
 import base64
+import fcntl
 import hashlib
 import json
 import os
 import re
 import stat
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
+from html import unescape as html_unescape
+from http.client import HTTPException
 
 GRAPH = "https://graph.microsoft.com/v1.0"
 # The bare host, needed by the redirect guard above the first request and by
@@ -228,6 +232,14 @@ def read_json(path, default=None):
         return default
 
 
+def discard(path):
+    """Remove a file that a second helper may have removed first."""
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
 def write_json(path, data):
     """Write a token file only the user can read.
 
@@ -236,11 +248,24 @@ def write_json(path, data):
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     os.chmod(os.path.dirname(path), stat.S_IRWXU)
-    tmp = path + ".tmp"
-    handle = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, stat.S_IRUSR | stat.S_IWUSR)
-    with os.fdopen(handle, "w", encoding="utf-8") as stream:
-        json.dump(data, stream)
-    os.replace(tmp, path)
+    # A name of its own per writer: up to three Services refresh the same
+    # account at the same moment, and a shared ".tmp" let them truncate each
+    # other's half-written file and rename it into place - a token file that
+    # no longer parses is a refresh token lost and a sign-in to do again.
+    # mkstemp creates the file 0600 before anything is written into it.
+    handle, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".write-", suffix=".tmp")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            json.dump(data, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.remove(tmp)
+        except OSError:
+            pass
+        raise
 
 
 def read_capped(response, limit=MAX_RESPONSE_BYTES):
@@ -343,15 +368,21 @@ def http(url, *, method="GET", data=None, json_body=None, raw=None, headers=None
     opener = UPLOAD_OPENER if raw is not None else API_OPENER
     try:
         with opener.open(request, timeout=timeout) as response:
-            raw = read_capped(response)
-            return response.status, (json.loads(raw) if raw else {})
+            answer = read_capped(response)
+            try:
+                return response.status, (json.loads(answer) if answer else {})
+            except ValueError:
+                return 0, {"error": {"message": "Microsoft answered with something that is not JSON"}}
     except urllib.error.HTTPError as error:
         try:
-            raw = read_capped(error)
-            return error.code, (json.loads(raw) if raw else {})
-        except (ValueError, AccountError):
+            answer = read_capped(error)
+            return error.code, (json.loads(answer) if answer else {})
+        except (ValueError, AccountError, HTTPException, OSError):
             return error.code, {}
-    except (urllib.error.URLError, TimeoutError, OSError) as error:
+    # HTTPException is not an OSError: a connection dropped halfway through a
+    # body is IncompleteRead, and escaping here would print a traceback where
+    # the window expects one JSON object.
+    except (urllib.error.URLError, TimeoutError, OSError, HTTPException) as error:
         return 0, {"error": {"message": "Could not reach Microsoft: %s" % error}}
 
 
@@ -436,10 +467,31 @@ def has_channels(account):
     return "channelmessage.read.all" in str((account or {}).get("scopes", "")).lower()
 
 
+def token_fresh(account):
+    return bool(account.get("access_token")) and time.time() < float(account.get("expires_at", 0))
+
+
 def access_token(alias, account):
-    if account.get("access_token") and time.time() < float(account.get("expires_at", 0)):
+    if token_fresh(account):
         return account["access_token"], account
 
+    # Every Service on the desktop notices the same expiry on the same tick.
+    # One of them refreshes; the others wait for it and use what it stored,
+    # rather than spending - and with rotation, invalidating - the refresh
+    # token a second and third time.
+    os.makedirs(STATE_DIR, exist_ok=True)
+    # Beside the account file, but not a .json, so `list` never takes it for one.
+    with open(state_path(alias)[:-len(".json")] + ".lock", "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        stored = read_json(state_path(alias))
+        if isinstance(stored, dict) and token_fresh(stored):
+            return stored["access_token"], stored
+        if isinstance(stored, dict) and stored.get("refresh_token"):
+            account = stored
+        return refresh_access_token(alias, account)
+
+
+def refresh_access_token(alias, account):
     refresh_token = account.get("refresh_token")
     if not refresh_token:
         raise AccountError("auth_required", "Not signed in")
@@ -455,7 +507,16 @@ def access_token(alias, account):
         },
     )
     if status != 200 or "access_token" not in payload:
-        raise AccountError("auth_required", payload.get("error_description", "Sign in again").split("\r")[0])
+        reason = str(payload.get("error_description") or graph_error(payload, "Sign in again")).split("\r")[0]
+        # Only an answer that says the grant itself is no good means signing
+        # in again. Waking up before the wifi does, a timeout or a throttled
+        # token endpoint leaves a perfectly good refresh token, and calling
+        # that "sign in" sends the user through a device code for nothing.
+        if status in (400, 401) and payload.get("error") in ("invalid_grant", "interaction_required",
+                                                              "consent_required", "invalid_client",
+                                                              "unauthorized_client"):
+            raise AccountError("auth_required", reason)
+        raise AccountError("token_refresh_failed", reason)
     return payload["access_token"], store_tokens(alias, account, payload)
 
 
@@ -595,7 +656,7 @@ def cmd_login_poll(args):
     if not pending:
         fail("no_pending_login", "No sign-in in progress")
     if time.time() > pending.get("expires_at", 0):
-        os.remove(pending_path)
+        discard(pending_path)
         fail("expired", "That code expired - start again")
 
     status, payload = http(
@@ -609,9 +670,12 @@ def cmd_login_poll(args):
     )
     if status != 200:
         error = payload.get("error", "")
-        if error in ("authorization_pending", "slow_down"):
+        # Not reaching the token endpoint, or it being unwell, is no answer
+        # about the code: the user may be halfway through typing it in, and
+        # throwing it away here makes them start over for a wifi blip.
+        if error in ("authorization_pending", "slow_down") or status == 0 or status >= 500:
             out({"ok": True, "status": "pending"})
-        os.remove(pending_path)
+        discard(pending_path)
         message = payload.get("error_description", "Sign-in failed").split("\r")[0]
         # The one failure worth naming, because the way out is different: the
         # channel scopes need an administrator, the chat scopes do not.
@@ -628,7 +692,7 @@ def cmd_login_poll(args):
         "authority": pending.get("authority", DEFAULT_AUTHORITY),
     }
     account = store_tokens(args.account, account, payload)
-    os.remove(pending_path)
+    discard(pending_path)
 
     status, me = graph_get(account["access_token"], "/me", {"$select": "displayName,userPrincipalName,id"})
     if status == 200:
@@ -737,16 +801,31 @@ LINK_OPEN, LINK_SEP, LINK_CLOSE = "\x00", "\x01", "\x02"
 LINK_MARKS = re.compile(r"[\x00\x01\x02]")
 
 
+ENTITY = re.compile(r"&(#[0-9]+|#[xX][0-9A-Fa-f]+|[A-Za-z][A-Za-z0-9]*);")
+
+
+def decode_entities(text):
+    """Every HTML entity decoded, in one pass, none of them into a link mark.
+
+    One pass, because decoding `&amp;` first and `&lt;` after turned the
+    literal text `&amp;lt;` into a `<`. And the whole table, because a
+    message from Outlook writes its apostrophes as `&rsquo;` and `&#8217;`.
+    A `&#1;` must not become the mark that opens a link.
+    """
+    def one(match):
+        decoded = html_unescape(match.group(0))
+        return LINK_MARKS.sub("", decoded.replace("\xa0", " "))
+    return ENTITY.sub(one, text)
+
+
 def link_href(attrs):
     """The address an anchor goes to, or "" if it is not one to follow."""
     href = attr(attrs, "href").strip()
     if not href:
         return ""
     # Written before the entities are decoded, so the ampersands in a query
-    # string are still `&amp;` here; decode the few that matter, in the same
-    # order plain_text does.
-    href = (href.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">")
-                .replace("&quot;", '"').replace("&#39;", "'"))
+    # string are still `&amp;` here.
+    href = decode_entities(href)
     lowered = href.lower()
     return href if lowered.startswith(LINK_SCHEMES) else ""
 
@@ -805,8 +884,7 @@ def text_and_links(html):
     text = re.sub(r"<\s*br\s*/?\s*>", "\n", text, flags=re.I)
     text = re.sub(r"<\s*/\s*(p|div|li)\s*>", "\n", text, flags=re.I)
     text = re.sub(r"<[^>]+>", "", text)
-    text = (text.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<")
-                .replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'"))
+    text = decode_entities(text)
     text = re.sub(r"[ \t]+\n", "\n", text)
     text = re.sub(r"\n{3,}", "\n\n", text).strip()
     return take_marks(text)
@@ -1097,13 +1175,15 @@ def fetch_account(alias, args):
     if not account:
         raise AccountError("auth_required", "Not signed in")
     token, account = access_token(alias, account)
+    # A sign-in whose /me failed has no userId on file; the token knows anyway.
+    me_id = own_user_id(token, account)
 
     result = {
         "ok": True,
         "alias": alias,
         "username": account.get("username", ""),
         "displayName": account.get("displayName", ""),
-        "userId": account.get("userId", ""),
+        "userId": me_id,
         "channels": has_channels(account),
         "canMarkRead": can_mark_read(account),
         "canUpload": can_upload(account),
@@ -1125,12 +1205,11 @@ def fetch_account(alias, args):
         "warnings": [],
     }
 
-    chats, chat_error = chat_rows(token, account.get("userId", ""), max(1, min(args.chats, CHAT_CAP)))
+    chats, chat_error = chat_rows(token, me_id, max(1, min(args.chats, CHAT_CAP)))
     result["chats"] = chats
 
     # One batched request for everybody in the list, and only when the sign-in
     # is allowed to ask.
-    me_id = str(account.get("userId") or "")
     if can_see_presence(account):
         # The user's own id rides along in the same batch. The picker has to
         # say what it is about to change, and this request takes 650 ids, so
@@ -1338,9 +1417,10 @@ def cmd_image(args):
         fail("not_an_image", "That link is %s, not an image" % (content_type or "of unknown type"))
 
     path = os.path.join(IMAGE_CACHE, digest + IMAGE_TYPES.get(content_type, ".bin"))
-    tmp = path + ".tmp"
-    with open(tmp, "wb") as handle:
-        handle.write(body)
+    # The same picture is asked for by every window showing the conversation.
+    handle, tmp = tempfile.mkstemp(dir=IMAGE_CACHE, prefix=".fetch-", suffix=".tmp")
+    with os.fdopen(handle, "wb") as stream:
+        stream.write(body)
     os.replace(tmp, path)
     out({"ok": True, "path": path, "cached": False, "bytes": len(body), "contentType": content_type})
 
@@ -2325,6 +2405,13 @@ def graph_moment(field):
     return when.astimezone()
 
 
+def graph_date(field):
+    """The date of a Graph dateTimeTimeZone written as a midnight, or None."""
+    raw = str((field or {}).get("dateTime") or "").strip()
+    match = re.match(r"^(\d{4}-\d{2}-\d{2})T00:00(:00(\.0*)?)?$", raw)
+    return match.group(1) if match else None
+
+
 def day_key(when):
     """The local date a moment belongs to, as the window's own day key."""
     return when.strftime("%Y-%m-%d") if when else ""
@@ -2393,6 +2480,19 @@ def event_row(event, detailed=False):
         end = start
     last = (end - timedelta(microseconds=1)) if (start and end and end > start) else start
     all_day = event.get("isAllDay") is True
+    start_date, end_date = day_key(start), day_key(last)
+    if all_day:
+        # An all-day event is a run of dates, not two instants. Graph writes it
+        # as midnight to midnight in whatever zone the answer is in - UTC, as
+        # nothing here sends a Prefer header - and turning UTC midnight into
+        # local time put a Berlin holiday on two days and a New York one on
+        # the day before. Where the stamp is a midnight, its date is the date.
+        first, after = graph_date(event.get("start")), graph_date(event.get("end"))
+        if first:
+            start_date = first
+            end_date = first
+            if after and after > first:
+                end_date = (datetime.fromisoformat(after) - timedelta(days=1)).strftime("%Y-%m-%d")
     minutes = int(round((end - start).total_seconds() / 60.0)) if (start and end) else 0
     organizer = ((event.get("organizer") or {}).get("emailAddress") or {})
     kind = str(event.get("type") or "singleInstance")
@@ -2404,8 +2504,8 @@ def event_row(event, detailed=False):
         "preview": plain_text(event.get("bodyPreview"))[:200],
         "when": local_iso(start),
         "until": local_iso(end),
-        "startDate": day_key(start),
-        "endDate": day_key(last),
+        "startDate": start_date,
+        "endDate": end_date,
         "allDay": all_day,
         "minutes": minutes,
         "where": event_location(event),
@@ -2454,11 +2554,15 @@ def calendar_window(from_date, days):
     meeting in yesterday's column for anybody east of London.
     """
     try:
-        start = datetime.fromisoformat(str(from_date) + "T00:00:00").astimezone()
+        first = datetime.fromisoformat(str(from_date) + "T00:00:00")
     except ValueError:
         raise AccountError("bad_date", "A date has to be written as YYYY-MM-DD")
     span = max(1, min(int(days or 1), CALENDAR_DAYS_CAP))
-    return start, start + timedelta(days=span), span
+    # The days are added to the wall clock and only then given an offset.
+    # astimezone() hands back a fixed offset, so adding a week to it walks
+    # straight past a clock change: the week ending on the last Sunday of
+    # October stopped at 23:00 and lost its last hour of meetings.
+    return first.astimezone(), (first + timedelta(days=span)).astimezone(), span
 
 
 def utc_param(when):
@@ -2603,7 +2707,7 @@ def cmd_calendar(args):
     }
     wanted = [str(one).strip() for one in (args.calendars or []) if str(one).strip()]
     if wanted:
-        rows, total, sources, missing = calendar_sources_view(
+        rows, total, sources, missing, more = calendar_sources_view(
             token, account, wanted[:CALENDAR_SOURCE_CAP], window)
     else:
         # Nothing picked means the calendar, the way it has always been: one
@@ -2619,6 +2723,9 @@ def cmd_calendar(args):
         found = payload.get("value") or []
         rows = [event_row(event) for event in found[:CALENDAR_CAP]]
         total, sources, missing = len(found), [], []
+        # $top is the cap, so a full page can never be more than it; the
+        # link to a next page is the only sign that the range went on.
+        more = "@odata.nextLink" in payload
 
     # By when they start, with an all-day event above the morning's first
     # meeting rather than wherever its UTC midnight happened to sort.
@@ -2633,7 +2740,7 @@ def cmd_calendar(args):
          # There is no paging here on purpose - a month nobody can scroll past
          # is not worth a second request - so a range that hits the cap says
          # so rather than quietly ending early.
-         "capped": total > CALENDAR_CAP})
+         "capped": more or total > CALENDAR_CAP})
 
 
 def calendar_sources_view(token, account, wanted, window):
@@ -2647,7 +2754,7 @@ def calendar_sources_view(token, account, wanted, window):
     """
     known = {entry["id"]: entry for entry in
              mailbox_calendars(token, account_address(account))}
-    rows, total, sources, missing = [], 0, [], []
+    rows, total, sources, missing, more = [], 0, [], [], False
     for calendar_id in wanted:
         source = known.get(calendar_id)
         if source is None:
@@ -2662,6 +2769,7 @@ def calendar_sources_view(token, account, wanted, window):
             continue
         found = payload.get("value") or []
         total += len(found)
+        more = more or "@odata.nextLink" in payload
         for event in found[:CALENDAR_CAP]:
             row = event_row(event)
             row["calendarId"] = source["id"]
@@ -2675,7 +2783,7 @@ def calendar_sources_view(token, account, wanted, window):
         sources.append({"id": source["id"], "name": source["name"],
                         "shared": source["shared"], "default": source["default"],
                         "events": len(found)})
-    return rows, total, sources, missing
+    return rows, total, sources, missing, more
 
 
 def cmd_event(args):
@@ -3219,6 +3327,10 @@ def cmd_remove(args):
         if os.path.exists(path):
             os.remove(path)
             removed = True
+    try:
+        os.remove(state_path(args.account)[:-len(".json")] + ".lock")
+    except OSError:
+        pass
     out({"ok": True, "removed": removed})
 
 
@@ -3752,6 +3864,8 @@ def main():
         args.func(args)
     except AccountError as error:
         fail(error.code, error.message)
+    except Exception as error:  # noqa: BLE001 - invariant 5: one JSON object, always
+        fail("internal", "%s: %s" % (type(error).__name__, error))
 
 
 if __name__ == "__main__":

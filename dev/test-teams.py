@@ -2210,5 +2210,82 @@ class Aliases(unittest.TestCase):
             teams.state_path("../escape")
 
 
+class ReviewFixes(unittest.TestCase):
+    """What the October review found, each pinned so it stays found."""
+
+    def with_zone(self, zone, check):
+        before = os.environ.get("TZ")
+        os.environ["TZ"] = zone
+        teams.time.tzset()
+        try:
+            check()
+        finally:
+            if before is None:
+                os.environ.pop("TZ", None)
+            else:
+                os.environ["TZ"] = before
+            teams.time.tzset()
+
+    def test_a_week_across_the_clock_change_still_ends_at_midnight(self):
+        def check():
+            _, end, _ = teams.calendar_window("2026-10-19", 7)
+            self.assertEqual(end.strftime("%Y-%m-%d %H:%M"), "2026-10-26 00:00")
+            _, end, _ = teams.calendar_window("2026-03-23", 7)
+            self.assertEqual(end.strftime("%Y-%m-%d %H:%M"), "2026-03-30 00:00")
+        self.with_zone("Europe/Berlin", check)
+
+    def test_an_all_day_event_written_as_utc_midnight_keeps_its_date(self):
+        event = {"id": "x", "isAllDay": True,
+                 "start": {"dateTime": "2026-09-04T00:00:00.0000000", "timeZone": "UTC"},
+                 "end": {"dateTime": "2026-09-05T00:00:00.0000000", "timeZone": "UTC"}}
+        for zone in ("Europe/Berlin", "America/New_York"):
+            def check():
+                row = teams.event_row(event)
+                self.assertEqual((row["startDate"], row["endDate"]), ("2026-09-04", "2026-09-04"))
+            self.with_zone(zone, check)
+
+    def test_entities_are_decoded_once_and_all_of_them(self):
+        self.assertEqual(teams.plain_text("&amp;lt;b&amp;gt; it&#8217;s&nbsp;&rsquo;"),
+                         "&lt;b&gt; it\u2019s \u2019")
+
+    def test_a_decoded_entity_cannot_open_a_link(self):
+        text, links = teams.text_and_links("ab&#1;c&#2;d")
+        self.assertEqual((text, links), ("abcd", []))
+
+    def test_only_a_refused_grant_means_signing_in_again(self):
+        account = {"refresh_token": "r", "client_id": "c"}
+        answers = [(0, {"error": {"message": "offline"}}),
+                   (503, {}),
+                   (400, {"error": "invalid_grant", "error_description": "expired"})]
+        codes = []
+        original = teams.http
+        try:
+            for answer in answers:
+                teams.http = lambda *a, _answer=answer, **k: _answer
+                with self.assertRaises(teams.AccountError) as caught:
+                    teams.refresh_access_token("work", account)
+                codes.append(caught.exception.code)
+        finally:
+            teams.http = original
+        self.assertEqual(codes, ["token_refresh_failed", "token_refresh_failed", "auth_required"])
+
+    def test_a_token_another_helper_just_refreshed_is_used_not_refreshed_again(self):
+        with tempfile.TemporaryDirectory() as state:
+            original_dir, original_http = teams.STATE_DIR, teams.http
+            teams.STATE_DIR = state
+            try:
+                fresh = {"access_token": "new", "expires_at": teams.time.time() + 600,
+                         "refresh_token": "r2"}
+                teams.write_json(teams.state_path("work"), fresh)
+                teams.http = lambda *a, **k: self.fail("refreshed a token that was fresh on disk")
+                token, _ = teams.access_token("work", {"access_token": "old", "expires_at": 0,
+                                                       "refresh_token": "r1"})
+                self.assertEqual(token, "new")
+                self.assertEqual([n for n in os.listdir(state) if n.endswith(".tmp")], [])
+                self.assertEqual(oct(os.stat(teams.state_path("work")).st_mode & 0o777), "0o600")
+            finally:
+                teams.STATE_DIR, teams.http = original_dir, original_http
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

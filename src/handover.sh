@@ -29,12 +29,12 @@ print=false
 while (($#)); do
   case "$1" in
     --account) account=${2:?--account needs a value}; shift 2 ;;
-    --chat)    chat=${2-}; shift 2 ;;
-    --team)    team=${2-}; shift 2 ;;
-    --channel) channel=${2-}; shift 2 ;;
-    --title)   title=${2-}; shift 2 ;;
-    --message) message=${2-}; shift 2 ;;
-    --task)    task=${2-}; shift 2 ;;
+    --chat)    chat=${2?--chat needs a value}; shift 2 ;;
+    --team)    team=${2?--team needs a value}; shift 2 ;;
+    --channel) channel=${2?--channel needs a value}; shift 2 ;;
+    --title)   title=${2?--title needs a value}; shift 2 ;;
+    --message) message=${2?--message needs a value}; shift 2 ;;
+    --task)    task=${2?--task needs a value}; shift 2 ;;
     --print)   print=true; shift ;;
     *) echo "Unexpected argument: $1" >&2; exit 1 ;;
   esac
@@ -61,15 +61,23 @@ skill="$(cd "$here/.." && pwd)/skills/omarchy-teams/SKILL.md"
 
 : "${task:=Catch me up on this conversation, and if it wants an answer from me, draft one into the window with the draft recipe in the skill. Post nothing.}"
 
+# Quoted for the shell the agent will paste this into: the ids come out of
+# Graph, and an id with a quote in it must not become a second command.
+printf -v q_teams '%q' "$here/teams.py"
+printf -v q_account '%q' "$account"
+printf -v q_chat '%q' "$chat"
+printf -v q_team '%q' "$team"
+printf -v q_channel '%q' "$channel"
+
 if [[ -n $chat ]]; then
   where="  account alias: $account
   chat:          $chat${title:+  ($title)}"
-  read_it="python3 $here/teams.py messages --account $account --chat '$chat' --top 30"
+  read_it="python3 $q_teams messages --account $q_account --chat $q_chat --top 30"
 else
   where="  account alias: $account
   team:          $team
   channel:       $channel${title:+  ($title)}"
-  read_it="python3 $here/teams.py messages --account $account --team '$team' --channel '$channel' --top 30"
+  read_it="python3 $q_teams messages --account $q_account --team $q_team --channel $q_channel --top 30"
 fi
 [[ -n $message ]] && where+="
   message:       $message  (the one the keyboard cursor was on)"

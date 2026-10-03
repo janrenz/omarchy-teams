@@ -219,29 +219,40 @@ Item {
           width: root.columnWidth
           height: root.allDayHeight
 
-          Column {
+          // The strip stops growing at three rows; a fourth all-day event
+          // scrolls inside it instead of drawing over the morning.
+          Flickable {
             anchors.fill: parent
             anchors.margins: Style.space(1)
-            spacing: Style.space(1)
+            clip: true
+            contentHeight: allDayColumn.implicitHeight
+            boundsBehavior: Flickable.StopAtBounds
+            interactive: contentHeight > height
 
-            Repeater {
-              model: modelData.allDay
+            Column {
+              id: allDayColumn
+              width: parent.width
+              spacing: Style.space(1)
 
-              delegate: EventChip {
-                required property var modelData
-                readonly property string dayKey: allDayCell.modelData.key
-                width: parent ? parent.width : 0
-                height: root.allDayRowHeight
-                event: modelData
-                palette: root.palette
-                fg: root.fg
-                accent: root.accent
-                fontFamily: root.fontFamily
-                dense: true
-                cursored: root.cursorKey === Model.eventCursorKey(dayKey, modelData.id)
-                selected: root.selectedId === String(modelData.id)
-                onPicked: root.picked(dayKey, modelData)
-                onJoinRequested: root.joinRequested(modelData)
+              Repeater {
+                model: allDayCell.modelData.allDay
+
+                delegate: EventChip {
+                  required property var modelData
+                  readonly property string dayKey: allDayCell.modelData.key
+                  width: parent ? parent.width : 0
+                  height: root.allDayRowHeight
+                  event: modelData
+                  palette: root.palette
+                  fg: root.fg
+                  accent: root.accent
+                  fontFamily: root.fontFamily
+                  dense: true
+                  cursored: root.cursorKey === Model.eventCursorKey(dayKey, modelData.id)
+                  selected: root.selectedId === String(modelData.id)
+                  onPicked: root.picked(dayKey, modelData)
+                  onJoinRequested: root.joinRequested(modelData)
+                }
               }
             }
           }

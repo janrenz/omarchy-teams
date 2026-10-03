@@ -39,8 +39,6 @@ Column {
   // against the name instead.
   property int markerGutter: rowIndent + Style.space(6)
 
-  function pad(px) { return Math.max(1, Math.round(px * density)) }
-
   signal picked(var row)
   // Where the cursored row sits, so the pane holding this list can keep it on
   // screen. The list cannot scroll itself: it does not know it is in one.
@@ -49,6 +47,22 @@ Column {
   spacing: rowGap
 
   readonly property var selectable: Model.selectableRows(rows)
+
+  // The cursor is held by the row it is on, not by its position. A poll
+  // moves a chat with a new message to the top, and an index left where it
+  // was then points at a different chat - which Enter would open.
+  property string cursorKey: ""
+  onCursorIndexChanged: {
+    var at = cursorIndex >= 0 && cursorIndex < selectable.length ? rows[selectable[cursorIndex]] : null
+    cursorKey = at ? String(at.key || "") : ""
+  }
+  onSelectableChanged: {
+    if (cursorKey === "") return
+    for (var i = 0; i < selectable.length; i++) {
+      if (String(rows[selectable[i]].key || "") === cursorKey) { cursorIndex = i; return }
+    }
+    cursorIndex = Math.min(cursorIndex, selectable.length - 1)
+  }
 
   function moveCursor(step) {
     if (selectable.length === 0) return

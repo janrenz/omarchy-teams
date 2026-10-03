@@ -49,7 +49,7 @@ Rectangle {
                   + Style.spacing.xs * 2
   color: root.unanswered || root.ignored
     ? "transparent"
-    : Util.alpha(root.tint, root.selected ? 0.34 : (pointer.containsMouse ? 0.26 : 0.18))
+    : Util.alpha(root.tint, root.selected ? 0.34 : (chipHover.hovered ? 0.26 : 0.18))
   border.width: (root.unanswered || root.selected || root.cursored) ? Style.space(1) : 0
   border.color: root.cursored ? root.fg : Util.alpha(root.tint, root.ignored ? 0.5 : 0.9)
   opacity: root.ignored ? 0.6 : 1.0
@@ -64,6 +64,12 @@ Rectangle {
     cursorShape: Qt.PointingHandCursor
     onClicked: root.picked()
   }
+
+  // Whether the pointer is anywhere over the chip, Join button included. The
+  // button's own MouseArea takes the hover from `pointer` the moment it
+  // appears, so asking `pointer` hid the button again under the cursor - it
+  // flickered, and a click meant for Join opened the meeting instead.
+  HoverHandler { id: chipHover }
 
   // The stripe down the side, which is what makes a column of these readable
   // as a column rather than as a stack of grey boxes.
@@ -219,7 +225,7 @@ Rectangle {
     anchors.top: parent.top
     anchors.margins: Style.spacing.xs
     visible: !root.dense && String(root.event.joinUrl || "") !== ""
-             && (pointer.containsMouse || root.cursored)
+             && (chipHover.hovered || root.cursored)
              && root.height >= joinText.implicitHeight + Style.spacing.md
     width: joinText.implicitWidth + Style.spacing.md
     height: joinText.implicitHeight + Style.spacing.xs

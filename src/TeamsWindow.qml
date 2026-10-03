@@ -285,8 +285,6 @@ Item {
     locationList.pickAt(index)
   }
 
-  readonly property bool typing: composer.activeFocus
-
   // The list that is actually on screen: narrow, that is the drawer's copy.
   function activeList() {
     return listDrawerOpen ? drawerList : conversations
@@ -314,9 +312,6 @@ Item {
     var bar = transcript.ScrollBar.vertical
     return bar ? bar.width : 0
   }
-
-  // One line of the transcript, near enough, for the scroll keys.
-  readonly property int lineStep: Math.max(Style.space(18), Style.font.bodySmall * 2)
 
   // ---- the message the keyboard is on -------------------------------------
   //
@@ -554,7 +549,9 @@ Item {
     if (!meetingDraft || String(meetingDraft.subject || "") === "") {
       meetingDraft = {
         subject: "", date: day, from: pad2(at) + ":00",
-        to: pad2(Math.min(23, at + 1)) + ":00",
+        // An hour long, except at 23:00, where the next hour is tomorrow
+        // and the form would refuse a meeting that ends when it starts.
+        to: at >= 23 ? "23:59" : pad2(at + 1) + ":00",
         allDay: false, days: 1, online: true, where: "", text: "", attendees: []
       }
     } else if (String(dayKey || "") !== "") {
@@ -676,7 +673,8 @@ Item {
     // Nowhere to put it. Better to say so to whoever called than to drop the
     // text into a window that is not reading anything.
     if (!service.reading) return "no-conversation"
-    service.draft = text
+    // Beside what the user had already typed there, never over it.
+    service.draft = service.draft.trim() === "" ? text : service.draft.replace(/\s+$/, "") + "\n\n" + text
     focusPane = "conversation"
     Qt.callLater(function() { root.focusComposer() })
     return "ok"
@@ -743,9 +741,24 @@ Item {
   // Only where there is something to type into. Focusing a composer that is
   // not on screen would take the keys away from the conversation list and give
   // them to nothing.
+  //
+  // `visible` is the effective one: a conversation open behind the calendar or
+  // the settings still has a composer, and forceActiveFocus would hand it the
+  // keys anyway - every letter typed into a box nobody can see, and a
+  // Shift+Enter that sends it to the chat behind.
   function focusComposer() {
-    if (!service.reading) return
+    if (!service.reading || !composer.visible) return
     composer.forceActiveFocus()
+  }
+
+  // A string, so the transcript's model depends on a value and not on
+  // `service.view` - which is a new object after every poll, and rebuilt
+  // every line, every picture process and every selection with it even when
+  // nothing in the conversation had changed.
+  readonly property string myUserId: String(service.view.userId || "")
+
+  function editableFocused(item) {
+    return !!item && item.cursorPosition !== undefined && item.readOnly !== true
   }
 
   // ---- scrolling by keyboard ---------------------------------------------
@@ -901,6 +914,7 @@ Item {
       Keys.onPressed: function(event) {
         // While a field has focus these belong to the text in it.
         if (composer.activeFocus || codeField.activeFocus) return
+        if (root.editableFocused(keyCatcher.Window.activeFocusItem)) return
         if (root.composingNew || root.composingMeeting) return
         // The key list is over everything, so while it is up the scroll keys
         // move it rather than the pane behind it.
@@ -1488,8 +1502,15 @@ Item {
         anchors.fill: parent
         // Stands down whenever a field has focus: it consumes bare letters to
         // drive the cursor, which would eat them out of a message.
+        //
+        // Any editable field, not a list of them: the settings pages are full
+        // of fields this line never named, and arrows and Escape typed in one
+        // of them walked the hidden list - or, Right at the end of the text,
+        // handed the next letters to the command vocabulary. A transcript line
+        // is a read-only TextEdit and still lets the keys through.
         blocked: composer.activeFocus || codeField.activeFocus
                  || peopleField.activeFocus || root.composingNew
+                 || root.editableFocused(keyCatcher.Window.activeFocusItem)
                  // The meeting form is all fields, and the meeting card has
                  // one - the line for the organiser - which only takes the
                  // letters while it has focus.
@@ -1595,7 +1616,12 @@ Item {
               if (text === "r") { service.reloadCalendar(); return }
             }
           }
+          // What acts on the conversation does not reach through a pane that
+          // covers it: an `e` on the calendar followed by `1` for the day view
+          // put a thumbs-up on the newest message of the chat behind it.
+          var covered = root.onCalendar || root.showSettings
           if (text === "c") root.toggleCalendar()
+          else if (covered && "e+ai".indexOf(text) !== -1) return
           else if (text === "e" || text === "+") root.startPicking()
           else if (text === "a") root.askAgent()
           else if (text === "r") service.reloadConversation()
@@ -2080,6 +2106,10 @@ Item {
             height: parent.height - y
             visible: root.showSettings
             clip: true
+            // The key catcher stands down while one of these fields has the
+            // focus, so Escape would otherwise do nothing at all. The first
+            // one leaves the field, the second closes the settings.
+            Keys.onEscapePressed: keyCatcher.forceActiveFocus()
 
             SettingsForm {
               id: settingsForm
@@ -2317,7 +2347,7 @@ Item {
                     onHeightChanged: if (transcript.followNewest) transcript.toNewest()
 
                     Repeater {
-                      model: Model.groupMessages(service.messages, service.view.userId)
+                      model: Model.groupMessages(service.messages, root.myUserId)
 
                       delegate: Column {
                         required property var modelData

@@ -307,7 +307,7 @@ Column {
         parts.push(root.current("channels", true) === true ? "with channels" : "chats only")
         if (root.current("notify", true) !== false) parts.push("notifies")
         if (root.current("sendFiles", false) === true) parts.push("files")
-        if (root.current("agentHandover", false) === true) parts.push("agent handover")
+        if (root.current("agentHandover", true) !== false) parts.push("agent handover")
         return parts.join("  ·  ")
       }
       fg: Color.foreground

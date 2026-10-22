@@ -2,6 +2,7 @@ import QtQuick
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 // Plain "Model.js", not "../src/Model.js": a relative import resolves against
 // this file's place in the *stage*, where link.sh has put Model.js beside it -
 // not against where the file really lives. The repo-relative path resolves
@@ -108,7 +109,7 @@ ShellRoot {
       if (backdrop.rect) return
       backdrop.rect = Qt.createQmlObject(
         'import QtQuick; Rectangle { z: -1000; anchors.fill: parent }', item, "backdrop")
-      backdrop.rect.color = Color.background
+      backdrop.rect.color = Commons.Color.background
     }
   }
 

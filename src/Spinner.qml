@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // Three dots, pulsing in turn: something is happening and it has not stalled.
 //
@@ -10,7 +11,7 @@ import qs.Commons
 Row {
   id: root
 
-  property color color: Color.accent
+  property color color: Commons.Color.accent
   property int dotSize: 4
   property int period: 900
 

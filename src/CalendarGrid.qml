@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -20,8 +21,8 @@ Item {
 
   property var days: []
   property var palette: ({})
-  property color fg: Color.foreground
-  property color accent: Color.accent
+  property color fg: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   property real density: 1.0
   // Which event the keyboard is on, as day-and-id: the same meeting appears
@@ -166,7 +167,7 @@ Item {
                 anchors.centerIn: parent
                 text: String(modelData.day)
                 textFormat: Text.PlainText
-                color: modelData.isToday ? Color.background
+                color: modelData.isToday ? Commons.Color.background
                        : (modelData.isPast ? Qt.darker(root.fg, 1.6) : root.fg)
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body

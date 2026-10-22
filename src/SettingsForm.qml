@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -294,7 +295,7 @@ Column {
         if (root.service.signedIn) return String(root.service.view.username || named)
         return named + "  ·  not signed in"
       }
-      fg: Color.foreground
+      fg: Commons.Color.foreground
       fontFamily: Style.font.family
       onClicked: root.page = root.pageAccount
     }
@@ -310,7 +311,7 @@ Column {
         if (root.current("agentHandover", true) !== false) parts.push("agent handover")
         return parts.join("  ·  ")
       }
-      fg: Color.foreground
+      fg: Commons.Color.foreground
       fontFamily: Style.font.family
       onClicked: root.page = root.pageChats
     }
@@ -326,7 +327,7 @@ Column {
           parts.push(Number(root.current("reminderMinutes", 5)) + " min warning")
         return parts.join("  ·  ")
       }
-      fg: Color.foreground
+      fg: Commons.Color.foreground
       fontFamily: Style.font.family
       onClicked: root.page = root.pageCalendar
     }
@@ -339,7 +340,7 @@ Column {
         return root.current("holdPresence", false) === true
           ? "on  ·  this machine holds a session" : "on"
       }
-      fg: Color.foreground
+      fg: Commons.Color.foreground
       fontFamily: Style.font.family
       onClicked: root.page = root.pagePresence
     }
@@ -360,7 +361,7 @@ Column {
             return here + "  →  " + (rows[i].problem !== "" ? rows[i].problem : rows[i].label)
         return rules.length === 1 ? "1 network mapped" : rules.length + " networks mapped"
       }
-      fg: Color.foreground
+      fg: Commons.Color.foreground
       fontFamily: Style.font.family
       onClicked: root.page = root.pageWorking
     }
@@ -377,7 +378,7 @@ Column {
         if (root.current("pausePolling", true) !== false) parts.push("pauses when away")
         return parts.join("  ·  ")
       }
-      fg: Color.foreground
+      fg: Commons.Color.foreground
       fontFamily: Style.font.family
       onClicked: root.page = root.pageLook
     }
@@ -425,7 +426,7 @@ Column {
         anchors.verticalCenter: parent.verticalCenter
         text: "Signed in as " + (root.service ? root.service.view.username : "")
         textFormat: Text.PlainText
-        color: Qt.darker(Color.foreground, 1.4)
+        color: Qt.darker(Commons.Color.foreground, 1.4)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -434,7 +435,7 @@ Column {
         text: "Sign in again"
         tooltipText: "Asks for the permissions this version needs, which an older sign-in may not carry"
         bordered: true
-        foreground: Color.foreground
+        foreground: Commons.Color.foreground
         fontFamily: Style.font.family
         fontSize: Style.font.caption
         onClicked: {
@@ -475,7 +476,7 @@ Column {
       text: "This sign-in cannot send files yet. Sign in again to ask for Files.ReadWrite."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -486,7 +487,7 @@ Column {
       text: "This sign-in has no channel access. Turning this on takes effect at the next sign-in."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Qt.darker(Color.foreground, 1.4)
+      color: Qt.darker(Commons.Color.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -608,7 +609,7 @@ Column {
         width: parent.width
         text: "Calendars to show"
         textFormat: Text.PlainText
-        color: Color.foreground
+        color: Commons.Color.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         font.bold: true
@@ -622,7 +623,7 @@ Column {
               + "answered - it is their invitation, not yours."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Qt.darker(Color.foreground, 1.4)
+        color: Qt.darker(Commons.Color.foreground, 1.4)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -632,7 +633,7 @@ Column {
         visible: !!root.service && root.service.mailboxCalendarsLoading
         text: "Reading your calendars…"
         textFormat: Text.PlainText
-        color: Qt.darker(Color.foreground, 1.4)
+        color: Qt.darker(Commons.Color.foreground, 1.4)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -643,7 +644,7 @@ Column {
         text: root.service ? root.service.mailboxCalendarsError : ""
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Color.urgent
+        color: Commons.Color.urgent
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -671,7 +672,7 @@ Column {
               + "is not a week anybody waits for."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Color.urgent
+        color: Commons.Color.urgent
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -684,7 +685,7 @@ Column {
       text: "This sign-in cannot read your calendar yet. Sign in again to ask for Calendars.Read."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -696,7 +697,7 @@ Column {
       text: "This sign-in can read your calendar but not change it. Sign in again to ask for Calendars.ReadWrite."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -737,7 +738,7 @@ Column {
       text: "This sign-in cannot set your presence yet. Sign in again to ask for Presence.ReadWrite - if the sign-in then fails, the tenant has not consented to it."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -787,7 +788,7 @@ Column {
         : "That is this plugin's own shared app registration, which does not ask for Place.Read.All - it is admin consent, and every other organisation signing in through the same app would be asked for it too. Register one of your own and put its id above. Naming a building by hand needs no permission at all - see below."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Qt.darker(Color.foreground, 1.4)
+      color: Qt.darker(Commons.Color.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -799,7 +800,7 @@ Column {
       text: "This sign-in cannot list your buildings yet. Sign in again to ask for Place.Read.All - if the sign-in then fails, the tenant has not consented to it."
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -810,7 +811,7 @@ Column {
       text: root.service ? root.service.buildingsNote : ""
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Qt.darker(Color.foreground, 1.4)
+      color: Qt.darker(Commons.Color.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -821,7 +822,7 @@ Column {
       text: root.service ? root.service.buildingsError : ""
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }
@@ -837,7 +838,7 @@ Column {
         width: parent.width
         text: "Which buildings you know"
         textFormat: Text.PlainText
-        color: Color.foreground
+        color: Commons.Color.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         font.bold: true
@@ -848,7 +849,7 @@ Column {
         text: "A building is a place id, and setting one needs no permission at all - only listing them does. So a building can be named here instead, and then used by name in the rules below and in the picker."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Qt.darker(Color.foreground, 1.4)
+        color: Qt.darker(Commons.Color.foreground, 1.4)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -875,7 +876,7 @@ Column {
         width: parent.width
         text: "Add one by hand:"
         textFormat: Text.PlainText
-        color: Qt.darker(Color.foreground, 1.3)
+        color: Qt.darker(Commons.Color.foreground, 1.3)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -907,7 +908,7 @@ Column {
         text: "That does not look like a place id - they are of the form eb706f15-137e-4722-b4d1-b601481d9251. It will be sent as written, and Graph will refuse it if it is wrong."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Color.urgent
+        color: Commons.Color.urgent
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -916,7 +917,7 @@ Column {
         text: "Add this building"
         bordered: true
         enabled: root.draftPlaceId.trim() !== "" && root.draftPlaceName.trim() !== ""
-        foreground: enabled ? Color.accent : Qt.darker(Color.foreground, 1.6)
+        foreground: enabled ? Commons.Color.accent : Qt.darker(Commons.Color.foreground, 1.6)
         fontFamily: Style.font.family
         fontSize: Style.font.caption
         onClicked: {
@@ -932,7 +933,7 @@ Column {
         text: "No building id has turned up on its own yet - one appears above the first time any Teams client reports you in a building. Until then, type one in. Or add Place.Read.All to a registration of your own and let the whole list come from Graph."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Qt.darker(Color.foreground, 1.5)
+        color: Qt.darker(Commons.Color.foreground, 1.5)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -951,7 +952,7 @@ Column {
             text: String(modelData.name) + "  ·  " + String(modelData.id)
             textFormat: Text.PlainText
             elide: Text.ElideRight
-            color: Qt.darker(Color.foreground, 1.3)
+            color: Qt.darker(Commons.Color.foreground, 1.3)
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }
@@ -961,7 +962,7 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             iconText: "\u{F0156}"   // nf-md-close
             tooltipText: "Forget this name"
-            foreground: Color.foreground
+            foreground: Commons.Color.foreground
             onClicked: root.dropName(String(modelData.id) + " = " + String(modelData.name))
           }
         }
@@ -982,7 +983,7 @@ Column {
           : "This machine is on no wifi network, so there is nothing to point at a building. Rules already made still apply when you are back on one."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Color.foreground
+        color: Commons.Color.foreground
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         font.bold: true
@@ -993,7 +994,7 @@ Column {
         text: "Teams on Windows reads this from the tenant's own wifi list; nothing in Graph hands that over, so this is your copy of the part that concerns you. Whatever you tick is reported as an automatic location, which a location you pick by hand still beats - and it is withdrawn when this machine goes to a network you have said nothing about."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Qt.darker(Color.foreground, 1.4)
+        color: Qt.darker(Commons.Color.foreground, 1.4)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -1020,7 +1021,7 @@ Column {
         }
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Color.urgent
+        color: Commons.Color.urgent
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -1081,7 +1082,7 @@ Column {
         width: parent.width
         text: "Networks you have mapped"
         textFormat: Text.PlainText
-        color: Qt.darker(Color.foreground, 1.2)
+        color: Qt.darker(Commons.Color.foreground, 1.2)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
         font.bold: true
@@ -1113,7 +1114,7 @@ Column {
             textFormat: Text.PlainText
             elide: Text.ElideRight
             color: String(modelData.problem) !== ""
-                   ? Color.urgent : Qt.darker(Color.foreground, 1.3)
+                   ? Commons.Color.urgent : Qt.darker(Commons.Color.foreground, 1.3)
             font.family: Style.font.family
             font.pixelSize: Style.font.caption
           }
@@ -1123,7 +1124,7 @@ Column {
             anchors.verticalCenter: parent.verticalCenter
             iconText: "\u{F0156}"   // nf-md-close
             tooltipText: "Forget this network"
-            foreground: Color.foreground
+            foreground: Commons.Color.foreground
             onClicked: root.dropRule(String(modelData.rule))
           }
         }
@@ -1134,7 +1135,7 @@ Column {
         text: "A network with no rule leaves your work location alone rather than clearing it - tethering to a phone should not announce anything. Add \"any other network\" by hand in shell.json as `* = remote` if you want one."
         textFormat: Text.PlainText
         wrapMode: Text.WordWrap
-        color: Qt.darker(Color.foreground, 1.5)
+        color: Qt.darker(Commons.Color.foreground, 1.5)
         font.family: Style.font.family
         font.pixelSize: Style.font.caption
       }
@@ -1215,7 +1216,7 @@ Column {
     text: root.service ? root.service.saveError : ""
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
-    color: Color.urgent
+    color: Commons.Color.urgent
     font.family: Style.font.family
     font.pixelSize: Style.font.caption
   }
@@ -1226,7 +1227,7 @@ Column {
     Button {
       text: "Close"
       bordered: true
-      foreground: Color.foreground
+      foreground: Commons.Color.foreground
       fontFamily: Style.font.family
       fontSize: Style.font.caption
       onClicked: root.close()
@@ -1244,7 +1245,7 @@ Column {
         return "Changes apply as you make them"
       }
       textFormat: Text.PlainText
-      color: Qt.darker(Color.foreground, root.dirty ? 1.2 : 1.6)
+      color: Qt.darker(Commons.Color.foreground, root.dirty ? 1.2 : 1.6)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }

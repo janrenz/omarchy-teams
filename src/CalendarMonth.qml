@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -19,8 +20,8 @@ Item {
 
   property var days: []
   property var palette: ({})
-  property color fg: Color.foreground
-  property color accent: Color.accent
+  property color fg: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   property string cursorKey: ""
   property string selectedId: ""
@@ -140,7 +141,7 @@ Item {
                     ? (cell.modelData.day + " " + cell.modelData.month)
                     : String(cell.modelData.day)
                   textFormat: Text.PlainText
-                  color: cell.modelData.isToday ? Color.background
+                  color: cell.modelData.isToday ? Commons.Color.background
                          : (cell.modelData.otherMonth ? Qt.darker(root.fg, 1.9)
                             : (cell.modelData.isPast ? Qt.darker(root.fg, 1.5) : root.fg))
                   font.family: root.fontFamily

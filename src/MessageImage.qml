@@ -3,6 +3,7 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // One inline image from a message.
@@ -76,9 +77,9 @@ Item {
     id: frame
     anchors.fill: parent
     radius: Style.space(5)
-    color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
+    color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.06)
     border.width: Style.space(1)
-    border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
+    border.color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.12)
     clip: true
 
     // The picture, clipped to the corners above rather than to the box they
@@ -132,7 +133,7 @@ Item {
     Spinner {
       anchors.centerIn: parent
       visible: root.loading || (root.path !== "" && root.pictureStatus === Image.Loading)
-      color: Color.accent
+      color: Commons.Color.accent
       dotSize: Style.space(4)
     }
 
@@ -144,7 +145,7 @@ Item {
       textFormat: Text.PlainText
       horizontalAlignment: Text.AlignHCenter
       wrapMode: Text.WordWrap
-      color: Qt.darker(Color.foreground, 1.4)
+      color: Qt.darker(Commons.Color.foreground, 1.4)
       font.family: Style.font.family
       font.pixelSize: Style.font.caption
     }

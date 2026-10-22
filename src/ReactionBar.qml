@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // The reactions on one message, and the picker for adding one.
@@ -23,8 +24,8 @@ Flow {
   // Graph, so the picker offers exactly what will work.
   property var choices: []
   property bool busy: false
-  property color fg: Color.foreground
-  property color accent: Color.accent
+  property color fg: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
 
   // Open only while somebody is choosing, so a transcript is not a wall of

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "Model.js" as Model
 
 // Setting your own presence, as Teams' own status menu does it: pick one and
@@ -16,7 +17,7 @@ Column {
   id: root
 
   property var service: null
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property string fontFamily: Style.font.family
   // The footer line. The hosts differ on what Escape does from here - the
   // window closes the picker over a conversation, the popover backs out to the
@@ -65,7 +66,7 @@ Column {
     text: root.service ? root.service.presenceError : ""
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
-    color: Color.urgent
+    color: Commons.Color.urgent
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
   }
@@ -103,7 +104,7 @@ Column {
         text: String(line.index)
         textFormat: Text.PlainText
         horizontalAlignment: Text.AlignRight
-        color: Color.accent
+        color: Commons.Color.accent
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
@@ -129,7 +130,7 @@ Column {
               + (line.current ? "  ·  now" : "")
         textFormat: Text.PlainText
         elide: Text.ElideRight
-        color: line.current ? Color.accent : root.fg
+        color: line.current ? Commons.Color.accent : root.fg
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "Model.js" as Model
 
 // Where you are working from, as Teams' own location control does it: pick
@@ -20,7 +21,7 @@ Column {
   id: root
 
   property var service: null
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property string fontFamily: Style.font.family
   // The footer line, written by the host: the window closes the picker over a
   // conversation and the popover backs out to the list behind it, so what
@@ -92,7 +93,7 @@ Column {
     text: root.service ? root.service.locationError : ""
     textFormat: Text.PlainText
     wrapMode: Text.WordWrap
-    color: Color.urgent
+    color: Commons.Color.urgent
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
   }
@@ -152,7 +153,7 @@ Column {
         text: String(line.index)
         textFormat: Text.PlainText
         horizontalAlignment: Text.AlignRight
-        color: Color.accent
+        color: Commons.Color.accent
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }
@@ -170,7 +171,7 @@ Column {
               + (line.via !== "" ? ", " + line.via : "")
         textFormat: Text.PlainText
         elide: Text.ElideRight
-        color: line.current ? Color.accent : root.fg
+        color: line.current ? Commons.Color.accent : root.fg
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
       }

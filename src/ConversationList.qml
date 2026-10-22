@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -11,9 +12,9 @@ Column {
 
   property var rows: []
   property string selectedKey: ""
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property color dim: Qt.darker(fg, 1.5)
-  property color accent: Color.accent
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   property int cursorIndex: -1
   // How generously to space the rows. 1.0 is the theme's own spacing.

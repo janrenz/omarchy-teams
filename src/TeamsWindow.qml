@@ -6,6 +6,7 @@ import Quickshell
 import Quickshell.Hyprland
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -821,7 +822,7 @@ Item {
            : (service.openConversation
               ? ("Teams — " + String(service.openConversation.title || ""))
               : "Teams")
-    color: Color.background
+    color: Commons.Color.background
     implicitWidth: 1080
     implicitHeight: 720
     minimumSize: Qt.size(640, 420)
@@ -881,7 +882,7 @@ Item {
         }
 
         Rectangle {
-          readonly property color tint: fileDrop.refusal === "" ? Color.accent : Color.urgent
+          readonly property color tint: fileDrop.refusal === "" ? Commons.Color.accent : Commons.Color.urgent
 
           anchors.fill: parent
           visible: parent.containsDrag
@@ -983,7 +984,7 @@ Item {
         // being navigated away from, and it should still be legible.
         Rectangle {
           anchors.fill: parent
-          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.6)
+          color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.6)
           opacity: root.listDrawerOpen ? 1 : 0
           Behavior on opacity { NumberAnimation { duration: 160; easing.type: Easing.OutQuad } }
 
@@ -1006,9 +1007,9 @@ Item {
             id: drawerPanel
             width: Math.min(Style.space(320), listDrawer.width * 0.85)
             height: parent.height
-            color: Color.background
+            color: Commons.Color.background
             border.width: Style.space(1)
-            border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.15)
+            border.color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.15)
 
             // Swallows clicks so the list does not dismiss itself.
             MouseArea { anchors.fill: parent }
@@ -1026,8 +1027,8 @@ Item {
                 palette: service.themeColors
                 rows: service.conversations
                 selectedKey: service.openConversation ? String(service.openConversation.key) : ""
-                fg: Color.foreground
-                accent: Color.accent
+                fg: Commons.Color.foreground
+                accent: Commons.Color.accent
                 fontFamily: Style.font.family
                 onPicked: function(row) {
                   if (row.kind === "team") { service.toggleTeam(row.id); return }
@@ -1053,8 +1054,8 @@ Item {
         sourceComponent: ImageViewer {
           path: root.viewingImagePath
           alt: root.viewingImageAlt
-          fg: Color.foreground
-          accent: Color.accent
+          fg: Commons.Color.foreground
+          accent: Commons.Color.accent
           fontFamily: Style.font.family
           onCloseRequested: root.closeImage()
         }
@@ -1068,7 +1069,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.97)
+          color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.97)
 
           MouseArea { anchors.fill: parent; onClicked: root.showHelp = false }
 
@@ -1089,7 +1090,7 @@ Item {
 
               KeyHelp {
                 id: help
-                fg: Color.foreground
+                fg: Commons.Color.foreground
                 fontFamily: Style.font.family
                 agentHandover: service.agentHandover
                 canSetPresence: service.canSetPresence
@@ -1113,7 +1114,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.6)
+          color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.6)
 
           MouseArea { anchors.fill: parent; onClicked: root.pickingPresence = false }
         }
@@ -1126,9 +1127,9 @@ Item {
           width: Math.min(Style.space(300), presenceMenu.width - root.padPanel * 2)
           height: menu.implicitHeight + Style.spacing.md * 2
           radius: Style.cornerRadius
-          color: Color.background
+          color: Commons.Color.background
           border.width: Style.space(1)
-          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+          border.color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.2)
 
           // Swallows the clicks that would otherwise reach the scrim and shut
           // the menu on the way to a row.
@@ -1141,7 +1142,7 @@ Item {
             anchors.top: parent.top
             anchors.margins: Style.spacing.md
             service: service
-            fg: Color.foreground
+            fg: Commons.Color.foreground
             fontFamily: Style.font.family
             onChose: root.pickingPresence = false
           }
@@ -1159,7 +1160,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.6)
+          color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.6)
 
           MouseArea { anchors.fill: parent; onClicked: root.pickingLocation = false }
         }
@@ -1172,9 +1173,9 @@ Item {
           width: Math.min(Style.space(340), locationMenu.width - root.padPanel * 2)
           height: locationList.implicitHeight + Style.spacing.md * 2
           radius: Style.cornerRadius
-          color: Color.background
+          color: Commons.Color.background
           border.width: Style.space(1)
-          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+          border.color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.2)
 
           // Swallows the clicks that would otherwise reach the scrim and shut
           // the menu on the way to a row.
@@ -1187,7 +1188,7 @@ Item {
             anchors.top: parent.top
             anchors.margins: Style.spacing.md
             service: service
-            fg: Color.foreground
+            fg: Commons.Color.foreground
             fontFamily: Style.font.family
             onChose: root.pickingLocation = false
           }
@@ -1203,7 +1204,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.96)
+          color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.96)
 
           MouseArea { anchors.fill: parent; onClicked: root.closeNewChat() }
 
@@ -1226,7 +1227,7 @@ Item {
               width: parent.width
               text: "New chat"
               textFormat: Text.PlainText
-              color: Color.foreground
+              color: Commons.Color.foreground
               font.family: Style.font.family
               font.pixelSize: Style.font.subtitle
               font.bold: true
@@ -1236,8 +1237,8 @@ Item {
               id: peopleField
               width: parent.width
               placeholderText: "Name or address"
-              foreground: Color.foreground
-              accent: Color.accent
+              foreground: Commons.Color.foreground
+              accent: Commons.Color.accent
               // Searched as you type, but not on every keystroke - the
               // directory is a network round trip.
               onTextChanged: peopleDebounce.restart()
@@ -1260,7 +1261,7 @@ Item {
               Spinner {
                 anchors.verticalCenter: parent.verticalCenter
                 visible: service.peopleSearching || service.startingChat
-                color: Color.accent
+                color: Commons.Color.accent
                 dotSize: Style.space(4)
               }
 
@@ -1271,7 +1272,7 @@ Item {
                 text: service.startChatError !== "" ? service.startChatError : service.peopleError
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
-                color: Color.urgent
+                color: Commons.Color.urgent
                 font.family: Style.font.family
                 font.pixelSize: Style.font.caption
               }
@@ -1283,7 +1284,7 @@ Item {
                        && service.peopleResults.length === 0 && service.peopleError === ""
               text: "Nobody found"
               textFormat: Text.PlainText
-              color: Qt.darker(Color.foreground, 1.5)
+              color: Qt.darker(Commons.Color.foreground, 1.5)
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
             }
@@ -1301,7 +1302,7 @@ Item {
                   implicitHeight: who.implicitHeight + Style.spacing.sm * 2
                   radius: Style.space(5)
                   color: pick.containsMouse
-                    ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.1)
+                    ? Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.1)
                     : "transparent"
 
                   Column {
@@ -1317,7 +1318,7 @@ Item {
                       text: String(modelData.name || "")
                       textFormat: Text.PlainText
                       elide: Text.ElideRight
-                      color: Color.foreground
+                      color: Commons.Color.foreground
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
                     }
@@ -1329,7 +1330,7 @@ Item {
                             .filter(function(part) { return part !== "" }).join("  ·  ")
                       textFormat: Text.PlainText
                       elide: Text.ElideRight
-                      color: Qt.darker(Color.foreground, 1.5)
+                      color: Qt.darker(Commons.Color.foreground, 1.5)
                       font.family: Style.font.family
                       font.pixelSize: Style.font.caption
                     }
@@ -1351,7 +1352,7 @@ Item {
               width: parent.width
               text: "Esc to close"
               textFormat: Text.PlainText
-              color: Qt.darker(Color.foreground, 1.8)
+              color: Qt.darker(Commons.Color.foreground, 1.8)
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
             }
@@ -1381,7 +1382,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.75)
+          color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.75)
 
           MouseArea { anchors.fill: parent; onClicked: service.closeEvent() }
         }
@@ -1393,9 +1394,9 @@ Item {
           height: Math.min(eventDetail.implicitHeight + Style.spacing.lg * 2,
                            meetingLayer.height - root.padPanel * 2)
           radius: Style.cornerRadius
-          color: Color.background
+          color: Commons.Color.background
           border.width: Style.space(1)
-          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+          border.color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.2)
 
           // Swallows the clicks that would otherwise reach the scrim on their
           // way to a button.
@@ -1404,7 +1405,7 @@ Item {
           Spinner {
             anchors.centerIn: parent
             visible: service.eventLoading && !service.openEvent
-            color: Color.accent
+            color: Commons.Color.accent
             dotSize: Style.space(5)
           }
 
@@ -1416,7 +1417,7 @@ Item {
             visible: !service.openEvent && service.eventError !== ""
             text: service.eventError
             textFormat: Text.PlainText
-            color: Color.urgent
+            color: Commons.Color.urgent
             font.family: Style.font.family
             font.pixelSize: Style.font.body
           }
@@ -1433,8 +1434,8 @@ Item {
               service: service
               event: service.openEvent
               palette: service.themeColors
-              fg: Color.foreground
-              accent: Color.accent
+              fg: Commons.Color.foreground
+              accent: Commons.Color.accent
               fontFamily: Style.font.family
               onCloseRequested: service.closeEvent()
             }
@@ -1458,7 +1459,7 @@ Item {
 
         Rectangle {
           anchors.fill: parent
-          color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.96)
+          color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.96)
 
           MouseArea { anchors.fill: parent; onClicked: root.closeNewMeeting() }
         }
@@ -1470,9 +1471,9 @@ Item {
           height: Math.min(meetingForm.implicitHeight + Style.spacing.lg * 2,
                            meetingFormLayer.height - root.padPanel * 2)
           radius: Style.cornerRadius
-          color: Color.background
+          color: Commons.Color.background
           border.width: Style.space(1)
-          border.color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.2)
+          border.color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.2)
 
           MouseArea { anchors.fill: parent }
 
@@ -1486,8 +1487,8 @@ Item {
               width: meetingFormCard.width - Style.spacing.lg * 2 - Style.spacing.xl
               service: service
               draft: root.meetingDraft
-              fg: Color.foreground
-              accent: Color.accent
+              fg: Commons.Color.foreground
+              accent: Commons.Color.accent
               fontFamily: Style.font.family
               onChanged: function(field, value) { root.changeMeeting(field, value) }
               onCreateRequested: root.createMeeting()
@@ -1705,7 +1706,7 @@ Item {
                          ? String(service.openConversation.title || "") : "Teams")
                 textFormat: Text.PlainText
                 elide: Text.ElideRight
-                color: Color.foreground
+                color: Commons.Color.foreground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.heading
               }
@@ -1720,7 +1721,7 @@ Item {
                 Spinner {
                   anchors.verticalCenter: parent.verticalCenter
                   visible: service.loading || service.messagesLoading
-                  color: Color.accent
+                  color: Commons.Color.accent
                   dotSize: Style.space(4)
                 }
 
@@ -1733,7 +1734,7 @@ Item {
                   visible: service.loading && !service.signedIn
                   text: "loading chats and teams…"
                   textFormat: Text.PlainText
-                  color: Qt.darker(Color.foreground, 1.5)
+                  color: Qt.darker(Commons.Color.foreground, 1.5)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }
@@ -1745,7 +1746,7 @@ Item {
                   visible: service.signedIn && !service.hasChannels
                   text: "chats only"
                   textFormat: Text.PlainText
-                  color: Qt.darker(Color.foreground, 1.5)
+                  color: Qt.darker(Commons.Color.foreground, 1.5)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }
@@ -1760,7 +1761,7 @@ Item {
                   presence: service.myPresence
                   palette: service.themeColors
                   busy: service.settingPresence
-                  fg: Color.foreground
+                  fg: Commons.Color.foreground
                   fontFamily: Style.font.family
                   onClicked: root.togglePresencePicker()
                 }
@@ -1773,7 +1774,7 @@ Item {
                   visible: service.signedIn && service.canSetPresence && !root.showSettings
                   text: "·"
                   textFormat: Text.PlainText
-                  color: Qt.darker(Color.foreground, 2.2)
+                  color: Qt.darker(Commons.Color.foreground, 2.2)
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }
@@ -1787,7 +1788,7 @@ Item {
                   choices: service.locationChoices
                   buildings: service.buildings
                   busy: service.settingLocation
-                  fg: Color.foreground
+                  fg: Commons.Color.foreground
                   fontFamily: Style.font.family
                   onClicked: root.toggleLocationPicker()
                 }
@@ -1810,7 +1811,7 @@ Item {
                   ? "Back to the conversations  (c)" : "Your calendar  (c)"
                 selected: root.onCalendar
                 bordered: true
-                foreground: root.onCalendar ? Color.accent : Color.foreground
+                foreground: root.onCalendar ? Commons.Color.accent : Commons.Color.foreground
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: root.toggleCalendar()
@@ -1824,7 +1825,7 @@ Item {
                           && !root.showSettings && !root.onCalendar
                 text: "Conversations"
                 bordered: true
-                foreground: Color.foreground
+                foreground: Commons.Color.foreground
                 fontFamily: Style.font.family
                 // The same size as its neighbours. A glyph at icon size made
                 // this button taller than the two beside it, which is what a
@@ -1841,7 +1842,7 @@ Item {
                 text: "?"
                 tooltipText: "What the keyboard does"
                 bordered: true
-                foreground: Qt.darker(Color.foreground, 1.4)
+                foreground: Qt.darker(Commons.Color.foreground, 1.4)
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: root.showHelp = !root.showHelp
@@ -1853,7 +1854,7 @@ Item {
                 // glyph with a stray digit on top of it.
                 iconText: root.showSettings ? "\u{F0156}" : "\u{F0493}"
                 tooltipText: root.showSettings ? "Close settings" : "Settings"
-                foreground: Color.foreground
+                foreground: Commons.Color.foreground
                 // Boxed, and the height of the outlined buttons on either
                 // side of it. A bare glyph between two boxes reads as a stray
                 // character rather than as the next control along.
@@ -1875,7 +1876,7 @@ Item {
                   ? "Showing only unread chats" : "Show only unread chats"
                 selected: service.unreadOnly
                 bordered: true
-                foreground: service.unreadOnly ? Color.accent : Color.foreground
+                foreground: service.unreadOnly ? Commons.Color.accent : Commons.Color.foreground
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: service.unreadOnly = !service.unreadOnly
@@ -1887,7 +1888,7 @@ Item {
                 text: "New chat"
                 keyText: "n"
                 bordered: true
-                foreground: Color.accent
+                foreground: Commons.Color.accent
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: root.openNewChat()
@@ -1900,7 +1901,7 @@ Item {
                 text: "Allow marking read…"
                 tooltipText: "Sign in again so opening a chat clears its unread mark"
                 bordered: true
-                foreground: Qt.darker(Color.foreground, 1.4)
+                foreground: Qt.darker(Commons.Color.foreground, 1.4)
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: service.startLogin(service.wantChannels)
@@ -1911,7 +1912,7 @@ Item {
                 text: "Add channels…"
                 tooltipText: "Sign in again asking for team and channel access. Needs an administrator to consent."
                 bordered: true
-                foreground: Qt.darker(Color.foreground, 1.4)
+                foreground: Qt.darker(Commons.Color.foreground, 1.4)
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: service.startLogin(true)
@@ -1931,7 +1932,7 @@ Item {
                   : "\u{F03E4}"    // nf-md-pause
                 tooltipText: service.manualPause
                   ? "Fetching paused - resume  (z)" : "Pause fetching  (z)"
-                foreground: service.manualPause ? Color.accent : Color.foreground
+                foreground: service.manualPause ? Commons.Color.accent : Commons.Color.foreground
                 bordered: true
                 size: unreadButton.height
                 onClicked: service.togglePause()
@@ -1942,7 +1943,7 @@ Item {
                 enabled: !service.loading
                 iconText: "\u{F0450}"   // nf-md-refresh
                 tooltipText: "Read the account again"
-                foreground: Color.foreground
+                foreground: Commons.Color.foreground
                 bordered: true
                 size: unreadButton.height
                 onClicked: service.refreshEverything()
@@ -1972,7 +1973,7 @@ Item {
               text: service.loginError
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
-              color: Color.urgent
+              color: Commons.Color.urgent
               font.family: Style.font.family
               font.pixelSize: Style.font.body
             }
@@ -1985,7 +1986,7 @@ Item {
               text: service.loginNote
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
-              color: Qt.darker(Color.foreground, 1.4)
+              color: Qt.darker(Commons.Color.foreground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.caption
             }
@@ -1996,7 +1997,7 @@ Item {
               text: root.settingsError
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
-              color: Qt.darker(Color.foreground, 1.4)
+              color: Qt.darker(Commons.Color.foreground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.body
             }
@@ -2015,7 +2016,7 @@ Item {
                     + "id in the settings too; the plugin's README has the permissions it needs."
               textFormat: Text.PlainText
               wrapMode: Text.WordWrap
-              color: Qt.darker(Color.foreground, 1.4)
+              color: Qt.darker(Commons.Color.foreground, 1.4)
               font.family: Style.font.family
               font.pixelSize: Style.font.body
             }
@@ -2027,7 +2028,7 @@ Item {
               Button {
                 text: "Sign in"
                 bordered: true
-                foreground: Color.accent
+                foreground: Commons.Color.accent
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: service.startLogin(service.wantChannels)
@@ -2038,7 +2039,7 @@ Item {
                 text: "Sign in for chats only"
                 tooltipText: "Skips the team and channel permissions, which need an administrator"
                 bordered: true
-                foreground: Color.foreground
+                foreground: Commons.Color.foreground
                 fontFamily: Style.font.family
                 fontSize: Style.font.caption
                 onClicked: service.startLogin(false)
@@ -2057,7 +2058,7 @@ Item {
                 text: service.loginMessage
                 textFormat: Text.PlainText
                 wrapMode: Text.WordWrap
-                color: Color.foreground
+                color: Commons.Color.foreground
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
               }
@@ -2068,8 +2069,8 @@ Item {
                 visible: service.userCode !== ""
                 text: service.userCode
                 readOnly: true
-                foreground: Color.accent
-                accent: Color.accent
+                foreground: Commons.Color.accent
+                accent: Commons.Color.accent
               }
 
               Row {
@@ -2079,7 +2080,7 @@ Item {
                   visible: service.verificationUri !== ""
                   text: "Open the sign-in page"
                   bordered: true
-                  foreground: Color.accent
+                  foreground: Commons.Color.accent
                   fontFamily: Style.font.family
                   fontSize: Style.font.caption
                   onClicked: service.openUrl(service.verificationUri)
@@ -2088,7 +2089,7 @@ Item {
                 Button {
                   text: "Cancel"
                   bordered: true
-                  foreground: Qt.darker(Color.foreground, 1.4)
+                  foreground: Qt.darker(Commons.Color.foreground, 1.4)
                   fontFamily: Style.font.family
                   fontSize: Style.font.caption
                   onClicked: service.cancelLogin()
@@ -2133,8 +2134,8 @@ Item {
                      && root.settingsError === "" && service.configured
                      && !service.needsSignIn
             service: service
-            fg: Color.foreground
-            accent: Color.accent
+            fg: Commons.Color.foreground
+            accent: Commons.Color.accent
             fontFamily: Style.font.family
             density: root.densityScale
             cursorKey: root.calendarCursor
@@ -2203,7 +2204,7 @@ Item {
                 anchors.leftMargin: root.listGutter
                 width: parent.width - root.listGutter
                 rows: 7
-                fg: Color.foreground
+                fg: Commons.Color.foreground
               }
             }
 
@@ -2226,8 +2227,8 @@ Item {
                 width: columns.sidebarWidth
                 rows: service.conversations
                 selectedKey: service.openConversation ? String(service.openConversation.key) : ""
-                fg: Color.foreground
-                accent: Color.accent
+                fg: Commons.Color.foreground
+                accent: Commons.Color.accent
                 fontFamily: Style.font.family
                 onPicked: function(row) {
                   if (row.kind === "team") { service.toggleTeam(row.id); return }
@@ -2244,7 +2245,7 @@ Item {
               width: Style.space(1)
               height: columns.height
               visible: columns.roomForBoth
-              color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.12)
+              color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.12)
             }
 
             Item {
@@ -2261,7 +2262,7 @@ Item {
                 text: service.conversations.length === 0
                   ? "Nothing here yet" : "Pick a conversation"
                 textFormat: Text.PlainText
-                color: Qt.darker(Color.foreground, 1.8)
+                color: Qt.darker(Commons.Color.foreground, 1.8)
                 font.family: Style.font.family
                 font.pixelSize: Style.font.body
               }
@@ -2281,7 +2282,7 @@ Item {
                   text: service.messagesError
                   textFormat: Text.PlainText
                   wrapMode: Text.WordWrap
-                  color: Color.urgent
+                  color: Commons.Color.urgent
                   font.family: Style.font.family
                   font.pixelSize: Style.font.caption
                 }
@@ -2290,7 +2291,7 @@ Item {
                   width: parent.width
                   visible: service.messagesLoading && service.messages.length === 0
                   rows: 5
-                  fg: Color.foreground
+                  fg: Commons.Color.foreground
                 }
 
                 ScrollView {
@@ -2361,7 +2362,7 @@ Item {
                                 + Model.whenLabel(modelData.when, new Date())
                           textFormat: Text.PlainText
                           elide: Text.ElideRight
-                          color: modelData.mine ? Color.accent : Qt.darker(Color.foreground, 1.4)
+                          color: modelData.mine ? Commons.Color.accent : Qt.darker(Commons.Color.foreground, 1.4)
                           font.family: Style.font.family
                           font.pixelSize: Style.font.caption
                           font.bold: true
@@ -2411,8 +2412,8 @@ Item {
                                   anchors.bottom: parent.bottom
                                   width: Style.space(2)
                                   radius: width / 2
-                                  color: Qt.rgba(Color.foreground.r, Color.foreground.g,
-                                                 Color.foreground.b, 0.28)
+                                  color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g,
+                                                 Commons.Color.foreground.b, 0.28)
                                 }
 
                                 Column {
@@ -2437,7 +2438,7 @@ Item {
                                           : (modelData.forwarded ? "Forwarded" : "")
                                     textFormat: Text.PlainText
                                     elide: Text.ElideRight
-                                    color: Qt.darker(Color.foreground, 1.4)
+                                    color: Qt.darker(Commons.Color.foreground, 1.4)
                                     font.family: Style.font.family
                                     font.pixelSize: Style.font.caption
                                     font.bold: true
@@ -2453,7 +2454,7 @@ Item {
                                     width: parent.width
                                     visible: text !== ""
                                     text: String(modelData.text || "")
-                                    color: Qt.darker(Color.foreground, 1.25)
+                                    color: Qt.darker(Commons.Color.foreground, 1.25)
                                     font.family: Style.font.family
                                     font.pixelSize: Style.font.bodySmall
                                   }
@@ -2490,8 +2491,8 @@ Item {
                                 anchors.rightMargin: -Style.spacing.xs
                                 radius: Style.space(4)
                                 visible: lineBox.cursored
-                                color: Qt.rgba(Color.foreground.r, Color.foreground.g,
-                                               Color.foreground.b, 0.08)
+                                color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g,
+                                               Commons.Color.foreground.b, 0.08)
                               }
 
                               SelectableText {
@@ -2522,7 +2523,7 @@ Item {
                                 // survive because teams.py turns each <emoji>
                                 // tag into the character its alt already holds.
                                 textFormat: linked ? TextEdit.RichText : TextEdit.PlainText
-                                color: Color.foreground
+                                color: Commons.Color.foreground
                                 font.family: Style.font.family
                                 font.pixelSize: Style.font.bodySmall
                               }
@@ -2560,15 +2561,15 @@ Item {
                                        : (lineHover.hovered || lineBox.cursored) ? 0.55 : 0.0
                                 Behavior on opacity { NumberAnimation { duration: 120 } }
                                 color: addPointer.containsMouse
-                                  ? Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.14)
-                                  : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
+                                  ? Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.14)
+                                  : Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.06)
 
                                 Text {
                                   id: plusGlyph
                                   anchors.centerIn: parent
                                   text: "+"
                                   textFormat: Text.PlainText
-                                  color: Qt.darker(Color.foreground, 1.4)
+                                  color: Qt.darker(Commons.Color.foreground, 1.4)
                                   font.family: Style.font.family
                                   font.pixelSize: Style.font.caption
                                 }
@@ -2599,8 +2600,8 @@ Item {
                               reactions: modelData.reactions || []
                               choices: service.reactionChoices
                               busy: service.reacting
-                              fg: Color.foreground
-                              accent: Color.accent
+                              fg: Commons.Color.foreground
+                              accent: Commons.Color.accent
                               fontFamily: Style.font.family
                               // A chip is a toggle: clicking one you are already
                               // part of takes yours off, clicking one you are
@@ -2635,7 +2636,7 @@ Item {
                                 text: Model.anchor(String(modelData.url || ""),
                                                    String(modelData.name || "a file"), "")
                                 linkColor: service.themeColors.blue
-                                           || service.themeColors.accent || Color.accent
+                                           || service.themeColors.accent || Commons.Color.accent
                                 font.family: Style.font.family
                                 font.pixelSize: Style.font.body
                                 onLinkActivated: function(url) { service.openUrl(url) }
@@ -2674,11 +2675,11 @@ Item {
                   width: parent.width
                   height: Style.space(84)
                   radius: Style.space(5)
-                  color: Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.06)
+                  color: Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.06)
                   border.width: Style.space(1)
                   border.color: composer.activeFocus
-                    ? Qt.rgba(Color.accent.r, Color.accent.g, Color.accent.b, 0.7)
-                    : Qt.rgba(Color.foreground.r, Color.foreground.g, Color.foreground.b, 0.15)
+                    ? Qt.rgba(Commons.Color.accent.r, Commons.Color.accent.g, Commons.Color.accent.b, 0.7)
+                    : Qt.rgba(Commons.Color.foreground.r, Commons.Color.foreground.g, Commons.Color.foreground.b, 0.15)
 
                   ScrollView {
                     anchors.fill: parent
@@ -2689,8 +2690,8 @@ Item {
                       id: composer
                       placeholderText: "Message — Shift+Enter to send"
                       wrapMode: TextArea.Wrap
-                      color: Color.foreground
-                      placeholderTextColor: Qt.darker(Color.foreground, 1.5)
+                      color: Commons.Color.foreground
+                      placeholderTextColor: Qt.darker(Commons.Color.foreground, 1.5)
                       font.family: Style.font.family
                       font.pixelSize: Style.font.body
                       background: null
@@ -2728,7 +2729,7 @@ Item {
                     enabled: !service.sending && service.draft.trim() !== ""
                     text: service.sending ? "Sending…" : "Send"
                     bordered: true
-                    foreground: Color.accent
+                    foreground: Commons.Color.accent
                     fontFamily: Style.font.family
                     fontSize: Style.font.caption
                     onClicked: service.send()
@@ -2744,7 +2745,7 @@ Item {
                     text: service.uploading ? "Sending…" : "Attach"
                     tooltipText: "Send a file into this chat. It goes to your OneDrive first, the way Teams does it, and anything typed in the box goes with it as its comment."
                     bordered: true
-                    foreground: Color.foreground
+                    foreground: Commons.Color.foreground
                     fontFamily: Style.font.family
                     fontSize: Style.font.caption
                     onClicked: attachDialog.open()
@@ -2755,7 +2756,7 @@ Item {
                     text: "Reload"
                     keyText: "r"
                     bordered: true
-                    foreground: Color.foreground
+                    foreground: Commons.Color.foreground
                     fontFamily: Style.font.family
                     fontSize: Style.font.caption
                     onClicked: service.reloadConversation()
@@ -2770,7 +2771,7 @@ Item {
                     keyText: "a"
                     tooltipText: "Open your coding agent on this conversation"
                     bordered: true
-                    foreground: Color.foreground
+                    foreground: Commons.Color.foreground
                     fontFamily: Style.font.family
                     fontSize: Style.font.caption
                     onClicked: root.askAgent()
@@ -2786,7 +2787,7 @@ Item {
                     elide: Text.ElideRight
                     // The only one of these that is not a failure.
                     color: (service.sendError === "" && service.uploadError === "")
-                           ? Qt.darker(Color.foreground, 1.4) : Color.urgent
+                           ? Qt.darker(Commons.Color.foreground, 1.4) : Commons.Color.urgent
                     font.family: Style.font.family
                     font.pixelSize: Style.font.caption
                   }

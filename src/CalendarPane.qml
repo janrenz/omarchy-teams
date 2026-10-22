@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -15,8 +16,8 @@ Item {
   id: root
 
   property var service: null
-  property color fg: Color.foreground
-  property color accent: Color.accent
+  property color fg: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   property real density: 1.0
   // Which event the keyboard is on, as day-and-id.
@@ -174,7 +175,7 @@ Item {
       wrapMode: Text.WordWrap
       color: (root.service && (root.service.calendarError !== ""
                                || (root.service.calendarMissing || []).length > 0))
-        ? Color.urgent : Qt.darker(root.fg, 1.4)
+        ? Commons.Color.urgent : Qt.darker(root.fg, 1.4)
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
     }

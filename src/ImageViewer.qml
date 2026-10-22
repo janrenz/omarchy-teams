@@ -4,6 +4,7 @@ import QtQuick.Dialogs
 import Quickshell
 import Quickshell.Io
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -26,8 +27,8 @@ Item {
   property string path: ""
   // What the message called the picture, if it said.
   property string alt: ""
-  property color fg: Color.foreground
-  property color accent: Color.accent
+  property color fg: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
 
   signal closeRequested()
@@ -110,7 +111,7 @@ Item {
 
   Rectangle {
     anchors.fill: parent
-    color: Qt.rgba(Color.background.r, Color.background.g, Color.background.b, 0.97)
+    color: Qt.rgba(Commons.Color.background.r, Commons.Color.background.g, Commons.Color.background.b, 0.97)
 
     // Clicking away from the picture closes it, the way the other layers do.
     MouseArea { anchors.fill: parent; onClicked: root.closeRequested() }
@@ -186,7 +187,7 @@ Item {
           text: root.problem !== "" ? root.problem : root.notice
           textFormat: Text.PlainText
           elide: Text.ElideMiddle
-          color: root.problem !== "" ? Color.urgent : Qt.darker(root.fg, 1.4)
+          color: root.problem !== "" ? Commons.Color.urgent : Qt.darker(root.fg, 1.4)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
         }

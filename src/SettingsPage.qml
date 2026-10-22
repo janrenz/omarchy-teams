@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // One page of the settings, with the way back at the top of it.
 //
@@ -18,7 +19,7 @@ Item {
   // straight to `visible` so the host says which page it wants and this
   // decides what that means for layout.
   property bool open: false
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property color dim: Qt.darker(fg, 1.5)
   property string fontFamily: Style.font.family
   property real spacing: Style.spacing.lg
@@ -59,7 +60,7 @@ Item {
         Text {
           anchors.verticalCenter: parent.verticalCenter
           text: "\u{F0141}"   // nf-md-chevron-left
-          color: Color.accent
+          color: Commons.Color.accent
           font.family: root.fontFamily
           font.pixelSize: Style.font.body
         }

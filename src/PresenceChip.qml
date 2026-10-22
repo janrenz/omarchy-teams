@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "Model.js" as Model
 
 // How you look to other people, and the handle the picker drops from. Both
@@ -21,7 +22,7 @@ Item {
   property var presence: null
   property var palette: ({})
   property bool busy: false
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property string fontFamily: Style.font.family
 
   signal clicked()

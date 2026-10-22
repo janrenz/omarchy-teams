@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 
 // One line on the settings index: where you can go, and what is set there.
 //
@@ -12,7 +13,7 @@ Rectangle {
 
   property string title: ""
   property string detail: ""
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property color dim: Qt.darker(fg, 1.5)
   property string fontFamily: Style.font.family
 

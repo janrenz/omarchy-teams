@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -22,8 +23,8 @@ Column {
   property var service: null
   property var event: null
   property var palette: ({})
-  property color fg: Color.foreground
-  property color accent: Color.accent
+  property color fg: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
 
   signal closeRequested()
@@ -71,7 +72,7 @@ Column {
     switch (String(response || "")) {
       case "accepted":  return colors.green || root.accent
       case "tentative": return colors.yellow || colors.orange || root.accent
-      case "declined":  return colors.red || Color.urgent
+      case "declined":  return colors.red || Commons.Color.urgent
       case "organizer": return colors.blue || root.accent
       default:          return Qt.darker(root.fg, 2.0)
     }
@@ -115,7 +116,7 @@ Column {
     visible: !!root.event && root.event.cancelled === true
     text: "This meeting has been cancelled"
     textFormat: Text.PlainText
-    color: Color.urgent
+    color: Commons.Color.urgent
     font.family: root.fontFamily
     font.pixelSize: Style.font.caption
   }
@@ -314,7 +315,7 @@ Column {
       text: root.service ? root.service.rsvpError : ""
       textFormat: Text.PlainText
       wrapMode: Text.WordWrap
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
     }
@@ -450,7 +451,7 @@ Column {
         ? "Cancels the meeting and tells everybody who was invited"
         : "Takes it off your own calendar. Nobody else is told."
       bordered: true
-      foreground: root.cancelArmed ? Color.urgent : Qt.darker(root.fg, 1.4)
+      foreground: root.cancelArmed ? Commons.Color.urgent : Qt.darker(root.fg, 1.4)
       fontFamily: root.fontFamily
       fontSize: Style.font.caption
       // Asked twice, because there is no route back: the first press arms the
@@ -470,7 +471,7 @@ Column {
                             : root.service.eventError) : ""
       textFormat: Text.PlainText
       elide: Text.ElideRight
-      color: Color.urgent
+      color: Commons.Color.urgent
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
     }

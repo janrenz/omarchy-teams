@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import "Model.js" as Model
 
 // Where you are working from, and the handle the location picker drops from.
@@ -28,7 +29,7 @@ Item {
   // everybody else, and the chip should not be the vaguer of the two.
   property var buildings: []
   property bool busy: false
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property string fontFamily: Style.font.family
 
   signal clicked()

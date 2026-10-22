@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -20,8 +21,8 @@ Rectangle {
 
   required property var event
   property var palette: ({})
-  property color fg: Color.foreground
-  property color accent: Color.accent
+  property color fg: Commons.Color.foreground
+  property color accent: Commons.Color.accent
   property string fontFamily: Style.font.family
   // Cramped rows: the month grid puts five of these in a cell.
   property bool dense: false
@@ -237,7 +238,7 @@ Rectangle {
       anchors.centerIn: parent
       text: "Join"
       textFormat: Text.PlainText
-      color: Color.background
+      color: Commons.Color.background
       font.family: root.fontFamily
       font.pixelSize: Style.font.caption
       font.bold: true

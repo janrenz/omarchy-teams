@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // Placeholder conversation rows, shaped like the real ones and breathing
@@ -12,7 +13,7 @@ Column {
   id: root
 
   property int rows: 7
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property int period: 1400
 
   spacing: Style.spacing.md

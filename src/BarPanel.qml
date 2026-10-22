@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import Quickshell
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.js" as Model
 
@@ -39,8 +40,8 @@ Panel {
   // panel nested inside it.
   readonly property var barIdentity: hostWidget || root
 
-  readonly property color fg: root.bar ? root.bar.foreground : Color.foreground
-  readonly property color accent: root.bar ? root.bar.urgent : Color.urgent
+  readonly property color fg: root.bar ? root.bar.foreground : Commons.Color.foreground
+  readonly property color accent: root.bar ? root.bar.urgent : Commons.Color.urgent
   readonly property string fontFamily: root.bar ? root.bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(fg, 1.5)
 

@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 
 // What the keyboard does, on the keyboard.
@@ -9,7 +10,7 @@ import qs.Ui
 Column {
   id: root
 
-  property color fg: Color.foreground
+  property color fg: Commons.Color.foreground
   property color dim: Qt.darker(fg, 1.5)
   property string fontFamily: Style.font.family
   // The a key is only there when the handover setting is on, so the list must
@@ -104,7 +105,7 @@ Column {
             text: modelData[0]
             textFormat: Text.PlainText
             horizontalAlignment: Text.AlignRight
-            color: Color.accent
+            color: Commons.Color.accent
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
           }
